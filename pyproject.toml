@@ -1,0 +1,89 @@
+[project]
+name = "rilixai-cookbook"
+version = "0.1.0"
+description = "Reproducible GEPA benchmark recipes for the rilixai optimizer."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "rilixai" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+# Workspace root has no runtime deps of its own — each benchmark
+# workspace member declares its own deps (including the rilixai pin).
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "ruff",
+  "mypy",
+  "pytest",
+  "pytest-asyncio>=0.23",
+]
+
+# Cookbook is a uv workspace. Each benchmark folder is a workspace
+# member with its own pyproject.toml. ``uv sync`` installs all
+# members in editable mode, so ``import hotpotqa.dataset`` works
+# without sys.path hacks and per-benchmark deps stay isolated.
+[tool.uv.workspace]
+members = ["hotpotqa"]
+# As benchmarks migrate, add: "apex_agents", "cl_bench"
+
+# The workspace root itself isn't an installable Python package.
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+# Test discovery walks into each workspace member's tests/ dir.
+testpaths = ["hotpotqa/tests"]
+
+[tool.ruff]
+line-length = 119
+
+[tool.ruff.lint]
+ignore = ["C901", "E501", "E721", "E741", "F402", "F823"]
+select = ["C", "E", "F", "I", "W", "UP006", "UP007", "UP045"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402", "F401", "F403", "F811"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+show_error_codes = true
+
+# Scope mypy to benchmark source code; tests follow the same pattern
+# as the rilixai repo (mypy runs over the package only, not tests or
+# scripts, since the tests use fixture-shaped types that intentionally
+# bend strict typing).
+files = ["hotpotqa"]
+exclude = ["hotpotqa/tests/", "hotpotqa/scripts/"]
+
+# Mirror the rilixai-side ``ignore_missing_imports`` overrides for
+# the scientific deps that ship without ``py.typed`` markers.
+[[tool.mypy.overrides]]
+module = [
+  "rank_bm25",
+  "datasets",
+  "bm25s",
+  "Stemmer",
+]
+ignore_missing_imports = true
