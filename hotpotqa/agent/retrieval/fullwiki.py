@@ -13,7 +13,7 @@ parse that back into :class:`HotpotQAParagraph` for type uniformity
 with the distractor path. Per-call dedup is delegated to the program
 (``HotpotQAProgram`` tracks already-retrieved titles across hops).
 
-This file is imported lazily by :mod:`.pipeline` only when
+This file is imported lazily by :mod:`.bm25` only when
 ``retrieval_mode="fullwiki"`` is selected, so distractor-mode tests
 never pay the ``bm25s`` startup cost.
 """
@@ -29,7 +29,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .dataset import HotpotQAParagraph
+from ...data.dataset import HotpotQAParagraph
 
 
 logger = logging.getLogger(__name__)

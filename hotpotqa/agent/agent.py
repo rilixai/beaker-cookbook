@@ -44,9 +44,9 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models import Model
 from pydantic_ai.settings import ModelSettings
 
-from ..dataset import HotpotQAParagraph
-from ..gold_helpers import remaining_gold_titles
-from ..retrieval import RetrieveKFn, bm25_top_k
+from ..data.dataset import HotpotQAParagraph
+from ..data.gold import remaining_gold_titles
+from .retrieval import RetrieveKFn, bm25_top_k
 from .types import AgentToolCall, HotpotQAAgentOutput
 
 

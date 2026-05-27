@@ -18,12 +18,12 @@ from typing import TYPE_CHECKING
 
 from rank_bm25 import BM25Okapi
 
-from .dataset import HotpotQAParagraph
+from ...data.dataset import HotpotQAParagraph
 
 
 if TYPE_CHECKING:
-    from .dataset import HotpotQARecord
-    from .pipeline import HotpotQAPipelineConfig
+    from ...config import HotpotQAConfig
+    from ...data.dataset import HotpotQARecord
 
 
 # Signature shared by both retrieval modes. ``(query, k) -> list of paragraphs``.
@@ -66,7 +66,7 @@ def bm25_top_k(
 def build_retrieve_k_fn_for_case(
     *,
     record: "HotpotQARecord",  # noqa: F821 - forward ref to avoid runtime dataset import
-    cfg: "HotpotQAPipelineConfig",  # noqa: F821 - forward ref to avoid circular import
+    cfg: "HotpotQAConfig",  # noqa: F821 - forward ref to avoid circular import
 ) -> RetrieveKFn:
     """Return a ``RetrieveKFn`` scoped to this case's retrieval corpus.
 
@@ -107,7 +107,7 @@ def build_retrieve_k_fn_for_case(
         return _retrieve
 
     if cfg.retrieval_mode == "fullwiki":
-        from .fullwiki_retrieval import fullwiki_retrieve_k_fn
+        from .fullwiki import fullwiki_retrieve_k_fn
 
         return fullwiki_retrieve_k_fn(k_default=cfg.retrieve_k)
 

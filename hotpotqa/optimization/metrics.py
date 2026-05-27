@@ -14,8 +14,8 @@ paragraphs, not sentences; sentence-level supporting-fact extraction can be
 layered on later without changing the optimization objective.
 
 The answer-string scoring functions (``normalize_answer`` and ``f1_score``)
-are re-exported from :mod:`.hotpot_eval`, which vendors the canonical
-HotpotQA evaluator. Keep them as the single source of truth.
+are re-exported from :mod:`hotpotqa.data.eval`, which vendors the
+canonical HotpotQA evaluator. Keep them as the single source of truth.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from typing import Any
 
 from rilixai.prompt_optimization.protocols import ErrorOutput, FieldConfig, MetricsResult
 
-from .hotpot_eval import exact_match_score, f1_score, normalize_answer
+from ..data.eval import exact_match_score, f1_score, normalize_answer
 
 
 __all__ = [

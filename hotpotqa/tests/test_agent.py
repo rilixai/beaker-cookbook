@@ -21,8 +21,9 @@ from hotpotqa.agent.agent import (
     HotpotQAPydanticAgent,
 )
 from hotpotqa.agent.prompts import hotpotqa_pydantic_agent_seed_candidate
-from hotpotqa.dataset import HotpotQAParagraph, HotpotQARecord
-from hotpotqa.pipeline import HotpotQAPipelineConfig, build_hotpotqa_runtime
+from hotpotqa.config import HotpotQAConfig
+from hotpotqa.data.dataset import HotpotQAParagraph, HotpotQARecord
+from hotpotqa.optimization.runtime import build_hotpotqa_runtime
 
 
 def _record() -> HotpotQARecord:
@@ -327,8 +328,8 @@ def test_summarize_feedback_reads_pydantic_ai_tool_arg_names() -> None:
     summarize call render as ``num_passages=?, has_context=False``,
     silently misleading the reflection LM.
     """
-    from hotpotqa.agent.feedback import _format_summarize_call
     from hotpotqa.agent.types import AgentToolCall
+    from hotpotqa.optimization.feedback import _format_summarize_call
 
     step_with_context = AgentToolCall(
         step_index=0,
@@ -371,11 +372,11 @@ def test_agent_feedback_correctness_matches_official_em_scorer() -> None:
     Switched to ``exact_match_score`` (which uses ``normalize_answer``)
     so feedback labels agree with the scored metric for every case.
     """
-    from hotpotqa.agent.feedback import (
+    from hotpotqa.agent.types import AgentToolCall, HotpotQAAgentOutput
+    from hotpotqa.optimization.feedback import (
         _policy_prompt_feedback,
         _summarize_feedback,
     )
-    from hotpotqa.agent.types import AgentToolCall, HotpotQAAgentOutput
 
     record = HotpotQARecord(
         case_id="case-em",
@@ -505,7 +506,7 @@ def test_runtime_requires_explicit_pydantic_agent_or_model() -> None:
     """
     with pytest.raises(ValueError, match="pydantic_agent_model"):
         build_hotpotqa_runtime(
-            config=HotpotQAPipelineConfig(
+            config=HotpotQAConfig(
                 retrieval_mode="distractor",
                 retrieve_k=1,
                 max_iters=2,

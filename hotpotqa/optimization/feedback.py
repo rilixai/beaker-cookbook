@@ -1,4 +1,4 @@
-"""Per-component textual feedback for the PydanticAI agent variant.
+"""Per-component textual feedback for the PydanticAI agent.
 
 The agent has two optimizable components — ``policy_prompt`` (its
 tool-use system prompt) and ``summarize_prompt`` (the summarize
@@ -6,19 +6,19 @@ sub-agent's system prompt, reused across every summarize call). Both
 get rich, gold-supervised textual feedback the reflection LM reads when
 rewriting them.
 
-Decoupled from the workflow's structurally-different per-module
-feedback because the agent's tool sequence is variable: the agent
-decides whether to summarize zero times, once, twice, or more. The
-feedback functions here aggregate across whatever the agent actually
-did.
+Lives under ``optimization/`` (not ``agent/``) because feedback
+strings exist purely to populate
+``trace_evidence.per_component_feedback`` for the rilixai reflection
+LM — they're GEPA-facing infrastructure the runtime adapter wraps,
+not anything the agent itself reads at inference time.
 """
 
 from __future__ import annotations
 
-from ..dataset import HotpotQARecord
-from ..gold_helpers import ideal_summary_from_supporting_facts
-from ..hotpot_eval import exact_match_score
-from .types import AgentToolCall, HotpotQAAgentOutput
+from ..agent.types import AgentToolCall, HotpotQAAgentOutput
+from ..data.dataset import HotpotQARecord
+from ..data.eval import exact_match_score
+from ..data.gold import ideal_summary_from_supporting_facts
 
 
 # Component names the agent attaches to the rilixai PromptCandidate.

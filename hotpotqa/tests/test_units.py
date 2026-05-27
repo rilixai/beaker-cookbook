@@ -5,13 +5,13 @@ from __future__ import annotations
 import pytest
 from rilixai.prompt_optimization.models import Case
 
-from hotpotqa.dataset import (
+from hotpotqa.data.dataset import (
     HotpotQAParagraph,
     HotpotQARecord,
     cases_from_records,
     record_to_case,
 )
-from hotpotqa.metrics import (
+from hotpotqa.optimization.metrics import (
     ANSWER_F1_FIELD,
     ANSWER_FIELD,
     SUPPORTING_TITLES_RECALL_FIELD,
@@ -19,7 +19,7 @@ from hotpotqa.metrics import (
     f1_score,
     normalize_answer,
 )
-from hotpotqa.pipeline import HotpotQARunResult
+from hotpotqa.optimization.runtime import HotpotQARunResult
 
 
 # ─── dataset ────────────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ def test_load_hotpotqa_paper_split_matches_artifact_slicing(monkeypatch: pytest.
     """
     import random as _random
 
-    from hotpotqa import dataset as dataset_module
+    from hotpotqa.data import dataset as dataset_module
 
     fake_records = [_synthetic_record(i) for i in range(100)]
     fake_dataset = _FakeHFDataset(fake_records)
@@ -179,7 +179,7 @@ def test_load_hotpotqa_paper_split_matches_artifact_slicing(monkeypatch: pytest.
 
 
 def test_load_hotpotqa_paper_split_rejects_unknown_partition() -> None:
-    from hotpotqa.dataset import load_hotpotqa_paper_split
+    from hotpotqa.data.dataset import load_hotpotqa_paper_split
 
     with pytest.raises(ValueError, match="partition must be one of"):
         load_hotpotqa_paper_split("dev", max_cases=10)

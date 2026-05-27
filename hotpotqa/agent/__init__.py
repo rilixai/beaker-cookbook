@@ -1,12 +1,17 @@
-"""PydanticAI agent variant of the HotpotQA benchmark.
+"""PydanticAI agent for the HotpotQA benchmark.
 
-The same multi-hop task as the workflow, expressed as an idiomatic
-PydanticAI tool-using agent: two tools (``retrieve_k`` + ``summarize``
-with an optional ``context`` arg), a structured Pydantic answer
-terminator, and two optimizable components (``policy_prompt`` +
-``summarize_prompt``). Per-component feedback (in :mod:`.feedback`) is
-independent of the workflow's per-module feedback because the agent's
-tool sequence is variable.
+An idiomatic two-tool agent: ``retrieve_k`` (BM25 over local
+distractor paragraphs or the fullwiki bm25s index, depending on
+``HotpotQAConfig.retrieval_mode``) + ``summarize`` (raw OpenAI
+chat-completions call with the optimizable summarize prompt). The
+agent terminates by populating a Pydantic ``HotpotQAOutput`` —
+PydanticAI's built-in ``final_result`` mechanism.
+
+Two optimizable components — ``policy_prompt`` + ``summarize_prompt``
+— get rewritten by rilixai's GEPA loop. The per-component feedback
+strings the reflection LM reads live in :mod:`hotpotqa.optimization.feedback`
+(they're GEPA-facing infrastructure, not agent internals the agent
+itself reads).
 """
 
 from .agent import (
@@ -16,23 +21,15 @@ from .agent import (
     HotpotQAPydanticAgent,
     SummarizeLLMCall,
 )
-from .feedback import (
-    AGENT_POLICY_COMPONENT,
-    AGENT_SUMMARIZE_COMPONENT,
-    build_agent_per_component_feedback,
-)
 from .prompts import (
     DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
     DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
     hotpotqa_pydantic_agent_seed_candidate,
 )
-from .runtime import build_agent_run_metrics, build_pydantic_agent_runtime
 from .types import AgentToolCall, HotpotQAAgentOutput
 
 
 __all__ = [
-    "AGENT_POLICY_COMPONENT",
-    "AGENT_SUMMARIZE_COMPONENT",
     "AgentToolCall",
     "DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT",
     "DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT",
@@ -42,8 +39,5 @@ __all__ = [
     "PYDANTIC_AGENT_POLICY_COMPONENT",
     "PYDANTIC_AGENT_SUMMARIZE_COMPONENT",
     "SummarizeLLMCall",
-    "build_agent_per_component_feedback",
-    "build_agent_run_metrics",
-    "build_pydantic_agent_runtime",
     "hotpotqa_pydantic_agent_seed_candidate",
 ]

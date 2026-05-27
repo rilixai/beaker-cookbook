@@ -57,9 +57,9 @@ from rilixai.prompt_optimization.spec import (
 )
 
 from .agent.prompts import hotpotqa_pydantic_agent_seed_candidate
-from .dataset import load_hotpotqa_paper_split
-from .pipeline import HotpotQAPipelineConfig
-from .spec import build_hotpotqa_spec
+from .config import HotpotQAConfig
+from .data.dataset import load_hotpotqa_paper_split
+from .optimization.spec import build_hotpotqa_spec
 
 
 logger = logging.getLogger("hotpotqa")
@@ -241,7 +241,7 @@ def _load_splits_for_command(args: argparse.Namespace) -> dict[str, list[Case]]:
     (``fullwiki`` config when retrieval is fullwiki — matching the paper;
     ``distractor`` config when retrieval is distractor — needed for the
     per-case 10-paragraph context). See
-    :func:`hotpotqa.dataset.load_hotpotqa_paper_split`
+    :func:`hotpotqa.data.dataset.load_hotpotqa_paper_split`
     for the full provenance.
     """
     cache_dir = str(args.cache_dir) if args.cache_dir else None
@@ -484,7 +484,7 @@ def main(argv: list[str] | None = None) -> int:
         # Translate the slash spec (``openai/gpt-4.1-mini``) to PydanticAI's
         # spec (``openai:gpt-4.1-mini``) so callers can share ``--task-model``.
         pydantic_agent_model = args.task_model.replace("/", ":", 1)
-    pipeline_config = HotpotQAPipelineConfig(
+    config = HotpotQAConfig(
         retrieval_mode=args.retrieval,
         retrieve_k=args.retrieve_k,
         max_iters=args.max_iters,
@@ -495,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
         cases_by_split=_placeholder_cases_for_spec(splits),
         model=args.task_model,
         max_concurrency=args.max_concurrency,
-        pipeline_config=pipeline_config,
+        config=config,
     )
 
     # Wrap the spec's runtime with progress logging. For ``evaluate`` the

@@ -1,49 +1,71 @@
-"""Async ``ExtractionRuntime`` builder for the PydanticAI agent variant.
+"""Async ``ExtractionRuntime`` adapter — the GEPA-facing surface.
 
-Wraps :class:`HotpotQAPydanticAgent` as an async runtime the rilixai
-adapter can drive. Translates the agent's variable-length tool-call
-trajectory into the same trajectory-dict schema the workflow runtime
-emits, and populates ``trace_evidence.per_component_feedback`` with
-agent-specific feedback strings (the workflow's feedback functions
-don't fit because the agent's tool sequence isn't fixed-hop).
+Wraps :class:`~hotpotqa.agent.agent.HotpotQAPydanticAgent` as an async
+runtime the rilixai adapter can drive. Translates the agent's
+variable-length tool-call trajectory into the trajectory-dict schema
+the optimizer's adapter expects, and populates
+``trace_evidence.per_component_feedback`` with paper-style
+per-component diagnostics (``policy_prompt`` + ``summarize_prompt``)
+the reflection LM reads when rewriting each component.
+
+This module is the single entry point GEPA hits per case — everything
+under :mod:`hotpotqa.agent` is implementation detail it composes.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field
+from typing import Any
 
-from ..dataset import HotpotQARecord
+from rilixai.prompt_optimization.models import PromptCandidate
+
+from ..agent.types import AgentToolCall, HotpotQAAgentOutput
+from ..config import HotpotQAConfig
+from ..data.dataset import HotpotQARecord
 from .feedback import build_agent_per_component_feedback
-from .types import AgentToolCall, HotpotQAAgentOutput
-
-
-if TYPE_CHECKING:
-    from ..pipeline import HotpotQAPipelineConfig, HotpotQARunResult
 
 
 logger = logging.getLogger(__name__)
 
 
-def build_pydantic_agent_runtime(
+@dataclass
+class HotpotQARunResult:
+    """One case's output, shaped for the rilixai field-extractor contract."""
+
+    answer: str
+    retrieved_titles: list[str]
+    run_metrics: dict[str, Any] = field(default_factory=dict)
+
+
+def build_hotpotqa_runtime(
     *,
-    cfg: HotpotQAPipelineConfig,
-    agent: Any | None,
+    config: HotpotQAConfig | None = None,
+    pydantic_agent: Any | None = None,
 ) -> Callable[..., Awaitable[HotpotQARunResult]]:
-    """Return an async runtime callable that executes one agent case."""
-    # Defer the import so callers using only workflow mode don't need
-    # pydantic-ai installed at import time.
-    from ..pipeline import HotpotQARunResult, _unpack_runtime_inputs
-    from .agent import HotpotQAPydanticAgent
+    """Build an async ``ExtractionRuntime`` for the HotpotQA agent.
+
+    Returns a callable the rilixai adapter invokes per case. ``config``
+    pins the retrieval mode + agent loop knobs; ``pydantic_agent`` is
+    an optional pre-built :class:`HotpotQAPydanticAgent` (tests inject
+    one with a scripted ``FunctionModel`` here).
+    """
+    cfg = config or HotpotQAConfig()
+
+    # Defer pydantic-ai-touching imports so callers that just need the
+    # runtime symbol (e.g. spec construction at module import time)
+    # don't pay the import cost until the runtime actually fires.
+    from ..agent.agent import HotpotQAPydanticAgent
+    from ..agent.retrieval import build_retrieve_k_fn_for_case
 
     resolved_agent: HotpotQAPydanticAgent
-    if isinstance(agent, HotpotQAPydanticAgent):
-        resolved_agent = agent
-    elif agent is None:
+    if isinstance(pydantic_agent, HotpotQAPydanticAgent):
+        resolved_agent = pydantic_agent
+    elif pydantic_agent is None:
         if cfg.pydantic_agent_model is None:
             raise ValueError(
-                "pydantic_agent mode requires either a pre-built agent or HotpotQAPipelineConfig.pydantic_agent_model."
+                "build_hotpotqa_runtime requires either a pre-built agent or HotpotQAConfig.pydantic_agent_model."
             )
         resolved_agent = HotpotQAPydanticAgent(
             model=cfg.pydantic_agent_model,
@@ -52,20 +74,18 @@ def build_pydantic_agent_runtime(
             temperature=cfg.pydantic_agent_temperature,
         )
     else:
-        raise TypeError(f"pydantic_agent must be a HotpotQAPydanticAgent or None, got {type(agent).__name__}.")
-
-    # Reuse the workflow's per-case retrieve fn so the agent sees the
-    # same retrieval corpus the workflow would for the same case +
-    # ``cfg.retrieval_mode``. Before this, ``_do_retrieve`` always
-    # searched the case's 10 local paragraphs regardless of mode —
-    # making nominally-fullwiki agent runs silently use distractor
-    # retrieval and producing non-comparable numbers vs the workflow's
-    # fullwiki baseline.
-    from ..retrieval import build_retrieve_k_fn_for_case
+        raise TypeError(
+            f"pydantic_agent must be a HotpotQAPydanticAgent or None, got {type(pydantic_agent).__name__}."
+        )
 
     async def _runtime(**kwargs: Any) -> HotpotQARunResult:
         record, candidate = _unpack_runtime_inputs(kwargs)
         resolved_agent.apply_candidate(candidate.components)
+        # Reuse the mode-dispatching retrieve fn so the agent sees the
+        # same retrieval corpus the runtime's ``cfg.retrieval_mode``
+        # selects. Before this, ``_do_retrieve`` always searched the
+        # case's 10 local paragraphs regardless of mode — making
+        # nominally-fullwiki runs silently use distractor retrieval.
         retrieve_k_fn = build_retrieve_k_fn_for_case(record=record, cfg=cfg)
         output = await resolved_agent.forward(
             question=record.question,
@@ -88,11 +108,9 @@ def build_agent_run_metrics(
     record: HotpotQARecord,
     output: HotpotQAAgentOutput,
     agent_kind: str,
-    config: HotpotQAPipelineConfig,
+    config: HotpotQAConfig,
 ) -> dict[str, Any]:
     """Translate an agent's tool-call trace into rilixai trajectory metadata."""
-    from ..pipeline import _truncate
-
     gold_titles_lower = {t.strip().lower() for t in record.supporting_titles}
     retrieved_titles_lower = {p.title.strip().lower() for p in output.retrieved_paragraphs}
     missing_gold_titles = sorted(
@@ -183,3 +201,24 @@ def _tool_call_for_agent_step(step: AgentToolCall) -> dict[str, Any]:
         },
         "thought": step.thought,
     }
+
+
+# ─── Shared helpers ─────────────────────────────────────────────────────
+
+
+def _unpack_runtime_inputs(kwargs: dict[str, Any]) -> tuple[HotpotQARecord, PromptCandidate]:
+    record = kwargs.get("input")
+    if not isinstance(record, HotpotQARecord):
+        raise TypeError(f"HotpotQA runtime expected `input` to be a HotpotQARecord, got {type(record).__name__}.")
+    candidate = kwargs.get("candidate")
+    if not isinstance(candidate, PromptCandidate):
+        raise TypeError(
+            f"HotpotQA runtime expected `candidate` to be a PromptCandidate, got {type(candidate).__name__}."
+        )
+    return record, candidate
+
+
+def _truncate(text: str, max_chars: int) -> str:
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 1)].rstrip() + "…"

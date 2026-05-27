@@ -15,13 +15,14 @@ from rilixai.prompt_optimization.models import Case, PromptCandidate
 from rilixai.prompt_optimization.protocols import EvaluationProfile
 from rilixai.prompt_optimization.spec import PromptOptimizationSpec
 
-from .agent.prompts import hotpotqa_pydantic_agent_seed_candidate
+from ..agent.prompts import hotpotqa_pydantic_agent_seed_candidate
+from ..config import HotpotQAConfig
 from .metrics import (
     HOTPOTQA_FIELD_WEIGHTS,
     HotpotQAMetricsCalculator,
     build_hotpotqa_field_extractor,
 )
-from .pipeline import HotpotQAPipelineConfig, build_hotpotqa_runtime
+from .runtime import build_hotpotqa_runtime
 
 
 _HOTPOTQA_PROFILE_KEY = "hotpotqa"
@@ -52,7 +53,7 @@ def build_hotpotqa_spec(
     *,
     cases_by_split: dict[str, Sequence[Case]],
     seed_candidate: PromptCandidate | None = None,
-    pipeline_config: HotpotQAPipelineConfig | None = None,
+    config: HotpotQAConfig | None = None,
     pydantic_agent: Any | None = None,
     name: str = "hotpotqa",
     user_id: str = "__hotpotqa_benchmark__",
@@ -63,15 +64,15 @@ def build_hotpotqa_spec(
 ) -> PromptOptimizationSpec:
     """Build a ready-to-run :class:`PromptOptimizationSpec` for HotpotQA.
 
-    Pass ``pipeline_config.pydantic_agent_model`` (a PydanticAI model
-    spec like ``"openai:gpt-4.1-mini"``) or a pre-built ``pydantic_agent``
+    Pass ``config.pydantic_agent_model`` (a PydanticAI model spec like
+    ``"openai:gpt-4.1-mini"``) or a pre-built ``pydantic_agent``
     instance. ``cases_by_split`` must include at least ``train`` and
     (``validation`` or ``val``) keys for optimization; evaluation-only
     uses can supply just one split. ``curated_plus_trace`` is the
     default reflection mode because the runtime populates per-tool
     ``trace_evidence`` that scalar field scores cannot represent.
     """
-    cfg = pipeline_config or HotpotQAPipelineConfig()
+    cfg = config or HotpotQAConfig()
     seed = seed_candidate or hotpotqa_pydantic_agent_seed_candidate()
     metrics = HotpotQAMetricsCalculator()
     runtime = build_hotpotqa_runtime(
