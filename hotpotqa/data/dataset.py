@@ -213,7 +213,13 @@ def load_hotpotqa_split(
             "Install it with `pip install datasets`."
         ) from exc
 
-    dataset = load_dataset("hotpot_qa", config, split=split, cache_dir=cache_dir, trust_remote_code=True)
+    # ``hotpotqa/hotpot_qa`` is the canonical namespaced repo ID. Newer
+    # versions of ``datasets`` / ``huggingface_hub`` reject the legacy
+    # bare name ``hotpot_qa`` with ``HfUriError: Repository id must be
+    # 'namespace/name'``. ``trust_remote_code`` is dropped — the
+    # namespaced repo is standard Parquet (no loading script) and the
+    # arg now emits a deprecation warning that will become a hard error.
+    dataset = load_dataset("hotpotqa/hotpot_qa", config, split=split, cache_dir=cache_dir)
 
     if shuffle_seed is not None:
         import random as _random
@@ -303,11 +309,10 @@ def load_hotpotqa_paper_split(
         ) from exc
 
     dataset = load_dataset(
-        "hotpot_qa",
+        "hotpotqa/hotpot_qa",
         config,
         split="train",
         cache_dir=cache_dir,
-        trust_remote_code=True,
     )
     total = len(dataset)
     start_frac, end_frac = _PAPER_PARTITION_BOUNDS[partition]

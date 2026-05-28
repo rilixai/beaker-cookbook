@@ -11,12 +11,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from rilixai import spec
 from rilixai.prompt_optimization.models import Case, PromptCandidate
 from rilixai.prompt_optimization.protocols import EvaluationProfile
-from rilixai.prompt_optimization.spec import PromptOptimizationSpec
+from rilixai.prompt_optimization.spec import OptimizationContext, PromptOptimizationSpec
 
 from ..agent.prompts import hotpotqa_pydantic_agent_seed_candidate
 from ..config import HotpotQAConfig
+from ..data.dataset import load_hotpotqa_paper_split
 from .metrics import (
     HOTPOTQA_FIELD_WEIGHTS,
     HotpotQAMetricsCalculator,
@@ -92,4 +94,66 @@ def build_hotpotqa_spec(
         task_type="hotpotqa_pydantic_agent",
         max_concurrency=max_concurrency,
         reflection_evidence_mode=reflection_evidence_mode,
+    )
+
+
+# ─── rilixai Modal sandbox entry point ─────────────────────────────────
+
+
+# Defaults the sandbox build_spec applies when ctx.config omits a key.
+# See README for the full key reference (GEPA vs cookbook split).
+_DEFAULT_SANDBOX_CONFIG: dict[str, Any] = {
+    "retrieval_mode": "distractor",
+    "retrieve_k": 7,
+    "max_iters": 8,
+    "train_size": 50,
+    "val_size": 100,
+    "pydantic_agent_model": "openai:gpt-4.1-mini",
+    "task_temperature": 0.0,
+    "max_concurrency": 4,
+}
+
+
+@spec(
+    name="hotpotqa-agent",
+    description="HotpotQA multi-hop QA — PydanticAI tool-using agent + GEPA",
+    metadata={"benchmark": "hotpotqa", "agent_kind": "pydantic_ai"},
+)
+def build_spec(ctx: OptimizationContext) -> PromptOptimizationSpec:
+    """Spec factory for the rilixai Modal sandbox path. See README for usage.
+
+    Intentionally no ``version=...`` argument. ``sandbox.py --build``
+    supplies the push-time version (defaulting to ``v<short_sha>``)
+    via ``rilixai push --version`` and then promotes the freshly-
+    pushed row to ``hotpotqa-agent@production``. Trigger calls
+    reference ``hotpotqa-agent@production`` so rilixai resolves the
+    current promoted version server-side — no rilix-side / cookbook-
+    side version bumps for routine deploys.
+    """
+    cfg_in = {**_DEFAULT_SANDBOX_CONFIG, **dict(ctx.config or {})}
+    hotpot_cfg = HotpotQAConfig(
+        retrieval_mode=cfg_in["retrieval_mode"],
+        retrieve_k=int(cfg_in["retrieve_k"]),
+        max_iters=int(cfg_in["max_iters"]),
+        pydantic_agent_model=str(cfg_in["pydantic_agent_model"]),
+        pydantic_agent_temperature=float(cfg_in["task_temperature"]),
+    )
+    hf_config = "fullwiki" if hotpot_cfg.retrieval_mode == "fullwiki" else "distractor"
+    splits = {
+        "train": load_hotpotqa_paper_split(
+            "train",
+            max_cases=int(cfg_in["train_size"]),
+            config=hf_config,
+        ),
+        "validation": load_hotpotqa_paper_split(
+            "validation",
+            max_cases=int(cfg_in["val_size"]),
+            config=hf_config,
+        ),
+    }
+    return build_hotpotqa_spec(
+        cases_by_split={k: list(v) for k, v in splits.items()},
+        config=hotpot_cfg,
+        model=cfg_in.get("model") or ctx.model,
+        max_concurrency=int(cfg_in["max_concurrency"]),
     )

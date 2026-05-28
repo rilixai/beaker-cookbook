@@ -1,7 +1,11 @@
-"""CLI entrypoint for the HotpotQA agent benchmark.
+"""CLI entrypoint for **local** HotpotQA agent runs.
 
 Run as ``python -m hotpotqa.cli ...`` after installing the cookbook's
 ``hotpotqa`` workspace member (``uv sync --all-packages --group dev``).
+
+For **remote** runs on the rilixai Modal sandbox path, see
+``hotpotqa/sandbox.py``. A future PR will collapse both entry points
+into one subcommand-style CLI.
 
 With no flags, ``evaluate`` runs the seed candidate on the GEPA paper's
 exact 300-case test slice under the paper's fullwiki / k=7 setup. Data

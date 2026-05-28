@@ -57,6 +57,5 @@ class HotpotQAConfig:
             raise ValueError(f"HotpotQAConfig.max_iters must be >= 1, got {self.max_iters}.")
         if self.retrieval_mode not in ("distractor", "fullwiki"):
             raise ValueError(
-                f"HotpotQAConfig.retrieval_mode must be one of "
-                f"'distractor' / 'fullwiki', got {self.retrieval_mode!r}."
+                f"HotpotQAConfig.retrieval_mode must be one of 'distractor' / 'fullwiki', got {self.retrieval_mode!r}."
             )

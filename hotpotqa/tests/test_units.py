@@ -142,7 +142,7 @@ def test_load_hotpotqa_paper_split_matches_artifact_slicing(monkeypatch: pytest.
     fake_dataset = _FakeHFDataset(fake_records)
 
     def _fake_load_dataset(name: str, config: str, **kwargs: object) -> _FakeHFDataset:
-        assert name == "hotpot_qa"
+        assert name == "hotpotqa/hotpot_qa"
         assert config == "fullwiki"
         assert kwargs.get("split") == "train"
         return fake_dataset
@@ -280,3 +280,33 @@ def test_supporting_titles_recall_is_case_insensitive() -> None:
         },
     )
     assert aggregate.field_accuracies[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(1.0)
+
+
+# ─── rilixai Modal sandbox @spec wiring ─────────────────────────────────
+
+
+def test_sandbox_spec_factory_is_registered() -> None:
+    """Lock the @spec(...) registration contract so ``rilixai push`` discovery can't silently break.
+
+    ``rilixai push --target hotpotqa/optimization/spec.py --name hotpotqa-agent``
+    enumerates ``@spec``-decorated factories via the ``__rilixai_spec__``
+    attribute the decorator stamps. If anyone renames ``build_spec`` or
+    drops the decorator, this test fails loudly before a stale-image
+    push reaches the build worker.
+    """
+    from rilixai.spec import get_registration
+
+    from hotpotqa.optimization.spec import build_spec
+
+    reg = get_registration(build_spec)
+    assert reg is not None, "build_spec must carry @spec registration"
+    assert reg.name == "hotpotqa-agent"
+    assert reg.entrypoint == "hotpotqa.optimization.spec:build_spec"
+    assert reg.metadata.get("benchmark") == "hotpotqa"
+    assert reg.metadata.get("agent_kind") == "pydantic_ai"
+    # Intentionally no version assertion: ``@spec`` doesn't pin a version.
+    # ``sandbox.py --build`` supplies ``v<short_sha>`` at push time and
+    # promotes to ``@production``. ``reg.version`` will be whatever
+    # rilixai's ``DEFAULT_SPEC_VERSION`` constant is (currently ``"v1"``),
+    # but that value never reaches the spec_versions table for normal
+    # ``--build`` flows because the CLI ``--version`` flag overrides it.
