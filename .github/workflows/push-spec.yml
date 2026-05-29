@@ -1,0 +1,109 @@
+name: Push hotpotqa spec to rilixai
+
+# Auto-pushes the ``@spec``-decorated ``hotpotqa-agent`` factory to
+# the rilixai control plane on every merge to ``main`` that touches
+# the hotpotqa workspace member. Mirrors the rilix repo's
+# ``push-spec.yml`` pattern (https://github.com/rilixai/rilix/pull/1381):
+# rilixai's build worker materializes a Modal image from the source
+# bundle, then ``rilixai spec promote`` flips
+# ``hotpotqa-agent@production`` to the freshly-pushed version.
+# Triggers referencing ``@production`` (the cookbook's default) pick
+# it up immediately, with no per-merge cookbook edits.
+#
+# Both push + promote happen via ``hotpotqa/sandbox.py --build``
+# (default version: ``v<short_sha>`` from git; promote: on). Manual
+# ``workflow_dispatch`` also supports overriding the version label
+# for hot-fix re-pushes and skipping the promote step.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'hotpotqa/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/push-spec.yml'
+  workflow_dispatch:
+    inputs:
+      version_override:
+        description: "Override the spec version label (default: v<short sha>)."
+        required: false
+        type: string
+      skip_promote:
+        description: "Push without promoting (the new build stays addressable but does not flip @production)."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Serialize pushes per ref so two rapid merges don't race the
+# ``rilixai spec promote`` order (which would otherwise leave
+# ``@production`` pointing at whichever ``spec promote`` lost the
+# race rather than the more recent commit).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  push-spec:
+    name: rilixai push + promote
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RILIXAI_API_BASE_URL: ${{ secrets.RILIXAI_API_BASE_URL }}
+      RILIXAI_API_KEY: ${{ secrets.RILIXAI_API_KEY }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Need the short SHA for the default version label.
+          fetch-depth: 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Configure SSH for private rilixai dependency
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.RILIXAI_GITHUB_SSH_KEY }}
+
+      - name: Trust GitHub SSH host
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: uv sync (locked)
+        run: uv sync --all-packages --group dev --locked
+
+      - name: Push + promote spec
+        # ``sandbox.py --build`` runs ``rilixai push`` with the deps
+        # from ``hotpotqa/pyproject.toml`` and then ``rilixai spec
+        # promote`` to point ``hotpotqa-agent@production`` at the
+        # fresh row. The trigger that ``sandbox.py`` always issues at
+        # the end queues a smoke run; cost is bounded by
+        # ``--max-metric-calls 100`` (the script's default), used
+        # here as the CI smoke-after-promote sanity check.
+        run: |
+          VERSION_OVERRIDE_FLAG=""
+          if [ -n "${VERSION_OVERRIDE}" ]; then
+            VERSION_OVERRIDE_FLAG="--version ${VERSION_OVERRIDE}"
+            echo "Using workflow_dispatch override: --version ${VERSION_OVERRIDE}"
+          else
+            echo "No override; sandbox.py defaults to v\$(git rev-parse --short HEAD)"
+          fi
+          SKIP_PROMOTE_FLAG=""
+          if [ "${SKIP_PROMOTE}" = "true" ]; then
+            SKIP_PROMOTE_FLAG="--no-promote"
+            echo "workflow_dispatch requested --no-promote (build won't flip @production)"
+          fi
+          uv run hotpotqa/sandbox.py --build ${VERSION_OVERRIDE_FLAG} ${SKIP_PROMOTE_FLAG}
+        env:
+          VERSION_OVERRIDE: ${{ inputs.version_override }}
+          SKIP_PROMOTE: ${{ inputs.skip_promote }}
