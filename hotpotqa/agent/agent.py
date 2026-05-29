@@ -46,6 +46,10 @@ from pydantic_ai.settings import ModelSettings
 
 from ..data.dataset import HotpotQAParagraph
 from ..data.gold import remaining_gold_titles
+from .prompts import (
+    DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
+    DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
+)
 from .retrieval import RetrieveKFn, bm25_top_k
 from .types import POLICY_COMPONENT, SUMMARIZE_COMPONENT, AgentToolCall, HotpotQAAgentOutput
 
@@ -104,10 +108,12 @@ class HotpotQADeps:
     summarize_prompt_override: str | None = None
 
 
-_FALLBACK_POLICY_PROMPT = (
-    "Given the question, use the available tools to retrieve evidence, then produce the structured answer."
-)
-_FALLBACK_SUMMARIZE_PROMPT = "Given the question and passages (optionally with prior context), produce a summary."
+# Fallbacks the agent uses when ``apply_candidate`` is never called or
+# called with missing keys. Aliased to the canonical seed prompts in
+# ``prompts.py`` so the two can't drift — same single-source-of-truth
+# pattern used for the component-name constants in ``types.py``.
+_FALLBACK_POLICY_PROMPT = DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT
+_FALLBACK_SUMMARIZE_PROMPT = DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT
 
 
 class HotpotQAPydanticAgent:
