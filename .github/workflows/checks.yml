@@ -5,10 +5,18 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  lint-and-test:
+  # Lint, format, type-check, and verify the hotpotqa workspace member
+  # builds cleanly. Split from the pytest job so a lint regression
+  # fails fast without waiting for pytest, and vice versa (mirrors
+  # rilixai's split between ``checks.yml`` and ``tests.yml``).
+  checks:
+    name: Lint, type-check, and build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -16,6 +24,9 @@ jobs:
         uses: astral-sh/setup-uv@v3
         with:
           version: "latest"
+
+      - name: Install Python
+        run: uv python install
 
       # The rilixai dep is a ``git+ssh://`` pin to the private
       # rilixai/rilixai repo. Auth flows via a deploy-key-style SSH
@@ -31,8 +42,11 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-      - name: uv sync
-        run: uv sync --all-packages --group dev
+      # ``--locked`` fails the job if uv.lock is stale vs pyproject —
+      # catches "forgot to ``uv lock`` after editing pyproject" before
+      # it bites downstream consumers of the cookbook template.
+      - name: uv sync (locked)
+        run: uv sync --all-packages --group dev --locked
 
       - name: ruff check
         run: uv run ruff check
@@ -45,6 +59,40 @@ jobs:
         # workspace member's source dir (tests + scripts are excluded
         # to match the rilixai pattern).
         run: uv run python -m mypy
+
+      # Build the hotpotqa wheel without ``[tool.uv.sources]``
+      # overrides so packaging regressions surface here rather than
+      # in a downstream "copy this template" user's environment.
+      - name: Build distributions
+        run: uv build --package hotpotqa --no-sources
+
+  tests:
+    name: Pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Configure SSH for private rilixai dependency
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.RILIXAI_GITHUB_SSH_KEY }}
+
+      - name: Trust GitHub SSH host
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: uv sync (locked)
+        run: uv sync --all-packages --group dev --locked
 
       - name: pytest
         run: uv run python -m pytest -q
