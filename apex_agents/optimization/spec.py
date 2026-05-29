@@ -30,7 +30,7 @@ from rilixai.prompt_optimization.spec import OptimizationContext, PromptOptimiza
 from ..agent.prompts import apex_agents_seed_candidate
 from ..config import ApexAgentsConfig
 from ..data.dataset import load_apex_agents_cases
-from ..data.kfold import stratified_case_cap, world_held_out_val_split
+from ..data.world_splits import stratified_case_cap, world_held_out_val_split
 from .metrics import (
     APEX_AGENTS_FIELD_WEIGHTS,
     ApexAgentsMetricsCalculator,

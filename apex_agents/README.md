@@ -1,4 +1,4 @@
-# APEX-Agents — ReAct toolbelt agent + GEPA optimization
+# APEX-Agents
 
 The Mercor **APEX-Agents** benchmark (Law / Investment Banking) wrapped as a
 native async ReAct toolbelt agent, with rilixai's GEPA loop optimizing its

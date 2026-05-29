@@ -54,7 +54,7 @@ from rilixai.prompt_optimization.spec import (
 from .agent.prompts import apex_agents_seed_candidate
 from .config import ApexAgentsConfig
 from .data.dataset import DEFAULT_DOMAIN, load_apex_agents_cases, world_ids_for_cases
-from .data.kfold import (
+from .data.world_splits import (
     fixed_val_split,
     stratified_case_cap,
     world_held_out_val_split,

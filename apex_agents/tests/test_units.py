@@ -29,7 +29,6 @@ from apex_agents.agent.types import (
     AgentToolCall,
     ApexAgentsAgentOutput,
 )
-from apex_agents.agent.world.fake import FakeWorld, fake_world_factory
 from apex_agents.config import ApexAgentsConfig
 from apex_agents.data.dataset import (
     _APEX_AGENTS_GROUND_TRUTH_KEY,
@@ -41,7 +40,7 @@ from apex_agents.data.dataset import (
     record_to_case,
     world_ids_for_cases,
 )
-from apex_agents.data.kfold import (
+from apex_agents.data.world_splits import (
     fixed_val_split,
     stratified_case_cap,
     world_held_out_val_split,
@@ -60,6 +59,7 @@ from apex_agents.optimization.metrics import (
 )
 from apex_agents.optimization.runtime import ApexAgentsRunResult
 from apex_agents.optimization.spec import build_apex_agents_spec
+from apex_agents.tests.fake_world import FakeWorld, fake_world_factory
 
 
 def _task_row(idx: int, **overrides: Any) -> dict[str, Any]:

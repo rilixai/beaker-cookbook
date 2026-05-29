@@ -2,8 +2,9 @@
 
 * :mod:`.dataset` — HuggingFace loader (``mercor/apex-agents``), record
   + rubric dataclasses, ``Case`` conversion.
-* :mod:`.kfold` — world-level k-fold splitters and the stratified
-  case cap used to hold train width constant across train-size points.
+* :mod:`.world_splits` — world-level train/val splitters (and the
+  k-fold partitioner) plus the stratified case cap used to hold train
+  width constant across train-size points.
 
 A reader writing a new benchmark looks here to see what the underlying
 dataset surface looks like, then goes to :mod:`apex_agents.optimization`
@@ -22,7 +23,7 @@ from .dataset import (
     record_to_case,
     world_ids_for_cases,
 )
-from .kfold import (
+from .world_splits import (
     fixed_val_split,
     stratified_case_cap,
     world_held_out_val_split,

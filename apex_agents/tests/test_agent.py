@@ -20,8 +20,8 @@ from apex_agents.agent.prompts import (
     apex_agents_seed_candidate,
     load_apex_agents_seed_prompts,
 )
-from apex_agents.agent.world.fake import FakeWorld
 from apex_agents.data.dataset import ApexAgentsRecord, RubricCriterion
+from apex_agents.tests.fake_world import FakeWorld
 
 
 def _record() -> ApexAgentsRecord:

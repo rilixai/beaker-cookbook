@@ -1,15 +1,25 @@
-"""Deterministic world-level k-fold splitter for APEX-Agents.
+"""Deterministic world-level data splitters for APEX-Agents.
 
 APEX-Agents tasks are clustered into worlds (10 in the
 investment-banking subset). Splitting at the *world* level — rather
-than the task level — keeps train and test worlds disjoint so a
+than the task level — keeps train and held-out worlds disjoint so a
 GEPA-optimized prompt is evaluated on worlds it never saw during
 optimization (the leakage-free evaluation the plan calibrates to).
 
-:func:`world_level_folds` is deterministic: it sorts the world ids,
-seeds a :class:`random.Random`, shuffles, and partitions the worlds
-into ``k`` contiguous test groups. Every world appears in exactly one
-test fold and the fold sizes differ by at most one.
+This module groups the world-aware split helpers:
+
+* :func:`world_held_out_val_split` — carve inner validation out of a
+  train pool by holding out whole worlds (used by both the local CLI
+  and the Modal ``build_spec``).
+* :func:`fixed_val_split` — a fixed cross-world validation pool that
+  stays constant across a train-size sweep (local CLI).
+* :func:`stratified_case_cap` — round-robin cap to ``n`` cases that
+  keeps the world set as wide as possible (used everywhere).
+* :func:`world_level_folds` — the k-fold partitioner behind the CLI's
+  ``kfold`` command: shuffle the world ids under a seed and partition
+  into ``k`` near-equal, disjoint test groups.
+
+All helpers are deterministic given their ``(cases, …, seed)`` inputs.
 """
 
 from __future__ import annotations
