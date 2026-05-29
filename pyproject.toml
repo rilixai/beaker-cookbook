@@ -34,9 +34,27 @@ dev = [
 members = ["hotpotqa", "apex_agents"]
 # As benchmarks migrate, add: "cl_bench"
 
-# The workspace root itself isn't an installable Python package.
+# The workspace root isn't an installable Python package for local dev
+# — uv installs each member from its own pyproject (``package = false``).
 [tool.uv]
 package = false
+
+# ...but rilixai's sandbox build worker bakes the Modal image by running
+# ``pip install /spec`` against this root (the whole cookbook is the
+# bundle). Without a declared backend, pip falls back to setuptools'
+# flat-layout auto-discovery, which refuses a tree containing more than
+# one top-level package ("Multiple top-level packages discovered in a
+# flat-layout: ['hotpotqa', 'apex_agents']"). Declare the backend and an
+# explicit package list so the build is deterministic: every member's
+# spec image installs all members (each spec only imports its own
+# package; the others ride along harmlessly), with tests/scripts excluded.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["hotpotqa*", "apex_agents*"]
+exclude = ["*.tests", "*.tests.*", "*.scripts", "*.scripts.*"]
 
 [tool.pytest.ini_options]
 # Test discovery walks into each workspace member's tests/ dir.
