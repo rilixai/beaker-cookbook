@@ -1,9 +1,15 @@
 # rilixai-cookbook
+<div align="center">
+  <img width="227" height="225" alt="31fdec74-bda3-4813-99ab-76f59f1f4484" src="https://github.com/user-attachments/assets/174d316a-24c0-4832-9f93-9c0a77a19433" />
 
-A collection of [rilixai](https://github.com/rilixai/rilixai) recipes
-that use challenging benchmarks to demonstrate rilixai's continual
-learning capabilities across different agent shapes, tasks, and
-production setup.
+</div>
+
+
+*A collection of [rilixai](https://github.com/rilixai/rilixai) recipes
+that demonstrate rilixai's continual learning capabilities across different agent shapes, tasks, and
+production setups.*
+
+
 
 ## Recipes
 
