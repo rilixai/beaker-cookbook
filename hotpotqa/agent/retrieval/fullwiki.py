@@ -106,7 +106,6 @@ def _ensure_initialized(cache_dir: Path | None = None) -> None:
 
         import bm25s
         import Stemmer
-        import ujson
 
         directory = cache_dir or _default_cache_dir()
         directory.mkdir(parents=True, exist_ok=True)
@@ -135,33 +134,54 @@ def _ensure_initialized(cache_dir: Path | None = None) -> None:
                     tar.extractall(path=directory, filter="data")
             assert corpus_path.exists(), f"Corpus file not found at {corpus_path} after extraction."
 
-            corpus_lines: list[str] = []
-            with corpus_path.open() as f:
-                for line in f:
-                    record = ujson.loads(line)
-                    corpus_lines.append(f"{record['title']} | {' '.join(record['text'])}")
-
+            # Cold path: read corpus once, reuse for both index
+            # construction below AND the in-memory singleton at the
+            # bottom of this function. ``corpus_data`` stays bound on
+            # the warm path too (``None`` sentinel) so we re-read only
+            # when we didn't just build.
+            corpus_data: list[str] | None = _read_corpus(corpus_path)
             stemmer = Stemmer.Stemmer("english")
-            corpus_tokens = bm25s.tokenize(corpus_lines, stopwords="en", stemmer=stemmer)
+            corpus_tokens = bm25s.tokenize(corpus_data, stopwords="en", stemmer=stemmer)
             # k1=0.9, b=0.4 mirror the artifact's tuning.
             retriever = bm25s.BM25(k1=0.9, b=0.4)
             retriever.index(corpus_tokens)
             retriever.save(str(index_path))
             assert index_path.exists(), f"Index not saved at {index_path}."
+        else:
+            corpus_data = None
 
-        # Load (or reload) the on-disk artifacts into the module-level singletons.
+        # Load (or reload) the on-disk artifacts into the module-level
+        # singletons. Re-load the bm25s index from disk even when we
+        # just built it so warm + cold paths produce identical
+        # in-memory state; the corpus list is reused from the cold-
+        # path read when available (the multi-GB file is otherwise
+        # parsed twice on first-ever init).
         retriever = bm25s.BM25.load(str(index_path))
         stemmer = Stemmer.Stemmer("english")
-        corpus_data: list[str] = []
-        with corpus_path.open() as f:
-            for line in f:
-                record = ujson.loads(line)
-                corpus_data.append(f"{record['title']} | {' '.join(record['text'])}")
+        if corpus_data is None:
+            corpus_data = _read_corpus(corpus_path)
 
         _retriever = retriever
         _stemmer = stemmer
         _corpus = corpus_data
         _initialized = True
+
+
+def _read_corpus(corpus_path: Path) -> list[str]:
+    """Parse the Wikipedia abstracts JSONL into the artifact's flat ``"title | text"`` strings.
+
+    Pulled into a module helper so the cold (build) and warm (reload)
+    paths share one implementation and the multi-GB read happens at
+    most once per ``_ensure_initialized`` invocation.
+    """
+    import ujson
+
+    out: list[str] = []
+    with corpus_path.open() as f:
+        for line in f:
+            record = ujson.loads(line)
+            out.append(f"{record['title']} | {' '.join(record['text'])}")
+    return out
 
 
 def fullwiki_retrieve_k_fn(
