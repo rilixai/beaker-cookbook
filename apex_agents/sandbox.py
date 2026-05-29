@@ -241,7 +241,7 @@ def main() -> int:
         "--max-metric-calls",
         type=int,
         default=50,
-        help="GEPA metric-call budget — primary cost knob. Default: 100 (smoke).",
+        help="GEPA metric-call budget — primary cost knob. Default: 50 (smoke).",
     )
     args = parser.parse_args()
 

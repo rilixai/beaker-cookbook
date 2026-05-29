@@ -324,8 +324,13 @@ def _carve_inner_val(train: list[Case], args: argparse.Namespace) -> tuple[list[
     :func:`world_held_out_val_split`).
     """
     inner_train, validation = world_held_out_val_split(train, n_val_worlds=args.val_worlds, seed=args.seed)
-    if args.val_size is not None and args.val_size > 0 and len(validation) > args.val_size:
-        validation = validation[: args.val_size]
+    if args.val_size is not None and args.val_size > 0:
+        # Stratify (round-robin across the held-out worlds) rather than
+        # front-slice: a plain validation[:val_size] collapses the cap onto
+        # the first world(s), reintroducing the in-world-fit selection bias
+        # this whole-world carve exists to avoid. Mirrors the sandbox path
+        # (spec.py) and the stratified train cap.
+        validation = stratified_case_cap(validation, args.val_size, seed=args.seed)
     return inner_train, validation
 
 

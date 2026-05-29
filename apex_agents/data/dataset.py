@@ -243,9 +243,16 @@ def filter_investment_banking(
     *,
     domain: str = DEFAULT_DOMAIN,
 ) -> list[ApexAgentsRecord]:
-    """Return only the records whose ``domain`` matches (case-insensitive)."""
-    target = domain.strip().casefold()
-    return [r for r in records if r.domain.strip().casefold() == target]
+    """Return only the records whose ``domain`` matches (case-insensitive).
+
+    Underscores are normalized to spaces so CLI/sandbox tokens like
+    ``"investment_banking"`` match the dataset's ``"Investment Banking"``
+    (the choice values are slug-style; the HF ``domain`` field is title-cased
+    with a space). Without this, ``--domain investment_banking`` matched zero
+    records and silently produced empty train/val splits.
+    """
+    target = domain.strip().casefold().replace("_", " ")
+    return [r for r in records if r.domain.strip().casefold().replace("_", " ") == target]
 
 
 def _hf_download(repo_id: str, filename: str, *, cache_dir: str | None) -> str:
