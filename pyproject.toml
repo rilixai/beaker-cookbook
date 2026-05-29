@@ -31,8 +31,8 @@ dev = [
 # members in editable mode, so ``import hotpotqa.dataset`` works
 # without sys.path hacks and per-benchmark deps stay isolated.
 [tool.uv.workspace]
-members = ["hotpotqa", "apex_agents"]
-# As benchmarks migrate, add: "cl_bench"
+members = ["hotpotqa"]
+# As benchmarks migrate, add: "apex_agents", "cl_bench"
 
 # The workspace root itself isn't an installable Python package.
 [tool.uv]
@@ -40,12 +40,7 @@ package = false
 
 [tool.pytest.ini_options]
 # Test discovery walks into each workspace member's tests/ dir.
-testpaths = ["hotpotqa/tests", "apex_agents/tests"]
-# ``importlib`` import mode lets workspace members share test
-# filenames (both have ``test_units.py`` / ``test_agent.py``) without
-# the "module already imported under a different __file__" collision
-# that pytest's default ``prepend`` mode raises.
-addopts = "--import-mode=importlib"
+testpaths = ["hotpotqa/tests"]
 
 [tool.ruff]
 line-length = 119
@@ -79,8 +74,8 @@ show_error_codes = true
 # as the rilixai repo (mypy runs over the package only, not tests or
 # scripts, since the tests use fixture-shaped types that intentionally
 # bend strict typing).
-files = ["hotpotqa", "apex_agents"]
-exclude = ["hotpotqa/tests/", "hotpotqa/scripts/", "apex_agents/tests/", "apex_agents/scripts/"]
+files = ["hotpotqa"]
+exclude = ["hotpotqa/tests/", "hotpotqa/scripts/"]
 
 # Mirror the rilixai-side ``ignore_missing_imports`` overrides for
 # the scientific deps that ship without ``py.typed`` markers.
@@ -90,7 +85,5 @@ module = [
   "datasets",
   "bm25s",
   "Stemmer",
-  "openpyxl",
-  "xlrd",
 ]
 ignore_missing_imports = true

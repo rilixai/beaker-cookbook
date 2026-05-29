@@ -60,15 +60,11 @@ jobs:
         # to match the rilixai pattern).
         run: uv run python -m mypy
 
-      # Build each workspace member's wheel without
-      # ``[tool.uv.sources]`` overrides so packaging regressions
-      # surface here rather than in a downstream "copy this template"
-      # user's environment.
-      - name: Build hotpotqa distribution
+      # Build the hotpotqa wheel without ``[tool.uv.sources]``
+      # overrides so packaging regressions surface here rather than
+      # in a downstream "copy this template" user's environment.
+      - name: Build distributions
         run: uv build --package hotpotqa --no-sources
-
-      - name: Build apex_agents distribution
-        run: uv build --package apex-agents --no-sources
 
   tests:
     name: Pytest
