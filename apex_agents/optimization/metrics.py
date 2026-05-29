@@ -158,9 +158,13 @@ def _parse_verdict(text: str) -> bool:
         return "NOT" not in tags[-1].upper()
 
     last = _normalize_last_line(text or "")
-    if last.startswith("NOT MET") or last.startswith("NOTMET") or last in {"NO", "FALSE", "FAIL", "FAILED"}:
+    # Match MET / NOT MET as a leading *token* (``\b``) so a last line that
+    # merely starts with "MET" — METHOD, METADATA, METRICS — isn't mis-scored
+    # as Met (which would silently inflate rubric_pass_rate). Mirrors the
+    # ``NOT[\s_-]?MET`` shape of _VERDICT_TAG_RE; ``last`` is already upper-cased.
+    if re.match(r"NOT[\s_-]?MET\b", last) or last in {"NO", "FALSE", "FAIL", "FAILED"}:
         return False
-    if last == "MET" or last.startswith("MET") or last in {"YES", "TRUE", "PASS", "PASSED", "SATISFIED"}:
+    if re.match(r"MET\b", last) or last in {"YES", "TRUE", "PASS", "PASSED", "SATISFIED"}:
         return True
 
     logger.warning(

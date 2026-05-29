@@ -339,8 +339,12 @@ def _load_splits_for_command(args: argparse.Namespace) -> dict[str, list[Case]]:
             raise ValueError(f"--fold-index {args.fold_index} out of range for k={args.k} ({len(folds)} folds).")
         train_world_ids, test_world_ids = folds[args.fold_index]
         train, test = _split_cases_by_world(all_cases, train_world_ids=train_world_ids, test_world_ids=test_world_ids)
-        if args.train_size is not None:
-            train = train[: args.train_size]
+        # Cap train with the same stratified (round-robin across worlds) policy
+        # the optimize path uses, so ``--train-size-mode`` is honored here too
+        # instead of silently front-slicing (which collapses worlds at small
+        # --train-size). ``stratified_case_cap`` returns the pool unchanged when
+        # train_size is None.
+        train = stratified_case_cap(train, args.train_size, mode=args.train_size_mode, seed=args.seed)
         if args.test_size is not None:
             test = test[: args.test_size]
         inner_train, validation = _carve_inner_val(train, args)

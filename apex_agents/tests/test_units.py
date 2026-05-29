@@ -572,6 +572,11 @@ def test_parse_verdict_is_robust_to_verbose_reasoning_judges() -> None:
     assert _parse_verdict("Draft: NOT MET. On reflection: VERDICT: MET") is True
     assert _parse_verdict("MET") is True
     assert _parse_verdict("  not met  ") is False
+    # Regression: a last line that merely *starts* with a "MET…" word
+    # (METHOD / METADATA / METRICS) must NOT be scored Met — the old
+    # startswith("MET") broadening inflated rubric_pass_rate on these.
+    assert _parse_verdict("METHODOLOGY looks sound") is False
+    assert _parse_verdict("METADATA is complete") is False
 
 
 # ─────────────────────────────────────────────────────────────────────
