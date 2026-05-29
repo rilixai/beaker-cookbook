@@ -129,6 +129,13 @@ def stratified_case_cap(
     worlds" scaling curve. ``mode="frontslice"``: legacy ``pool[:n]``
     (worlds collapse at small ``n`` — confounds the curve). ``n=None``
     returns the full pool unchanged.
+
+    ``seed`` shuffles the *within-world* case order (deterministically per
+    seed, like the other splitters in this module) so the cases chosen to
+    represent each world vary across seeds rather than always being each
+    world's first ``k``. World coverage and the train-size nesting property
+    (a smaller ``n`` is a prefix of a larger ``n`` at the same seed) are
+    preserved because the per-world order is fixed once the seed is set.
     """
     pool = list(train_pool)
     if n is None or n >= len(pool):
@@ -138,7 +145,12 @@ def stratified_case_cap(
     if mode != "stratified":
         raise ValueError(f"stratified_case_cap mode must be 'stratified' or 'frontslice', got {mode!r}.")
     by_world = _group_by_world(pool)
-    groups = [by_world[w] for w in sorted(by_world)]
+    rng = _random.Random(seed)
+    groups: list[list[Any]] = []
+    for world in sorted(by_world):
+        group = by_world[world]  # fresh list from _group_by_world; safe to shuffle in place
+        rng.shuffle(group)
+        groups.append(group)
     return _round_robin_take(groups, n)
 
 

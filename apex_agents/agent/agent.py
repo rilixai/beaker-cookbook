@@ -409,8 +409,16 @@ class ApexReActAgent:
         started = time.monotonic()
         world: Any = None
         try:
-            world = await asyncio.to_thread(self._world_factory, record)
+            # Snapshot the prompts BEFORE the first ``await``. The caller does
+            # ``apply_candidate(c); await forward(...)`` with no await in
+            # between, and asyncio only yields at an await — so taking the
+            # snapshot as forward's first action keeps apply→snapshot atomic.
+            # Snapshotting *after* the world-build await (as before) opened a
+            # window where a concurrent case's ``apply_candidate`` could swap
+            # the shared agent's prompts and this case would snapshot the wrong
+            # candidate.
             sys_p, task_t, resum_p = self._snapshot_components()
+            world = await asyncio.to_thread(self._world_factory, record)
             output = await asyncio.to_thread(
                 self._run_loop,
                 record=record,
