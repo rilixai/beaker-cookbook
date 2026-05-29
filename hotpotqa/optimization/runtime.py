@@ -190,7 +190,6 @@ def build_agent_run_metrics(
             "missing_gold_titles": missing_gold_titles,
             "spurious_titles": spurious_titles,
             "num_total_steps": len(output.tool_calls),
-            "tool_counts": tool_counts,
         },
     }
 

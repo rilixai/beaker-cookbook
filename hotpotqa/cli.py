@@ -422,29 +422,36 @@ def _fmt_hms(seconds: float) -> str:
 def _summarize_agent_tool_usage(outputs: Sequence[Any]) -> dict[str, Any] | None:
     """Aggregate per-case agent tool-call counts into evaluate-summary stats.
 
-    Reads ``run_metrics["hotpotqa"]["tool_counts"]`` (a ``{tool_name: count}``
-    dict each agent case populates) and ``run_metrics["hotpotqa"]["num_total_steps"]``
-    from every output. Returns the per-case mean total-calls and per-tool
-    mean counts, plus the case count that contributed. Returns ``None``
-    if no case carries the expected agent metadata (e.g. the workflow
-    runtime, which doesn't emit ``tool_counts``).
+    Reads ``run_metrics["tool_counts"]`` (the canonical top-level dict
+    rilixai's adapter consumes — keys are ``hotpotqa_``-prefixed for
+    namespace safety against other benchmarks' counts) and
+    ``run_metrics["hotpotqa"]["num_total_steps"]`` from every output.
+    The ``hotpotqa_`` prefix is stripped for display so users see the
+    raw tool names (``retrieve_k``, ``summarize``, ``finish``).
+    Returns ``None`` if no case carries the expected agent metadata.
     """
+    prefix = "hotpotqa_"
     per_tool_totals: dict[str, int] = {}
     total_calls_sum = 0
     cases_seen = 0
     for output in outputs:
         run_metrics = getattr(output, "run_metrics", None) or {}
-        hotpotqa = run_metrics.get("hotpotqa") if isinstance(run_metrics, Mapping) else None
+        if not isinstance(run_metrics, Mapping):
+            continue
+        hotpotqa = run_metrics.get("hotpotqa")
         if not isinstance(hotpotqa, Mapping):
             continue
-        tool_counts = hotpotqa.get("tool_counts")
+        tool_counts = run_metrics.get("tool_counts")
         if not isinstance(tool_counts, Mapping):
             continue
         cases_seen += 1
         total_calls_sum += int(hotpotqa.get("num_total_steps", 0) or 0)
-        for tool_name, count in tool_counts.items():
+        for raw_name, count in tool_counts.items():
+            if not isinstance(raw_name, str):
+                continue
+            display_name = raw_name[len(prefix) :] if raw_name.startswith(prefix) else raw_name
             try:
-                per_tool_totals[str(tool_name)] = per_tool_totals.get(str(tool_name), 0) + int(count)
+                per_tool_totals[display_name] = per_tool_totals.get(display_name, 0) + int(count)
             except (TypeError, ValueError):
                 continue
     if cases_seen == 0:
