@@ -17,14 +17,19 @@ jobs:
         with:
           version: "latest"
 
-      # The rilixai dep is currently a git+url pin to the private
-      # rilixai/rilixai repo. Provide a PAT with read access so
-      # uv sync can fetch it.
-      - name: Configure git for private rilixai access
-        env:
-          GH_PAT: ${{ secrets.RILIXAI_REPO_READ_PAT }}
+      # The rilixai dep is a ``git+ssh://`` pin to the private
+      # rilixai/rilixai repo. Auth flows via a deploy-key-style SSH
+      # private key in ``RILIXAI_GITHUB_SSH_KEY`` — matches the rilix
+      # repo's auth pattern (see rilix/.github/workflows/push-spec.yml).
+      - name: Configure SSH for private rilixai dependency
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.RILIXAI_GITHUB_SSH_KEY }}
+
+      - name: Trust GitHub SSH host
         run: |
-          git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
 
       - name: uv sync
         run: uv sync --all-packages --group dev
