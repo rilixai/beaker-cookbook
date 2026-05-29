@@ -18,6 +18,12 @@ dependencies = [
   # matches the rilix repo's auth pattern.
   "rilixai @ git+ssh://git@github.com/rilixai/rilixai.git@1baba33",
   "litellm>=1.74",
+  # litellm lazy-imports tenacity for its retry wrapper but doesn't
+  # declare it as a dependency. Locally a transitive dep provides it,
+  # but the baked sandbox image has nothing pulling it in, so the
+  # rubric judge call fails with "tenacity import failed". Pin it
+  # explicitly so the image always has it.
+  "tenacity>=8.0",
   "huggingface-hub>=0.20",
   # Heavy parsers — lazy-imported inside the WorldFiles surface so
   # tests with FakeWorld don't pay the import cost.

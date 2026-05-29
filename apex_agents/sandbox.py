@@ -38,9 +38,10 @@ Required env vars (load via .env or export):
     HUGGING_FACE_HUB_TOKEN — bound at the project level in rilixai;
                              needed inside the sandbox to download the
                              private ``mercor/apex-agents`` dataset.
-    Provider keys (one of OPENAI_API_KEY / ANTHROPIC_API_KEY /
-    GEMINI_API_KEY) — also bound at the project level for the agent +
-    the LLM rubric judge.
+    Provider keys (OPENAI_API_KEY for the agent + reflection LM,
+    GOOGLE_API_KEY for the default Gemini judge — GEMINI_API_KEY also
+    works as a fallback) — also bound at the project level for the
+    agent + the LLM rubric judge.
 """
 
 from __future__ import annotations
@@ -66,7 +67,7 @@ MEMBER_PYPROJECT = REPO_ROOT / "apex_agents" / "pyproject.toml"
 SPEC_TARGET = REPO_ROOT / "apex_agents" / "optimization" / "spec.py"
 SPEC_NAME = "apex-agents"
 SCOPE_KEY = "apex-agents"
-TASK_TYPE = "apex_agents_agent"
+TASK_TYPE = "apex_agent"
 DEFAULT_SPEC_REFERENCE = f"{SPEC_NAME}@production"
 
 
@@ -239,7 +240,7 @@ def main() -> int:
     parser.add_argument(
         "--max-metric-calls",
         type=int,
-        default=100,
+        default=50,
         help="GEPA metric-call budget — primary cost knob. Default: 100 (smoke).",
     )
     args = parser.parse_args()

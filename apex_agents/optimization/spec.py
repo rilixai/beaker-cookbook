@@ -111,7 +111,7 @@ def build_apex_agents_spec(
         name=name,
         user_id=user_id,
         model=model,
-        task_type="apex_agents_agent",
+        task_type="apex_agent",
         max_concurrency=max_concurrency,
         reflection_evidence_mode=reflection_evidence_mode,
     )

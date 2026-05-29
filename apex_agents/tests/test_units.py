@@ -736,7 +736,7 @@ def test_build_apex_agents_spec_passes_validation_and_accepts_overrides() -> Non
         "resum_summary_prompt",
     }
     assert spec.name == "apex_agents"
-    assert spec.task_type == "apex_agents_agent"
+    assert spec.task_type == "apex_agent"
     assert spec.max_concurrency == 4
     assert spec.reflection_evidence_mode == "curated_plus_trace"
     # field_weights override flows through to the profile.

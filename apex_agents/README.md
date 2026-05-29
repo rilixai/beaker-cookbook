@@ -46,7 +46,7 @@ Required env vars before running anything that calls a model:
 ```bash
 export HUGGING_FACE_HUB_TOKEN=hf_...   # private dataset access
 export OPENAI_API_KEY=sk-...           # task LM (gpt-4.1-mini default)
-export GEMINI_API_KEY=...              # judge LM (gemini-2.5-flash default)
+export GOOGLE_API_KEY=...              # judge LM (gemini-2.5-flash default; GEMINI_API_KEY also works)
 ```
 
 (Or `ANTHROPIC_API_KEY` etc., depending on `--task-model` / `--judge-model`.)
@@ -115,7 +115,7 @@ export RILIXAI_API_BASE_URL=https://<id>.execute-api.<region>.amazonaws.com/prod
 ```
 
 The provider keys the agent + judge need (`OPENAI_API_KEY`,
-`GEMINI_API_KEY`, …) and `HUGGING_FACE_HUB_TOKEN` are bound at the *project*
+`GOOGLE_API_KEY`, …) and `HUGGING_FACE_HUB_TOKEN` are bound at the *project*
 level on rilixai's side, not on your machine — see rilixai's docs for
 project-secret configuration. Once bound, every run spawned under that
 project receives them as env vars inside the sandbox.
@@ -222,7 +222,7 @@ client = RilixAIClient(
 )
 
 response = client.create_optimization_run(
-    task_type="apex_agents_agent",
+    task_type="apex_agent",
     spec="apex-agents@production",  # resolves to the currently promoted version
     scope_key="apex-agents",         # customer-defined stable key; auto-created on first use
     config={
