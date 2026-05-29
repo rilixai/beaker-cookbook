@@ -1,26 +1,33 @@
-name: Push hotpotqa spec to rilixai
+name: Push specs to rilixai
 
-# Auto-pushes the ``@spec``-decorated ``hotpotqa-agent`` factory to
-# the rilixai control plane on every merge to ``main`` that touches
-# the hotpotqa workspace member. Mirrors the rilix repo's
+# Auto-pushes each cookbook member's ``@spec``-decorated factory to the
+# rilixai control plane on every merge to ``main``. Mirrors the rilix repo's
 # ``push-spec.yml`` pattern (https://github.com/rilixai/rilix/pull/1381):
-# rilixai's build worker materializes a Modal image from the source
-# bundle, then ``rilixai spec promote`` flips
-# ``hotpotqa-agent@production`` to the freshly-pushed version.
-# Triggers referencing ``@production`` (the cookbook's default) pick
-# it up immediately, with no per-merge cookbook edits.
+# rilixai's build worker materializes a Modal image from the source bundle,
+# then ``rilixai spec promote`` flips ``<name>@production`` to the
+# freshly-pushed version. Triggers referencing ``@production`` (the
+# cookbook's default) pick it up immediately, with no per-merge edits.
 #
-# Both push + promote happen via ``hotpotqa/sandbox.py --build
-# --no-trigger`` (default version: ``v<short_sha>`` from git; promote:
-# on; trigger: skipped — CI never spends LLM tokens on a smoke run).
-# Manual ``workflow_dispatch`` also supports overriding the version
-# label for hot-fix re-pushes and skipping the promote step.
+# Push + promote happen via ``<member>/sandbox.py --build --no-trigger``
+# (default version: ``v<short_sha>`` from git; promote: on; trigger: skipped
+# — CI never spends LLM tokens on a smoke run). The job fans out over every
+# workspace member via a matrix, so adding a new recipe is a one-line matrix
+# edit. ``fail-fast: false`` keeps one member's build failure from cancelling
+# the others. Manual ``workflow_dispatch`` overrides the version label and can
+# skip the promote step.
+#
+# Path filters are workflow-level (GitHub can't scope them per matrix entry),
+# so a change to a shared file (or any member) re-pushes all members. That's
+# intentional and cheap: the build worker layer-caches by content hash, so an
+# unchanged member's image rebuild is a near-no-op and re-promoting to the
+# same content is harmless.
 
 on:
   push:
     branches: [main]
     paths:
       - 'hotpotqa/**'
+      - 'apex_agents/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/push-spec.yml'
@@ -39,19 +46,23 @@ on:
 permissions:
   contents: read
 
-# Serialize pushes per ref so two rapid merges don't race the
-# ``rilixai spec promote`` order (which would otherwise leave
-# ``@production`` pointing at whichever ``spec promote`` lost the
-# race rather than the more recent commit).
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   push-spec:
-    name: rilixai push + promote
+    name: push ${{ matrix.member }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        member: [hotpotqa, apex_agents]
+    # Serialize per member + ref so two rapid merges don't race the
+    # ``rilixai spec promote`` order (which would otherwise leave
+    # ``<name>@production`` pointing at whichever ``spec promote`` lost the
+    # race rather than the more recent commit). Different members don't
+    # block each other.
+    concurrency:
+      group: push-spec-${{ matrix.member }}-${{ github.ref }}
+      cancel-in-progress: false
     env:
       RILIXAI_API_BASE_URL: ${{ secrets.RILIXAI_API_BASE_URL }}
       RILIXAI_API_KEY: ${{ secrets.RILIXAI_API_KEY }}
@@ -84,14 +95,12 @@ jobs:
         run: uv sync --all-packages --group dev --locked
 
       - name: Push + promote spec
-        # ``sandbox.py --build --no-trigger`` runs ``rilixai push``
-        # with the deps from ``hotpotqa/pyproject.toml`` and then
-        # ``rilixai spec promote`` to point
-        # ``hotpotqa-agent@production`` at the fresh row.
+        # ``<member>/sandbox.py --build --no-trigger`` runs ``rilixai push``
+        # with the deps from that member's pyproject and then ``rilixai spec
+        # promote`` to point ``<name>@production`` at the fresh row.
         # ``--no-trigger`` keeps CI build-only — optimization runs are
-        # initiated explicitly by humans (or downstream services)
-        # against ``hotpotqa-agent@production``, never auto-fired on
-        # every merge.
+        # initiated explicitly by humans (or downstream services) against
+        # ``<name>@production``, never auto-fired on every merge.
         run: |
           VERSION_OVERRIDE_FLAG=""
           if [ -n "${VERSION_OVERRIDE}" ]; then
@@ -105,7 +114,7 @@ jobs:
             SKIP_PROMOTE_FLAG="--no-promote"
             echo "workflow_dispatch requested --no-promote (build won't flip @production)"
           fi
-          uv run hotpotqa/sandbox.py --build --no-trigger ${VERSION_OVERRIDE_FLAG} ${SKIP_PROMOTE_FLAG}
+          uv run ${{ matrix.member }}/sandbox.py --build --no-trigger ${VERSION_OVERRIDE_FLAG} ${SKIP_PROMOTE_FLAG}
         env:
           VERSION_OVERRIDE: ${{ inputs.version_override }}
           SKIP_PROMOTE: ${{ inputs.skip_promote }}
