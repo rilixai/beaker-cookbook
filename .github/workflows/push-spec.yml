@@ -1,26 +1,27 @@
-name: Push specs to rilixai
+name: Push cookbook specs to rilixai
 
-# Auto-pushes each cookbook member's ``@spec``-decorated factory to the
-# rilixai control plane on every merge to ``main``. Mirrors the rilix repo's
-# ``push-spec.yml`` pattern (https://github.com/rilixai/rilix/pull/1381):
-# rilixai's build worker materializes a Modal image from the source bundle,
-# then ``rilixai spec promote`` flips ``<name>@production`` to the
-# freshly-pushed version. Triggers referencing ``@production`` (the
-# cookbook's default) pick it up immediately, with no per-merge edits.
+# Auto-pushes each cookbook member's ``@spec``-decorated factory to
+# the rilixai control plane on merge to ``main``. Mirrors the rilix
+# repo's ``push-spec.yml`` pattern
+# (https://github.com/rilixai/rilix/pull/1381): rilixai's build worker
+# materializes a Modal image from the source bundle, then ``rilixai
+# spec promote`` flips ``<spec>@production`` to the freshly-pushed
+# version. Triggers referencing ``@production`` pick it up
+# immediately, with no per-merge cookbook edits.
 #
-# Push + promote happen via ``<member>/sandbox.py --build --no-trigger``
-# (default version: ``v<short_sha>`` from git; promote: on; trigger: skipped
-# — CI never spends LLM tokens on a smoke run). The job fans out over every
-# workspace member via a matrix, so adding a new recipe is a one-line matrix
-# edit. ``fail-fast: false`` keeps one member's build failure from cancelling
-# the others. Manual ``workflow_dispatch`` overrides the version label and can
-# skip the promote step.
+# Per-member triggering: ``dorny/paths-filter`` detects which
+# member's tree changed and the matrix only runs that member's
+# ``sandbox.py --build --no-trigger``. A change under
+# ``hotpotqa/**`` only rebuilds ``hotpotqa-agent``; a change under
+# ``apex_agents/**`` only rebuilds ``apex-agents``. Root-level edits
+# (workspace ``pyproject.toml``, ``uv.lock``, the workflow itself)
+# affect every member's image, so they fan out to all of them.
 #
-# Path filters are workflow-level (GitHub can't scope them per matrix entry),
-# so a change to a shared file (or any member) re-pushes all members. That's
-# intentional and cheap: the build worker layer-caches by content hash, so an
-# unchanged member's image rebuild is a near-no-op and re-promoting to the
-# same content is harmless.
+# ``--no-trigger`` is forced on so CI never spends LLM tokens on a
+# smoke run — optimization runs are initiated explicitly by humans
+# or downstream services against ``<spec>@production``. Manual
+# ``workflow_dispatch`` supports overriding the version label and
+# skipping the promote step for hot-fix re-pushes.
 
 on:
   push:
@@ -42,27 +43,117 @@ on:
         required: false
         type: boolean
         default: false
+      members:
+        description: "Comma-separated member names to push (default: detected from path filter; manual dispatch defaults to all)."
+        required: false
+        type: string
+        default: "hotpotqa,apex_agents"
 
 permissions:
   contents: read
 
+# Serialize pushes per ref so two rapid merges don't race the
+# ``rilixai spec promote`` order (which would otherwise leave
+# ``@production`` pointing at whichever ``spec promote`` lost the
+# race rather than the more recent commit).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  # Detect which workspace members changed so the matrix only runs
+  # the ones that need a fresh image. Root-level edits (workspace
+  # pyproject, uv.lock, this workflow) cascade to every member.
+  detect-changes:
+    name: Detect changed members
+    runs-on: ubuntu-latest
+    outputs:
+      members: ${{ steps.set-matrix.outputs.members }}
+      any: ${{ steps.set-matrix.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Path filter
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # ``root`` fans out to every member — workspace-level files
+          # change what gets baked into every spec image.
+          filters: |
+            hotpotqa:
+              - 'hotpotqa/**'
+            apex_agents:
+              - 'apex_agents/**'
+            root:
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - '.github/workflows/push-spec.yml'
+
+      - name: Build matrix
+        id: set-matrix
+        env:
+          DISPATCH_MEMBERS: ${{ inputs.members }}
+          EVENT_NAME: ${{ github.event_name }}
+          ROOT_CHANGED: ${{ steps.filter.outputs.root }}
+          HOTPOTQA_CHANGED: ${{ steps.filter.outputs.hotpotqa }}
+          APEX_CHANGED: ${{ steps.filter.outputs.apex_agents }}
+        run: |
+          set -euo pipefail
+          declare -A SELECTED=()
+
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            # Manual dispatch: honor the comma-separated members input.
+            IFS=',' read -ra REQUESTED <<< "${DISPATCH_MEMBERS}"
+            for name in "${REQUESTED[@]}"; do
+              SELECTED["$(echo "$name" | xargs)"]=1
+            done
+          else
+            # Push to main: paths-filter decides. Root-level edits fan
+            # out to every member.
+            if [ "${ROOT_CHANGED}" = "true" ]; then
+              SELECTED["hotpotqa"]=1
+              SELECTED["apex_agents"]=1
+            else
+              [ "${HOTPOTQA_CHANGED}" = "true" ] && SELECTED["hotpotqa"]=1
+              [ "${APEX_CHANGED}" = "true" ] && SELECTED["apex_agents"]=1
+            fi
+          fi
+
+          INCLUDE="[]"
+          for member in "${!SELECTED[@]}"; do
+            case "$member" in
+              hotpotqa)
+                ENTRY='{"name":"hotpotqa","sandbox":"hotpotqa/sandbox.py"}'
+                ;;
+              apex_agents)
+                ENTRY='{"name":"apex_agents","sandbox":"apex_agents/sandbox.py"}'
+                ;;
+              *)
+                echo "warning: ignoring unknown member '$member'"
+                continue
+                ;;
+            esac
+            INCLUDE=$(echo "$INCLUDE" | jq --argjson e "$ENTRY" '. + [$e]')
+          done
+
+          MATRIX=$(jq -c -n --argjson inc "$INCLUDE" '{include: $inc}')
+          ANY=$(echo "$INCLUDE" | jq 'length > 0')
+          echo "members=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "any=$ANY" >> "$GITHUB_OUTPUT"
+          echo "matrix: $MATRIX"
+
   push-spec:
-    name: push ${{ matrix.member }}
+    name: ${{ matrix.name }} push + promote
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.any == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # ``fail-fast: false`` so a failing apex_agents build doesn't
+    # cancel an in-flight hotpotqa promote (or vice versa) — each
+    # spec is independent.
     strategy:
       fail-fast: false
-      matrix:
-        member: [hotpotqa, apex_agents]
-    # Serialize per member + ref so two rapid merges don't race the
-    # ``rilixai spec promote`` order (which would otherwise leave
-    # ``<name>@production`` pointing at whichever ``spec promote`` lost the
-    # race rather than the more recent commit). Different members don't
-    # block each other.
-    concurrency:
-      group: push-spec-${{ matrix.member }}-${{ github.ref }}
-      cancel-in-progress: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.members) }}
     env:
       RILIXAI_API_BASE_URL: ${{ secrets.RILIXAI_API_BASE_URL }}
       RILIXAI_API_KEY: ${{ secrets.RILIXAI_API_KEY }}
@@ -94,13 +185,13 @@ jobs:
       - name: uv sync (locked)
         run: uv sync --all-packages --group dev --locked
 
-      - name: Push + promote spec
-        # ``<member>/sandbox.py --build --no-trigger`` runs ``rilixai push``
-        # with the deps from that member's pyproject and then ``rilixai spec
-        # promote`` to point ``<name>@production`` at the fresh row.
-        # ``--no-trigger`` keeps CI build-only — optimization runs are
-        # initiated explicitly by humans (or downstream services) against
-        # ``<name>@production``, never auto-fired on every merge.
+      - name: Push + promote ${{ matrix.name }} spec
+        # ``sandbox.py --build --no-trigger`` runs ``rilixai push``
+        # with the deps from the member's pyproject.toml and then
+        # ``rilixai spec promote`` to point ``<spec>@production`` at
+        # the fresh row. ``--no-trigger`` keeps CI build-only —
+        # optimization runs are initiated explicitly against
+        # ``<spec>@production``, never auto-fired on every merge.
         run: |
           VERSION_OVERRIDE_FLAG=""
           if [ -n "${VERSION_OVERRIDE}" ]; then
@@ -114,7 +205,7 @@ jobs:
             SKIP_PROMOTE_FLAG="--no-promote"
             echo "workflow_dispatch requested --no-promote (build won't flip @production)"
           fi
-          uv run ${{ matrix.member }}/sandbox.py --build --no-trigger ${VERSION_OVERRIDE_FLAG} ${SKIP_PROMOTE_FLAG}
+          uv run ${{ matrix.sandbox }} --build --no-trigger ${VERSION_OVERRIDE_FLAG} ${SKIP_PROMOTE_FLAG}
         env:
           VERSION_OVERRIDE: ${{ inputs.version_override }}
           SKIP_PROMOTE: ${{ inputs.skip_promote }}
