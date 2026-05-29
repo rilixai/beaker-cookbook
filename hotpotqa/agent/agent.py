@@ -47,15 +47,18 @@ from pydantic_ai.settings import ModelSettings
 from ..data.dataset import HotpotQAParagraph
 from ..data.gold import remaining_gold_titles
 from .retrieval import RetrieveKFn, bm25_top_k
-from .types import AgentToolCall, HotpotQAAgentOutput
+from .types import POLICY_COMPONENT, SUMMARIZE_COMPONENT, AgentToolCall, HotpotQAAgentOutput
 
 
 logger = logging.getLogger(__name__)
 
 
-# Component names this agent reads off the rilixai PromptCandidate.
-PYDANTIC_AGENT_POLICY_COMPONENT = "policy_prompt"
-PYDANTIC_AGENT_SUMMARIZE_COMPONENT = "summarize_prompt"
+# Component names live in ``agent.types`` so the framework-neutral
+# feedback module can import them without dragging in PydanticAI. Keep
+# the legacy ``PYDANTIC_AGENT_*`` aliases for backward-compat with any
+# external consumer that imports them from ``agent.agent``.
+PYDANTIC_AGENT_POLICY_COMPONENT = POLICY_COMPONENT
+PYDANTIC_AGENT_SUMMARIZE_COMPONENT = SUMMARIZE_COMPONENT
 
 
 SummarizeLLMCall = Callable[[str, str], Awaitable[str]]

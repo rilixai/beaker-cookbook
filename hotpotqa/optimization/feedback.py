@@ -15,17 +15,23 @@ not anything the agent itself reads at inference time.
 
 from __future__ import annotations
 
-from ..agent.types import AgentToolCall, HotpotQAAgentOutput
+from ..agent.types import (
+    POLICY_COMPONENT,
+    SUMMARIZE_COMPONENT,
+    AgentToolCall,
+    HotpotQAAgentOutput,
+)
 from ..data.dataset import HotpotQARecord
 from ..data.eval import exact_match_score
 from ..data.gold import ideal_summary_from_supporting_facts
 
 
-# Component names the agent attaches to the rilixai PromptCandidate.
-# Defined here so the runtime and the agent's tests can import them
-# without pulling in PydanticAI.
-AGENT_POLICY_COMPONENT = "policy_prompt"
-AGENT_SUMMARIZE_COMPONENT = "summarize_prompt"
+# Legacy aliases — keep so external consumers importing
+# ``AGENT_POLICY_COMPONENT`` / ``AGENT_SUMMARIZE_COMPONENT`` from
+# this module (or via ``hotpotqa.optimization``) don't break.
+# The canonical names live in ``agent.types`` so they can't drift.
+AGENT_POLICY_COMPONENT = POLICY_COMPONENT
+AGENT_SUMMARIZE_COMPONENT = SUMMARIZE_COMPONENT
 
 
 def build_agent_per_component_feedback(

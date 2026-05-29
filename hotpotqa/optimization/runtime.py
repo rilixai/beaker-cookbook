@@ -69,6 +69,12 @@ def build_hotpotqa_runtime(
             )
         resolved_agent = HotpotQAPydanticAgent(
             model=cfg.pydantic_agent_model,
+            # Track the task model on the summarize call too so the two
+            # LLM call sites can't drift (the agent's outer model + the
+            # raw OpenAI summarize call). ``pydantic_agent_model`` is
+            # a PydanticAI spec like ``"openai:gpt-4.1-mini"``; the raw
+            # OpenAI call wants the bare ``"gpt-4.1-mini"`` model name.
+            summarize_model=_bare_openai_model(cfg.pydantic_agent_model),
             top_k=cfg.retrieve_k,
             max_iters=cfg.max_iters,
             temperature=cfg.pydantic_agent_temperature,
@@ -222,3 +228,16 @@ def _truncate(text: str, max_chars: int) -> str:
     if max_chars <= 0 or len(text) <= max_chars:
         return text
     return text[: max(0, max_chars - 1)].rstrip() + "…"
+
+
+def _bare_openai_model(pydantic_spec: str) -> str:
+    """Strip the provider prefix from a PydanticAI model spec.
+
+    PydanticAI uses ``"openai:gpt-4.1-mini"``; the raw OpenAI
+    ``chat.completions.create`` call inside the summarize tool wants
+    ``"gpt-4.1-mini"`` (no provider prefix). Returns the original
+    string when no ``:`` is present so non-openai PydanticAI specs
+    that already lack a prefix still pass through unchanged.
+    """
+    _, separator, model = pydantic_spec.partition(":")
+    return model if separator else pydantic_spec

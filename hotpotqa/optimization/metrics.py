@@ -20,7 +20,7 @@ canonical HotpotQA evaluator. Keep them as the single source of truth.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,7 +40,6 @@ __all__ = [
     "build_hotpotqa_field_extractor",
     "f1_score",
     "normalize_answer",
-    "supporting_title_set",
 ]
 
 
@@ -227,12 +226,3 @@ def build_hotpotqa_field_extractor() -> Callable[[Any, str], Any]:
         return _resolve_path(obj, path)
 
     return _extractor
-
-
-def supporting_title_set(records: Iterable[Mapping[str, Any]]) -> set[str]:
-    """Helper for tests / debugging: collect lowercased supporting titles."""
-    titles: set[str] = set()
-    for record in records:
-        for title in _coerce_title_sequence(record.get("supporting_facts")):
-            titles.add(title.strip().lower())
-    return titles

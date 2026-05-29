@@ -13,6 +13,16 @@ from typing import Any
 from ..data.dataset import HotpotQAParagraph
 
 
+# Component names the agent attaches to the rilixai PromptCandidate.
+# Defined in this framework-neutral module so the agent runtime
+# (``agent.py``, which imports PydanticAI) and the GEPA-facing
+# feedback functions (``optimization/feedback.py``) can both import
+# them without dragging in either layer's heavy deps. Single source
+# of truth — no aliases — so they can't drift.
+POLICY_COMPONENT = "policy_prompt"
+SUMMARIZE_COMPONENT = "summarize_prompt"
+
+
 @dataclass
 class AgentToolCall:
     """One step of a HotpotQA agent's tool-use loop, framework-agnostic."""
