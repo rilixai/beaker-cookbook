@@ -22,8 +22,12 @@ Version strategy (mirrors rilix/rilix PR #1381):
 
 Typical workflows:
 
-    # Build + promote + trigger in one shot (the canonical CI-equivalent flow):
+    # Build + promote + trigger in one shot (canonical local dev flow):
     uv run hotpotqa/sandbox.py --build
+
+    # Build + promote only, no trigger (the CI ``push-spec.yml`` flow —
+    # ships the image and flips @production without spending LLM tokens):
+    uv run hotpotqa/sandbox.py --build --no-trigger
 
     # Trigger only (uses whatever's currently @production):
     uv run hotpotqa/sandbox.py
@@ -200,6 +204,15 @@ def main() -> int:
         help="With --build, push without promoting. Lets you smoke-test a new build before flipping production.",
     )
     parser.add_argument(
+        "--no-trigger",
+        action="store_true",
+        help=(
+            "Skip the optimization-run trigger after build/promote. Used by the CI "
+            "``push-spec.yml`` workflow, which only needs to ship the spec image and "
+            "flip @production — not spend tokens on a smoke run."
+        ),
+    )
+    parser.add_argument(
         "--version",
         default=None,
         help=(
@@ -242,18 +255,24 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    api_key = os.environ.get("RILIXAI_API_KEY")
-    base_url = os.environ.get("RILIXAI_API_BASE_URL")
-    if not api_key or not base_url:
-        print("error: RILIXAI_API_KEY and RILIXAI_API_BASE_URL must be set.", file=sys.stderr)
-        return 2
-
     if args.build:
         version = args.version or f"v{_short_sha()}"
         push_image(version)
         if not args.no_promote:
             promote_image(version)
             print(f"\n{SPEC_NAME}@production now resolves to {version}.")
+
+    # ``--no-trigger`` skips the RilixAIClient call entirely, so the
+    # client-only env vars aren't checked in that path. ``rilixai push``
+    # + ``rilixai spec promote`` use their own auth via the rilixai CLI.
+    if args.no_trigger:
+        return 0
+
+    api_key = os.environ.get("RILIXAI_API_KEY")
+    base_url = os.environ.get("RILIXAI_API_BASE_URL")
+    if not api_key or not base_url:
+        print("error: RILIXAI_API_KEY and RILIXAI_API_BASE_URL must be set.", file=sys.stderr)
+        return 2
 
     client = RilixAIClient(base_url=base_url, api_key=api_key)
     run_id = trigger_run(

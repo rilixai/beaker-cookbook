@@ -10,10 +10,11 @@ name: Push hotpotqa spec to rilixai
 # Triggers referencing ``@production`` (the cookbook's default) pick
 # it up immediately, with no per-merge cookbook edits.
 #
-# Both push + promote happen via ``hotpotqa/sandbox.py --build``
-# (default version: ``v<short_sha>`` from git; promote: on). Manual
-# ``workflow_dispatch`` also supports overriding the version label
-# for hot-fix re-pushes and skipping the promote step.
+# Both push + promote happen via ``hotpotqa/sandbox.py --build
+# --no-trigger`` (default version: ``v<short_sha>`` from git; promote:
+# on; trigger: skipped — CI never spends LLM tokens on a smoke run).
+# Manual ``workflow_dispatch`` also supports overriding the version
+# label for hot-fix re-pushes and skipping the promote step.
 
 on:
   push:
@@ -83,13 +84,14 @@ jobs:
         run: uv sync --all-packages --group dev --locked
 
       - name: Push + promote spec
-        # ``sandbox.py --build`` runs ``rilixai push`` with the deps
-        # from ``hotpotqa/pyproject.toml`` and then ``rilixai spec
-        # promote`` to point ``hotpotqa-agent@production`` at the
-        # fresh row. The trigger that ``sandbox.py`` always issues at
-        # the end queues a smoke run; cost is bounded by
-        # ``--max-metric-calls 100`` (the script's default), used
-        # here as the CI smoke-after-promote sanity check.
+        # ``sandbox.py --build --no-trigger`` runs ``rilixai push``
+        # with the deps from ``hotpotqa/pyproject.toml`` and then
+        # ``rilixai spec promote`` to point
+        # ``hotpotqa-agent@production`` at the fresh row.
+        # ``--no-trigger`` keeps CI build-only — optimization runs are
+        # initiated explicitly by humans (or downstream services)
+        # against ``hotpotqa-agent@production``, never auto-fired on
+        # every merge.
         run: |
           VERSION_OVERRIDE_FLAG=""
           if [ -n "${VERSION_OVERRIDE}" ]; then
@@ -103,7 +105,7 @@ jobs:
             SKIP_PROMOTE_FLAG="--no-promote"
             echo "workflow_dispatch requested --no-promote (build won't flip @production)"
           fi
-          uv run hotpotqa/sandbox.py --build ${VERSION_OVERRIDE_FLAG} ${SKIP_PROMOTE_FLAG}
+          uv run hotpotqa/sandbox.py --build --no-trigger ${VERSION_OVERRIDE_FLAG} ${SKIP_PROMOTE_FLAG}
         env:
           VERSION_OVERRIDE: ${{ inputs.version_override }}
           SKIP_PROMOTE: ${{ inputs.skip_promote }}

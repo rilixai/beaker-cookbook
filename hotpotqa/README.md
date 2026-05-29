@@ -126,7 +126,8 @@ just pick a value and pass it to every `create_optimization_run` call.
 
 ### One-shot: build + promote + trigger via `sandbox.py`
 
-The canonical CI-equivalent flow:
+The canonical local flow — push a fresh image, flip `@production`,
+and queue a run against it in one shot:
 
 ```bash
 uv run hotpotqa/sandbox.py --build
@@ -158,6 +159,13 @@ uv run hotpotqa/sandbox.py --build --no-promote
 # Then trigger against that specific version:
 uv run hotpotqa/sandbox.py --spec hotpotqa-agent@v1a2b3c4
 ```
+
+CI (`.github/workflows/push-spec.yml`) runs the same script with
+`--build --no-trigger` on every merge to `main` that touches the
+hotpotqa member: it ships the image and flips `@production`, but
+never spends LLM tokens auto-firing a run. Optimization runs are
+initiated explicitly by humans or downstream services against
+`hotpotqa-agent@production`.
 
 ### Phase 1 — push the spec (image build)
 
