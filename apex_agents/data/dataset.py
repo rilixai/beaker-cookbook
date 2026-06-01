@@ -179,7 +179,7 @@ def _normalize_record(
     )
 
 
-def record_to_case(record: ApexAgentsRecord, *, group_key: str | None = None) -> Sample:
+def record_to_sample(record: ApexAgentsRecord, *, group_key: str | None = None) -> Sample:
     """Convert a normalized APEX-Agents record into a rilixai :class:`Sample`.
 
     The ground-truth bundle stashes the rubric + prompt + world/task
@@ -234,7 +234,7 @@ def cases_from_records(
             raise TypeError(
                 f"cases_from_records expected Mapping or ApexAgentsRecord at position {idx}, got {type(raw).__name__}."
             )
-        cases.append(record_to_case(record, group_key=group_key))
+        cases.append(record_to_sample(record, group_key=group_key))
     return cases
 
 
@@ -366,6 +366,6 @@ __all__ = [
     "filter_investment_banking",
     "load_apex_agents_cases",
     "load_apex_agents_records",
-    "record_to_case",
+    "record_to_sample",
     "world_ids_for_cases",
 ]

@@ -43,7 +43,7 @@ from rilixai.prompt_optimization.evaluation import (
     field_accuracy_rows,
     serialize_eval_outputs,
 )
-from rilixai.prompt_optimization.models import Sample, PromptCandidate
+from rilixai.prompt_optimization.models import PromptCandidate, Sample
 from rilixai.prompt_optimization.optimization import extract_best_candidate, summarize_gepa_result_metadata
 from rilixai.prompt_optimization.spec import (
     PromptOptimizationRunConfig,
@@ -60,7 +60,7 @@ from .data.world_splits import (
     world_held_out_val_split,
     world_level_folds,
 )
-from .optimization.spec import build_apex_agents_spec
+from .rilixai_spec import build_apex_agents_spec
 
 
 logger = logging.getLogger("rilixai.benchmarks.apex_agents")

@@ -68,7 +68,7 @@ load_dotenv()
 # ``apex_agents/sandbox.py``; parents[1] is the cookbook repo root.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MEMBER_PYPROJECT = REPO_ROOT / "apex_agents" / "pyproject.toml"
-SPEC_TARGET = REPO_ROOT / "apex_agents" / "optimization" / "spec.py"
+SPEC_TARGET = REPO_ROOT / "apex_agents" / "rilixai_spec.py"
 SPEC_NAME = "apex-agents"
 SCOPE_KEY = "apex-agents"
 TASK_TYPE = "apex_agent"

@@ -36,22 +36,25 @@ from .data.dataset import (
     cases_from_records,
     load_apex_agents_cases,
     load_apex_agents_records,
-    record_to_case,
+    record_to_sample,
 )
-from .optimization.feedback import build_apex_per_component_feedback
+from .optimization.feedback import ApexAgentsFeedback
 from .optimization.metrics import (
-    APEX_AGENTS_FIELD_WEIGHTS,
     DEFAULT_JUDGE_MODEL,
     RUBRIC_FIELD,
-    ApexAgentsMetricsCalculator,
-    build_apex_agents_field_extractor,
+    build_rubric_judge,
+    score_rubric,
 )
-from .optimization.runtime import ApexAgentsRunResult, build_apex_agents_runtime
-from .optimization.spec import build_apex_agents_spec
+from .optimization.runtime import build_apex_agents_run_metrics
+from .rilixai_spec import (
+    ApexAgentsMetrics,
+    ApexAgentsRunner,
+    ApexAgentsSandboxConfig,
+    build_apex_agents_spec,
+)
 
 
 __all__ = [
-    "APEX_AGENTS_FIELD_WEIGHTS",
     "DEFAULT_JUDGE_MODEL",
     "RESUM_SUMMARY_PROMPT_SEED",
     "SYSTEM_PROMPT_SEED",
@@ -60,17 +63,19 @@ __all__ = [
     "AgentToolCall",
     "ApexAgentsAgentOutput",
     "ApexAgentsConfig",
-    "ApexAgentsMetricsCalculator",
+    "ApexAgentsFeedback",
+    "ApexAgentsMetrics",
     "ApexAgentsRecord",
-    "ApexAgentsRunResult",
+    "ApexAgentsRunner",
+    "ApexAgentsSandboxConfig",
     "RubricCriterion",
     "apex_agents_seed_candidate",
-    "build_apex_agents_field_extractor",
-    "build_apex_agents_runtime",
+    "build_apex_agents_run_metrics",
     "build_apex_agents_spec",
-    "build_apex_per_component_feedback",
+    "build_rubric_judge",
     "cases_from_records",
     "load_apex_agents_cases",
     "load_apex_agents_records",
-    "record_to_case",
+    "record_to_sample",
+    "score_rubric",
 ]

@@ -1,134 +1,25 @@
-"""Async ``ExtractionRuntime`` adapter — the GEPA-facing surface.
+"""Trajectory metadata builder for the APEX-Agents agent.
 
-Wraps :class:`~apex_agents.agent.agent.ApexReActAgent` as an async
-runtime the rilixai adapter can drive. Each call runs one case
-end-to-end:
-
-1. Unpack the :class:`ApexAgentsRecord` + :class:`PromptCandidate`.
-2. Forward the candidate to ``ApexReActAgent.apply_candidate``.
-3. Run the agent (world build, ReAct loop, ReSum — all in the agent).
-4. Run the LLM judge over the rubric to compute ``rubric_pass_rate``.
-5. Translate the agent's output + per-component feedback into a
-   rilixai ``run_metrics`` payload.
-
-Decoupled from the world factory + judge so tests inject a
-:class:`FakeWorld` factory and a stub judge while production passes
-the real HF builder + litellm judge.
+Translates the agent's output + the precomputed ``rubric_pass_rate`` into the
+``run_metrics`` dict the optimizer's adapter reads. The runtime closure +
+result-wrapper that used to live here are gone:
+:class:`~apex_agents.rilixai_spec.ApexAgentsRunner` (a
+``rilixai.adapters.BaseSampleRunner`` subclass) now owns the run loop (agent
+forward + judge) and calls :func:`build_apex_agents_run_metrics` from its
+``_package_result``.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from typing import Any
-
-from rilixai.prompt_optimization.models import PromptCandidate
 
 from ..agent.types import ApexAgentsAgentOutput
 from ..config import ApexAgentsConfig
 from ..data.dataset import ApexAgentsRecord
-from .feedback import build_apex_per_component_feedback
-from .metrics import build_rubric_judge, score_rubric
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ApexAgentsRunResult:
-    """One case's output, shaped for the rilixai field-extractor contract.
-
-    The single optimization field is ``rubric_pass_rate`` (fraction of
-    rubric criteria the LLM judge marked Met). ``final_answer`` is
-    surfaced for downstream debugging; ``run_metrics`` carries the
-    trajectory + per-component feedback the reflection LM reads.
-    """
-
-    rubric_pass_rate: float
-    final_answer: str
-    run_metrics: dict[str, Any] = field(default_factory=dict)
-
-
-def build_apex_agents_runtime(
-    *,
-    config: ApexAgentsConfig | None = None,
-    agent: Any | None = None,
-    world_factory: Callable[[Any], Any] | None = None,
-    model_factory: Callable[[str, float], Any] | None = None,
-    judge: Callable[[str, str, str], bool] | None = None,
-) -> Callable[..., Awaitable[ApexAgentsRunResult]]:
-    """Build an async ``ExtractionRuntime`` for the APEX-Agents agent.
-
-    ``world_factory`` is required when ``agent`` is None — it's how the
-    runtime builds per-case worlds without depending on HuggingFace at
-    import time. Tests pass a closure yielding :class:`FakeWorld`.
-    ``judge`` defaults to the litellm-backed rubric judge; tests inject
-    a stub so zero network fires.
-    """
-    cfg = config or ApexAgentsConfig()
-
-    # Defer the import so callers that just need the runtime symbol
-    # (e.g. spec construction at module-import time) don't pay the
-    # cost until the runtime actually fires.
-    from ..agent.agent import ApexReActAgent
-    from ..agent.prompts import load_apex_agents_seed_prompts
-
-    resolved_agent: ApexReActAgent
-    if isinstance(agent, ApexReActAgent):
-        resolved_agent = agent
-    elif agent is None:
-        if world_factory is None:
-            raise ValueError(
-                "build_apex_agents_runtime requires either a pre-built agent or a "
-                "world_factory so the runtime can construct per-case worlds."
-            )
-        default_sys, default_task, default_resum = load_apex_agents_seed_prompts()
-        resolved_agent = ApexReActAgent(
-            model_name=cfg.task_model,
-            model_temperature=cfg.task_temperature,
-            max_steps=cfg.max_steps,
-            cost_limit=cfg.cost_limit,
-            max_toolbelt_size=cfg.max_toolbelt_size,
-            max_context_tokens=cfg.max_context_tokens,
-            default_system_prompt=default_sys,
-            default_task_template=default_task,
-            default_resum_summary_prompt=default_resum,
-            world_factory=world_factory,
-            model_factory=model_factory,
-            llm_timeout=cfg.llm_timeout,
-        )
-    else:
-        raise TypeError(f"agent must be an ApexReActAgent or None, got {type(agent).__name__}.")
-
-    resolved_judge = judge if judge is not None else build_rubric_judge(model=cfg.judge_model, timeout=cfg.llm_timeout)
-
-    async def _runtime(**kwargs: Any) -> ApexAgentsRunResult:
-        record, candidate = _unpack_runtime_inputs(kwargs)
-        resolved_agent.apply_candidate(candidate.components)
-        output = await resolved_agent.forward(record=record)
-        rubric_payload = [{"verifier_id": c.verifier_id, "criteria": c.criteria} for c in record.rubric]
-        rubric_pass_rate = await asyncio.to_thread(
-            score_rubric,
-            rubric=rubric_payload,
-            answer=output.final_answer,
-            task_prompt=record.prompt,
-            judge=resolved_judge,
-        )
-        run_metrics = build_apex_agents_run_metrics(
-            record=record,
-            output=output,
-            config=cfg,
-            rubric_pass_rate=rubric_pass_rate,
-        )
-        return ApexAgentsRunResult(
-            rubric_pass_rate=rubric_pass_rate,
-            final_answer=output.final_answer,
-            run_metrics=run_metrics,
-        )
-
-    return _runtime
 
 
 def build_apex_agents_run_metrics(
@@ -138,9 +29,13 @@ def build_apex_agents_run_metrics(
     config: ApexAgentsConfig,
     rubric_pass_rate: float,
 ) -> dict[str, Any]:
-    """Translate the agent's output into rilixai trajectory metadata."""
-    per_component_feedback = build_apex_per_component_feedback(record=record, output=output)
+    """Translate the agent's output into rilixai trajectory metadata.
 
+    Per-component feedback is no longer embedded here — it flows through
+    ``@spec(feedback=ApexAgentsFeedback)`` (the runner merges it into
+    ``trace_evidence.per_component_feedback`` in ``_package_result``). This
+    builder owns only the domain-specific trace evidence.
+    """
     policy_reasoning = [
         _truncate(m.content, config.max_preview_chars) for m in output.messages if m.role == "assistant"
     ][:5]
@@ -167,7 +62,6 @@ def build_apex_agents_run_metrics(
         "tool_counts": tool_counts,
         "tool_calls_detail": tool_calls_detail,
         "trace_evidence": {
-            "per_component_feedback": per_component_feedback,
             "policy_reasoning": policy_reasoning,
             "tools_called": tools_called[:25],
         },
@@ -188,20 +82,6 @@ def build_apex_agents_run_metrics(
 
 
 # ─── Shared helpers ──────────────────────────────────────────────────
-
-
-def _unpack_runtime_inputs(kwargs: dict[str, Any]) -> tuple[ApexAgentsRecord, PromptCandidate]:
-    record = kwargs.get("input")
-    if not isinstance(record, ApexAgentsRecord):
-        raise TypeError(
-            f"APEX-Agents runtime expected `input` to be an ApexAgentsRecord, got {type(record).__name__}."
-        )
-    candidate = kwargs.get("candidate")
-    if not isinstance(candidate, PromptCandidate):
-        raise TypeError(
-            f"APEX-Agents runtime expected `candidate` to be a PromptCandidate, got {type(candidate).__name__}."
-        )
-    return record, candidate
 
 
 def _truncate(text: str, max_chars: int) -> str:

@@ -3,7 +3,7 @@
 The FakeWorld-driven ReAct loop behavioral suite lives in
 ``test_apex_agents_agent.py``. This file consolidates the rest:
 
-- dataset normalization + IB filter + record_to_case + WorldFiles
+- dataset normalization + IB filter + record_to_sample + WorldFiles
 - pipeline config + runtime + CLI plumbing
 - metrics + LLM judge (incl. parse-verdict calibration)
 - world-level k-fold + val splitters
@@ -37,7 +37,7 @@ from apex_agents.data.dataset import (
     cases_from_records,
     filter_investment_banking,
     load_apex_agents_records,
-    record_to_case,
+    record_to_sample,
     world_ids_for_cases,
 )
 from apex_agents.data.world_splits import (
@@ -47,18 +47,14 @@ from apex_agents.data.world_splits import (
     world_level_folds,
 )
 from apex_agents.optimization.feedback import (
-    SYSTEM_PROMPT_COMPONENT,
-    build_apex_per_component_feedback,
+    _system_prompt_feedback,
 )
 from apex_agents.optimization.metrics import (
-    APEX_AGENTS_FIELD_WEIGHTS,
     RUBRIC_FIELD,
-    ApexAgentsMetricsCalculator,
     build_rubric_judge,
     score_rubric,
 )
-from apex_agents.optimization.runtime import ApexAgentsRunResult
-from apex_agents.optimization.spec import build_apex_agents_spec
+from apex_agents.rilixai_spec import ApexAgentsMetrics, build_apex_agents_spec
 from apex_agents.tests.fake_world import FakeWorld, fake_world_factory
 
 
@@ -130,7 +126,7 @@ def test_cases_from_records_rejects_unsupported_items() -> None:
         cases_from_records([object()])  # type: ignore[list-item]
 
 
-def test_record_to_case_explicit_group_key_wins() -> None:
+def test_record_to_sample_explicit_group_key_wins() -> None:
     record = ApexAgentsRecord(
         task_id="t-2",
         task_name="name",
@@ -141,7 +137,7 @@ def test_record_to_case_explicit_group_key_wins() -> None:
         task_input_files=(),
         raw_task={"task_id": "t-2"},
     )
-    case = record_to_case(record, group_key="train-split")
+    case = record_to_sample(record, group_key="train-split")
     assert case.group_key == "train-split"
 
 
@@ -310,10 +306,9 @@ def _scripted_model() -> Any:
     return _M()
 
 
-def test_runtime_emits_per_component_feedback_and_scores_with_stub_judge() -> None:
+def test_runner_emits_per_component_feedback_and_scores_with_stub_judge() -> None:
     from apex_agents.agent.agent import ApexReActAgent
     from apex_agents.agent.prompts import load_apex_agents_seed_prompts
-    from apex_agents.optimization.runtime import build_apex_agents_runtime
 
     sys_p, task_t, resum_p = load_apex_agents_seed_prompts()
     agent = ApexReActAgent(
@@ -331,12 +326,17 @@ def test_runtime_emits_per_component_feedback_and_scores_with_stub_judge() -> No
         judged.append((criterion, answer))
         return "EV" in answer
 
-    cfg = ApexAgentsConfig()
-    runtime = build_apex_agents_runtime(config=cfg, agent=agent, judge=_stub_judge)
-    result = asyncio.run(runtime(input=_pipeline_record(), candidate=apex_agents_seed_candidate()))
+    # Build the spec via the factory (which wraps the runner) and drive its
+    # extraction_runtime the way the optimizer adapter would.
+    record = _pipeline_record()
+    spec = build_apex_agents_spec(
+        samples_by_split={"train": [record_to_sample(record)], "validation": [record_to_sample(record)]},
+        agent=agent,
+        judge=_stub_judge,
+    )
+    result = asyncio.run(spec.extraction_runtime(input=record, candidate=apex_agents_seed_candidate()))
 
-    assert isinstance(result, ApexAgentsRunResult)
-    assert result.rubric_pass_rate == 1.0
+    assert result.rubric_pass_rate == 1.0  # forwarded from the _ApexResult output
     assert judged and judged[0][1] == "The EV is $5M."
     feedback = result.run_metrics["trace_evidence"]["per_component_feedback"]
     assert set(feedback) == {"system_prompt", "task_template", "resum_summary_prompt"}
@@ -349,11 +349,9 @@ def test_runtime_emits_per_component_feedback_and_scores_with_stub_judge() -> No
     assert aa["rubric_pass_rate"] == 1.0
 
 
-def test_runtime_requires_agent_or_world_factory() -> None:
-    from apex_agents.optimization.runtime import build_apex_agents_runtime
-
+def test_build_apex_agents_spec_requires_agent_or_world_factory() -> None:
     with pytest.raises(ValueError, match="world_factory"):
-        build_apex_agents_runtime(config=ApexAgentsConfig())
+        build_apex_agents_spec(samples_by_split={"train": [], "validation": []}, config=ApexAgentsConfig())
 
 
 def test_wrap_runtime_with_progress_preserves_runtime_result_when_throttled() -> None:
@@ -456,8 +454,8 @@ def _ground_truth(task_id: str, *, n_criteria: int = 2) -> dict[str, Any]:
 
 
 def test_metrics_calculator_aggregates_and_handles_missing_or_empty() -> None:
-    assert APEX_AGENTS_FIELD_WEIGHTS == {RUBRIC_FIELD: 1.0}
-    metrics = ApexAgentsMetricsCalculator()
+    metrics = ApexAgentsMetrics()
+    assert metrics.field_weights == {RUBRIC_FIELD: 1.0}
 
     # 3 cases with mixed pass rates → mean.
     out = metrics.calculate_metrics(
@@ -498,7 +496,7 @@ def test_metrics_calculator_aggregates_and_handles_missing_or_empty() -> None:
 
 
 def test_comparison_method_clamps_to_unit_interval() -> None:
-    metrics = ApexAgentsMetricsCalculator()
+    metrics = ApexAgentsMetrics()
     comparator = metrics._get_comparison_method(metrics.field_configs[0])
     assert comparator(0.75, _ground_truth("c")) == 0.75
     assert comparator(2.0, _ground_truth("c")) == 1.0
@@ -753,8 +751,9 @@ def test_build_apex_agents_spec_passes_validation_and_accepts_overrides() -> Non
     )
     profile = override.evaluation_profile_resolver()
     assert profile.field_weights == {"rubric_pass_rate": 0.5}
-    # Runtime is async.
-    assert asyncio.iscoroutinefunction(spec.extraction_runtime)
+    # The runtime is now a BaseSampleRunner instance with an async __call__.
+    assert callable(spec.extraction_runtime)
+    assert asyncio.iscoroutinefunction(spec.extraction_runtime.__call__)
 
 
 def test_spec_end_to_end_via_adapter_with_fake_world_and_stub_judge() -> None:
@@ -805,7 +804,7 @@ def test_zero_file_tools_yields_critical_headline_first() -> None:
         status="completed",
         messages=[_asst(0, "todo_write"), _asst(1, "final_answer")],
     )
-    fb = build_apex_per_component_feedback(record=_feedback_record(), output=out)[SYSTEM_PROMPT_COMPONENT]
+    fb = _system_prompt_feedback(record=_feedback_record(), output=out)
     assert fb.startswith("CRITICAL FAILURE"), fb[:80]
     assert "ZERO workspace-reading tool calls" in fb
     assert fb.index("CRITICAL FAILURE") < fb.index("You are optimizing")
@@ -817,7 +816,7 @@ def test_punt_after_exploring_yields_high_priority_headline() -> None:
         status="blocked",
         messages=[_asst(0, "list_files"), _asst(1, "read_pdf"), _asst(2, "final_answer")],
     )
-    fb = build_apex_per_component_feedback(record=_feedback_record(), output=out)[SYSTEM_PROMPT_COMPONENT]
+    fb = _system_prompt_feedback(record=_feedback_record(), output=out)
     assert fb.startswith("HIGH-PRIORITY FAILURE"), fb[:80]
     assert "PUNTED" in fb
     assert "ZERO workspace-reading" not in fb
@@ -829,6 +828,6 @@ def test_explored_and_answered_has_no_failure_headline() -> None:
         status="completed",
         messages=[_asst(0, "list_files"), _asst(1, "read_file"), _asst(2, "final_answer")],
     )
-    fb = build_apex_per_component_feedback(record=_feedback_record(), output=out)[SYSTEM_PROMPT_COMPONENT]
+    fb = _system_prompt_feedback(record=_feedback_record(), output=out)
     assert fb.startswith("You are optimizing")
     assert "CRITICAL FAILURE" not in fb and "HIGH-PRIORITY FAILURE" not in fb

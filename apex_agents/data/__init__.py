@@ -20,7 +20,7 @@ from .dataset import (
     filter_investment_banking,
     load_apex_agents_cases,
     load_apex_agents_records,
-    record_to_case,
+    record_to_sample,
     world_ids_for_cases,
 )
 from .world_splits import (
@@ -41,7 +41,7 @@ __all__ = [
     "fixed_val_split",
     "load_apex_agents_cases",
     "load_apex_agents_records",
-    "record_to_case",
+    "record_to_sample",
     "stratified_case_cap",
     "world_held_out_val_split",
     "world_ids_for_cases",

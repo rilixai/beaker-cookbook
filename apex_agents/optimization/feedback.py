@@ -17,6 +17,9 @@ reflection LM reads when rewriting it:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
+
+from rilixai.adapters import per_component_feedback
 
 from ..agent.prompts import (
     RESUM_SUMMARY_PROMPT_COMPONENT,
@@ -27,17 +30,25 @@ from ..agent.types import AgentToolCall, ApexAgentsAgentOutput
 from ..data.dataset import ApexAgentsRecord
 
 
-def build_apex_per_component_feedback(
-    *,
-    record: ApexAgentsRecord,
-    output: ApexAgentsAgentOutput,
-) -> dict[str, str]:
-    """Return per-component feedback strings the rilixai adapter consumes."""
-    return {
-        SYSTEM_PROMPT_COMPONENT: _system_prompt_feedback(record=record, output=output),
-        TASK_TEMPLATE_COMPONENT: _task_template_feedback(record=record, output=output),
-        RESUM_SUMMARY_PROMPT_COMPONENT: _resum_summary_prompt_feedback(record=record, output=output),
-    }
+class ApexAgentsFeedback:
+    """Per-component feedback for the reflection LM.
+
+    Each ``@per_component_feedback``-decorated method returns the narrative the
+    reflection LM reads when rewriting that component. rilixai collects them via
+    ``@spec(feedback=ApexAgentsFeedback)`` — no dict-assembly to keep in sync.
+    """
+
+    @per_component_feedback(SYSTEM_PROMPT_COMPONENT)
+    def system_prompt(self, sample: Any, output: ApexAgentsAgentOutput) -> str:
+        return _system_prompt_feedback(record=sample.input, output=output)
+
+    @per_component_feedback(TASK_TEMPLATE_COMPONENT)
+    def task_template(self, sample: Any, output: ApexAgentsAgentOutput) -> str:
+        return _task_template_feedback(record=sample.input, output=output)
+
+    @per_component_feedback(RESUM_SUMMARY_PROMPT_COMPONENT)
+    def resum_summary_prompt(self, sample: Any, output: ApexAgentsAgentOutput) -> str:
+        return _resum_summary_prompt_feedback(record=sample.input, output=output)
 
 
 # Tools that actually read the workspace. If NONE of these were called
@@ -207,6 +218,6 @@ __all__ = [
     "RESUM_SUMMARY_PROMPT_COMPONENT",
     "SYSTEM_PROMPT_COMPONENT",
     "TASK_TEMPLATE_COMPONENT",
-    "build_apex_per_component_feedback",
+    "ApexAgentsFeedback",
     "task_template_preserves_task_var",
 ]

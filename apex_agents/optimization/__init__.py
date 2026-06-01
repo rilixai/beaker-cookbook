@@ -1,53 +1,38 @@
-"""GEPA-facing surface for the APEX-Agents benchmark.
+"""GEPA-facing helpers for the APEX-Agents benchmark.
 
-Everything the rilixai optimizer consumes lives here:
+The integration itself — the ``@spec``-decorated :class:`ApexAgentsRunner`
+plus :class:`ApexAgentsMetrics` and :func:`build_apex_agents_spec` — lives one
+level up in :mod:`apex_agents.rilixai_spec`. This subpackage holds the domain
+helpers that runner composes:
 
-* :mod:`.runtime` — the async ``ExtractionRuntime`` adapter the
-  optimizer invokes per case.
-* :mod:`.spec` — assembles the :class:`PromptOptimizationSpec` that
-  ``run_optimization_from_spec`` / ``build_adapter_from_spec``
-  consume. Also hosts the ``@spec(name="apex-agents")``-decorated
-  factory rilixai's Modal sandbox invokes.
-* :mod:`.metrics` — LLM-judge rubric scorer + ``MetricsCalculator``.
-* :mod:`.feedback` — per-component reflection feedback strings.
-
-A reader who wants to understand "what does GEPA see for APEX-Agents"
-can read just this subpackage. The agent internals it composes live
-in :mod:`apex_agents.agent`.
+* :mod:`.runtime` — :func:`build_apex_agents_run_metrics`, the trajectory
+  metadata builder.
+* :mod:`.metrics` — the LLM rubric judge (:func:`build_rubric_judge`,
+  :func:`score_rubric`, :func:`coerce_pass_rate`).
+* :mod:`.feedback` — :class:`ApexAgentsFeedback`, whose
+  ``@per_component_feedback`` methods give the reflection LM per-component
+  narratives.
 """
 
 from __future__ import annotations
 
-from .feedback import build_apex_per_component_feedback
+from .feedback import ApexAgentsFeedback
 from .metrics import (
-    APEX_AGENTS_FIELD_WEIGHTS,
     DEFAULT_JUDGE_MODEL,
     RUBRIC_FIELD,
-    ApexAgentsMetricsCalculator,
-    build_apex_agents_field_extractor,
     build_rubric_judge,
+    coerce_pass_rate,
     score_rubric,
 )
-from .runtime import (
-    ApexAgentsRunResult,
-    build_apex_agents_run_metrics,
-    build_apex_agents_runtime,
-)
-from .spec import build_apex_agents_spec, build_spec
+from .runtime import build_apex_agents_run_metrics
 
 
 __all__ = [
-    "APEX_AGENTS_FIELD_WEIGHTS",
     "DEFAULT_JUDGE_MODEL",
     "RUBRIC_FIELD",
-    "ApexAgentsMetricsCalculator",
-    "ApexAgentsRunResult",
-    "build_apex_agents_field_extractor",
+    "ApexAgentsFeedback",
     "build_apex_agents_run_metrics",
-    "build_apex_agents_runtime",
-    "build_apex_agents_spec",
-    "build_apex_per_component_feedback",
     "build_rubric_judge",
-    "build_spec",
+    "coerce_pass_rate",
     "score_rubric",
 ]
