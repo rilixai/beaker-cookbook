@@ -36,40 +36,31 @@ from .data.dataset import (
     cases_from_records,
     load_hotpotqa_paper_split,
     load_hotpotqa_split,
-    record_to_case,
+    record_to_sample,
 )
 from .data.eval import exact_match_score, f1_score, f1_score_components, normalize_answer
 from .optimization.feedback import build_agent_per_component_feedback
-from .optimization.metrics import (
-    ANSWER_F1_FIELD,
-    ANSWER_FIELD,
-    HOTPOTQA_FIELD_WEIGHTS,
-    SUPPORTING_TITLES_RECALL_FIELD,
-    HotpotQAFieldConfig,
-    HotpotQAMetricsCalculator,
-    build_hotpotqa_field_extractor,
+from .optimization.runtime import build_agent_run_metrics
+from .optimization.spec import (
+    HotpotQAMetrics,
+    HotpotQARunner,
+    HotpotQASandboxConfig,
+    build_hotpotqa_spec,
 )
-from .optimization.runtime import HotpotQARunResult, build_hotpotqa_runtime
-from .optimization.spec import build_hotpotqa_spec
 
 
 __all__ = [
-    "ANSWER_F1_FIELD",
-    "ANSWER_FIELD",
     "AgentToolCall",
     "DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT",
     "DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT",
-    "HOTPOTQA_FIELD_WEIGHTS",
     "HotpotQAAgentOutput",
     "HotpotQAConfig",
-    "HotpotQAFieldConfig",
-    "HotpotQAMetricsCalculator",
+    "HotpotQAMetrics",
     "HotpotQARecord",
-    "HotpotQARunResult",
-    "SUPPORTING_TITLES_RECALL_FIELD",
+    "HotpotQARunner",
+    "HotpotQASandboxConfig",
     "build_agent_per_component_feedback",
-    "build_hotpotqa_field_extractor",
-    "build_hotpotqa_runtime",
+    "build_agent_run_metrics",
     "build_hotpotqa_spec",
     "cases_from_records",
     "exact_match_score",
@@ -79,5 +70,5 @@ __all__ = [
     "load_hotpotqa_paper_split",
     "load_hotpotqa_split",
     "normalize_answer",
-    "record_to_case",
+    "record_to_sample",
 ]

@@ -1,111 +1,103 @@
 """HotpotQA spec wiring for rilixai's optimizer.
 
-Two entry points live here:
+The whole integration is one :class:`~rilixai.adapters.BaseSampleRunner`
+subclass — :class:`HotpotQARunner` — decorated with ``@spec``. rilixai
+assembles the metrics calculator, seed candidate, and per-component feedback
+from the declarations on the decorator + the runner's own
+``_package_result`` (which emits the paper-style trace evidence).
 
-* :func:`build_hotpotqa_spec` — the explicit factory the local CLI uses to
-  assemble a :class:`PromptOptimizationSpec` by hand (full control over splits,
-  field weights, and a pre-built agent for tests).
-* :class:`HotpotQARunner` — the class-style ``@spec`` form the rilixai Modal
-  sandbox runs. The whole sandbox integration is this one
-  :class:`~rilixai.adapters.BaseSampleRunner` subclass: rilixai assembles the
-  metrics calculator, seed candidate, and feedback from the declarations on
-  the decorator + the methods on the class.
+:func:`build_hotpotqa_spec` is a thin factory the local CLI uses to assemble a
+:class:`PromptOptimizationSpec` with explicit (already-loaded) splits and an
+optionally pre-built agent — it reuses :class:`HotpotQARunner` so there is one
+source of truth for the runtime + scoring.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from pydantic import BaseModel
 from rilixai import spec
-from rilixai.adapters import BaseSampleRunner, CallableApplier, per_component_feedback
+from rilixai.adapters import BaseSampleRunner, CallableApplier, SampleRunResult
 from rilixai.metrics import BaseMetricsCalculator, FieldConfig
-from rilixai.prompt_optimization.models import PromptCandidate, Sample
-from rilixai.prompt_optimization.protocols import EvaluationProfile
-from rilixai.prompt_optimization.spec import PromptOptimizationSpec
+from rilixai.prompt_optimization.models import Sample
+from rilixai.prompt_optimization.protocols import ErrorOutput, EvaluationProfile
+from rilixai.prompt_optimization.spec import OptimizationContext, PromptOptimizationSpec
 
 from ..agent.prompts import hotpotqa_pydantic_agent_seed_candidate
 from ..agent.types import HotpotQAAgentOutput
 from ..config import HotpotQAConfig
 from ..data.dataset import HotpotQARecord, load_hotpotqa_paper_split
 from ..data.eval import exact_match_score, f1_score
-from .metrics import (
-    HOTPOTQA_FIELD_WEIGHTS,
-    HotpotQAMetricsCalculator,
-    build_hotpotqa_field_extractor,
-)
-from .runtime import build_hotpotqa_runtime
+from .runtime import build_agent_run_metrics
 
 
 _HOTPOTQA_PROFILE_KEY = "hotpotqa"
 
 
-def _hotpotqa_agent_resolver(**_: Any) -> tuple[None, None]:
-    """The runtime owns the agent + LM, so adapter agent resolution is a no-op."""
-    return (None, None)
+# ─── Scoring ────────────────────────────────────────────────────────────
 
 
-def _build_hotpotqa_profile_resolver(
-    metrics: HotpotQAMetricsCalculator,
-    field_weights: dict[str, float] | None = None,
-) -> Any:
+def _hotpot_exact_match(predicted: Any, expected: Any) -> float:
+    return 1.0 if exact_match_score(predicted, expected) else 0.0
+
+
+def _hotpot_f1(predicted: Any, expected: Any) -> float:
+    return float(f1_score(predicted, expected))
+
+
+class HotpotQAMetrics(BaseMetricsCalculator):
+    """Scoring for HotpotQA, reusing the paper-faithful answer scorers.
+
+    Field weights mirror the GEPA artifact: pure exact-match drives candidate
+    selection (``answer`` weight 1.0); token F1 + supporting-title recall are
+    computed as diagnostics (weight 0.0) and surface in eval summaries.
+    """
+
+    fields = [
+        FieldConfig(name="answer", comparators="hotpot_exact_match", weight=1.0),
+        FieldConfig(name="answer_f1", extract_from="answer", comparators="hotpot_f1", weight=0.0),
+        FieldConfig(
+            name="titles_recall",
+            extract_from="retrieved_titles",
+            compare_to="supporting_titles",
+            comparators="set_recall",
+            weight=0.0,
+        ),
+    ]
+    comparators = {
+        "hotpot_exact_match": _hotpot_exact_match,
+        "hotpot_f1": _hotpot_f1,
+    }
+
+
+def _field_extractor(obj: Any, path: str) -> Any:
+    """Resolve a dotted path on a result object (attribute first, item second)."""
+    if obj is None or isinstance(obj, ErrorOutput):
+        return None
+    current: Any = obj
+    for segment in path.split("."):
+        if current is None:
+            return None
+        if isinstance(current, Mapping):
+            current = current.get(segment)
+        else:
+            current = getattr(current, segment, None)
+    return current
+
+
+def _build_profile_resolver(metrics: HotpotQAMetrics) -> Any:
     profile = EvaluationProfile(
         profile_key=_HOTPOTQA_PROFILE_KEY,
         metrics_calculator=metrics,
-        field_weights=dict(field_weights or HOTPOTQA_FIELD_WEIGHTS),
+        field_weights=dict(metrics.field_weights),
     )
 
     def _resolver(**_: Any) -> EvaluationProfile:
         return profile
 
     return _resolver
-
-
-def build_hotpotqa_spec(
-    *,
-    samples_by_split: dict[str, Sequence[Sample]],
-    seed_candidate: PromptCandidate | None = None,
-    config: HotpotQAConfig | None = None,
-    pydantic_agent: Any | None = None,
-    name: str = "hotpotqa",
-    user_id: str = "__hotpotqa_benchmark__",
-    model: str | None = None,
-    max_concurrency: int = 8,
-    reflection_evidence_mode: str = "curated_plus_trace",
-    field_weights: dict[str, float] | None = None,
-) -> PromptOptimizationSpec:
-    """Build a ready-to-run :class:`PromptOptimizationSpec` for HotpotQA.
-
-    Pass ``config.pydantic_agent_model`` (a PydanticAI model spec like
-    ``"openai:gpt-4.1-mini"``) or a pre-built ``pydantic_agent``
-    instance. ``samples_by_split`` must include at least ``train`` and
-    (``validation`` or ``val``) keys for optimization; evaluation-only
-    uses can supply just one split. ``curated_plus_trace`` is the
-    default reflection mode because the runtime populates per-tool
-    ``trace_evidence`` that scalar field scores cannot represent.
-    """
-    cfg = config or HotpotQAConfig()
-    seed = seed_candidate or hotpotqa_pydantic_agent_seed_candidate()
-    metrics = HotpotQAMetricsCalculator()
-    runtime = build_hotpotqa_runtime(
-        config=cfg,
-        pydantic_agent=pydantic_agent,
-    )
-    return PromptOptimizationSpec(
-        samples_by_split=samples_by_split,
-        seed_candidate=seed,
-        extraction_runtime=runtime,
-        agent_resolver=_hotpotqa_agent_resolver,
-        field_extractor=build_hotpotqa_field_extractor(),
-        evaluation_profile_resolver=_build_hotpotqa_profile_resolver(metrics, field_weights),
-        name=name,
-        user_id=user_id,
-        model=model,
-        task_type="hotpotqa_pydantic_agent",
-        max_concurrency=max_concurrency,
-        reflection_evidence_mode=reflection_evidence_mode,
-    )
 
 
 # ─── rilixai Modal sandbox entry point — class-style @spec ──────────────
@@ -130,73 +122,19 @@ class HotpotQASandboxConfig(BaseModel):
     max_concurrency: int = 4
 
 
-def _hotpot_exact_match(predicted: Any, expected: Any) -> float:
-    return 1.0 if exact_match_score(predicted, expected) else 0.0
-
-
-def _hotpot_f1(predicted: Any, expected: Any) -> float:
-    return float(f1_score(predicted, expected))
-
-
-class HotpotQASandboxMetrics(BaseMetricsCalculator):
-    """Scoring for the sandbox runner, reusing the paper-faithful answer scorers.
-
-    ``answer`` emits two scores (paper EM + token F1) from the canonical
-    HotpotQA evaluator; ``titles_recall`` measures multi-hop retrieval coverage.
-    """
-
-    fields = [
-        FieldConfig(name="answer", comparators=["hotpot_exact_match", "hotpot_f1"]),
-        FieldConfig(
-            name="titles_recall",
-            extract_from="retrieved_titles",
-            compare_to="supporting_titles",
-            comparators="set_recall",
-        ),
-    ]
-    comparators = {
-        "hotpot_exact_match": _hotpot_exact_match,
-        "hotpot_f1": _hotpot_f1,
-    }
-
-
-class HotpotQASandboxFeedback:
-    """Per-component narratives for the reflection LM, reusing the agent feedback.
-
-    Delegates to :func:`build_agent_per_component_feedback`, which builds the
-    paper-style policy / summarize narratives from the agent's tool-call trace.
-    """
-
-    def __init__(self) -> None:
-        # Imported lazily so the feedback module's transitive deps don't load
-        # at spec-import time.
-        from .feedback import build_agent_per_component_feedback
-
-        self._build = build_agent_per_component_feedback
-
-    @per_component_feedback("policy_prompt")
-    def _policy(self, sample: Any, output: HotpotQAAgentOutput) -> str:
-        return self._build(record=sample.input, output=output).get("policy_prompt", "")
-
-    @per_component_feedback("summarize_prompt")
-    def _summarize(self, sample: Any, output: HotpotQAAgentOutput) -> str:
-        return self._build(record=sample.input, output=output).get("summarize_prompt", "")
-
-
 @spec(
     name="hotpotqa-agent",
     description="HotpotQA multi-hop QA — PydanticAI tool-using agent + GEPA",
     metadata={"benchmark": "hotpotqa", "agent_kind": "pydantic_ai"},
     task_type="hotpotqa_pydantic_agent",
     config_schema=HotpotQASandboxConfig,
-    field_configs=HotpotQASandboxMetrics,
-    feedback=HotpotQASandboxFeedback,
+    field_configs=HotpotQAMetrics,
     seed=hotpotqa_pydantic_agent_seed_candidate(),
     reflection_evidence_mode="curated_plus_trace",
     max_concurrency=4,
 )
 class HotpotQARunner(BaseSampleRunner[HotpotQARecord, HotpotQAAgentOutput]):
-    """The entire sandbox integration: one runner the rilixai sandbox drives.
+    """The entire HotpotQA integration: one runner the rilixai sandbox drives.
 
     No ``version=`` on ``@spec`` — ``rilixai push`` supplies the push-time
     version (defaulting to ``v<short_sha>``) and promotes it to
@@ -204,24 +142,24 @@ class HotpotQARunner(BaseSampleRunner[HotpotQARecord, HotpotQAAgentOutput]):
     """
 
     def __init__(self, ctx: Any) -> None:
-        cfg = ctx.config if isinstance(ctx.config, HotpotQASandboxConfig) else HotpotQASandboxConfig()
-        self._sandbox_cfg = cfg
+        sandbox_cfg = ctx.config if isinstance(ctx.config, HotpotQASandboxConfig) else HotpotQASandboxConfig()
+        self._sandbox_cfg = sandbox_cfg
         self.cfg = HotpotQAConfig(
-            retrieval_mode=cfg.retrieval_mode,
-            retrieve_k=cfg.retrieve_k,
-            max_iters=cfg.max_iters,
-            pydantic_agent_model=cfg.pydantic_agent_model,
-            pydantic_agent_temperature=cfg.task_temperature,
+            retrieval_mode=sandbox_cfg.retrieval_mode,
+            retrieve_k=sandbox_cfg.retrieve_k,
+            max_iters=sandbox_cfg.max_iters,
+            pydantic_agent_model=sandbox_cfg.pydantic_agent_model,
+            pydantic_agent_temperature=sandbox_cfg.task_temperature,
         )
         # Defer the pydantic-ai-touching import until the runner is built.
         from ..agent.agent import HotpotQAPydanticAgent
 
         self.agent = HotpotQAPydanticAgent(
-            model=cfg.pydantic_agent_model,
-            summarize_model=_bare_openai_model(cfg.pydantic_agent_model),
-            top_k=cfg.retrieve_k,
-            max_iters=cfg.max_iters,
-            temperature=cfg.task_temperature,
+            model=sandbox_cfg.pydantic_agent_model,
+            summarize_model=_bare_openai_model(sandbox_cfg.pydantic_agent_model),
+            top_k=sandbox_cfg.retrieve_k,
+            max_iters=sandbox_cfg.max_iters,
+            temperature=sandbox_cfg.task_temperature,
         )
         super().__init__(
             applier=CallableApplier(
@@ -241,8 +179,23 @@ class HotpotQARunner(BaseSampleRunner[HotpotQARecord, HotpotQAAgentOutput]):
             retrieve_k_fn=retrieve_k_fn,
         )
 
-    def _collect_tool_calls(self, output: HotpotQAAgentOutput) -> list[dict[str, Any]]:
-        return [{"tool": tc.tool_name, "args": dict(tc.tool_args)} for tc in output.tool_calls]
+    def _package_result(
+        self,
+        record: HotpotQARecord,
+        output: HotpotQAAgentOutput,
+        runtime_kwargs: Mapping[str, Any],
+    ) -> SampleRunResult[HotpotQAAgentOutput]:
+        # The paper-style trace evidence (retrieval reasoning, per-hop
+        # documents-remaining, missing/spurious titles, and the per-component
+        # feedback narratives) lives in ``build_agent_run_metrics`` — richer
+        # than the base hook set, so override the packager to emit it.
+        run_metrics = build_agent_run_metrics(
+            record=record,
+            output=output,
+            agent_kind="pydantic",
+            config=self.cfg,
+        )
+        return SampleRunResult(output=output, run_metrics=run_metrics)
 
     def samples_by_split(self, ctx: Any) -> dict[str, list[Sample]]:
         hf_config = "fullwiki" if self._sandbox_cfg.retrieval_mode == "fullwiki" else "distractor"
@@ -254,6 +207,59 @@ class HotpotQARunner(BaseSampleRunner[HotpotQARecord, HotpotQAAgentOutput]):
                 load_hotpotqa_paper_split("validation", max_cases=self._sandbox_cfg.val_size, config=hf_config)
             ),
         }
+
+
+# ─── Local-CLI factory ─────────────────────────────────────────────────
+
+
+def build_hotpotqa_spec(
+    *,
+    samples_by_split: dict[str, Sequence[Sample]],
+    config: HotpotQAConfig | None = None,
+    pydantic_agent: Any | None = None,
+    model: str | None = None,
+    max_concurrency: int = 8,
+) -> PromptOptimizationSpec:
+    """Assemble a :class:`PromptOptimizationSpec` from explicit splits.
+
+    The local ``python -m hotpotqa.cli`` path uses this: it loads its own
+    splits (sized by CLI flags) and may inject a scripted ``pydantic_agent``
+    for hermetic tests. Internally it reuses :class:`HotpotQARunner` so the
+    runtime + scoring match the sandbox path exactly.
+    """
+    cfg = config or HotpotQAConfig()
+    # The runner reads ``ctx.config`` as a typed HotpotQASandboxConfig; the
+    # OptimizationContext field is annotated Mapping[str, Any], so the typed
+    # model is a deliberate stand-in (attribute access only).
+    ctx = OptimizationContext(
+        model=model,
+        config=HotpotQASandboxConfig(  # type: ignore[arg-type]
+            retrieval_mode=cfg.retrieval_mode,
+            retrieve_k=cfg.retrieve_k,
+            max_iters=cfg.max_iters,
+            pydantic_agent_model=cfg.pydantic_agent_model or "openai:gpt-4.1-mini",
+            task_temperature=cfg.pydantic_agent_temperature,
+            max_concurrency=max_concurrency,
+        ),
+    )
+    runner = HotpotQARunner(ctx)
+    if pydantic_agent is not None:
+        runner.agent = pydantic_agent
+    metrics = HotpotQAMetrics()
+    return PromptOptimizationSpec(
+        samples_by_split=samples_by_split,
+        seed_candidate=hotpotqa_pydantic_agent_seed_candidate(),
+        extraction_runtime=runner,
+        agent_resolver=lambda **_: (None, None),
+        field_extractor=_field_extractor,
+        evaluation_profile_resolver=_build_profile_resolver(metrics),
+        name="hotpotqa",
+        user_id="__hotpotqa_benchmark__",
+        model=model,
+        task_type="hotpotqa_pydantic_agent",
+        max_concurrency=max_concurrency,
+        reflection_evidence_mode="curated_plus_trace",
+    )
 
 
 def _bare_openai_model(pydantic_spec: str) -> str:

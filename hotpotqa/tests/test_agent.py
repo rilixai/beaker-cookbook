@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
@@ -21,9 +20,7 @@ from hotpotqa.agent.agent import (
     HotpotQAPydanticAgent,
 )
 from hotpotqa.agent.prompts import hotpotqa_pydantic_agent_seed_candidate
-from hotpotqa.config import HotpotQAConfig
 from hotpotqa.data.dataset import HotpotQAParagraph, HotpotQARecord
-from hotpotqa.optimization.runtime import build_hotpotqa_runtime
 
 
 def _record() -> HotpotQARecord:
@@ -498,17 +495,3 @@ def test_load_candidate_uses_mode_specific_seed_when_no_path_given() -> None:
 
     default = _load_candidate(None)
     assert set(default.components.keys()) == {"policy_prompt", "summarize_prompt"}
-
-
-def test_runtime_requires_explicit_pydantic_agent_or_model() -> None:
-    """If the runtime gets neither an agent instance nor a model string in the
-    config, construction must fail loudly.
-    """
-    with pytest.raises(ValueError, match="pydantic_agent_model"):
-        build_hotpotqa_runtime(
-            config=HotpotQAConfig(
-                retrieval_mode="distractor",
-                retrieve_k=1,
-                max_iters=2,
-            ),
-        )

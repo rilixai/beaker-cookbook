@@ -132,7 +132,7 @@ def _normalize_record(raw: Mapping[str, Any], *, index_hint: int) -> HotpotQARec
     )
 
 
-def record_to_case(record: HotpotQARecord, *, group_key: str | None = None) -> Sample:
+def record_to_sample(record: HotpotQARecord, *, group_key: str | None = None) -> Sample:
     """Convert a normalized HotpotQA record into a rilixai :class:`Sample`.
 
     The ``input`` payload is the entire record (the pipeline reads question
@@ -172,7 +172,7 @@ def cases_from_records(
             raise TypeError(
                 f"cases_from_records expected Mapping or HotpotQARecord at position {idx}, got {type(raw).__name__}."
             )
-        cases.append(record_to_case(record, group_key=group_key))
+        cases.append(record_to_sample(record, group_key=group_key))
     return cases
 
 

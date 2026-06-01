@@ -9,17 +9,10 @@ from hotpotqa.data.dataset import (
     HotpotQAParagraph,
     HotpotQARecord,
     cases_from_records,
-    record_to_case,
+    record_to_sample,
 )
-from hotpotqa.optimization.metrics import (
-    ANSWER_F1_FIELD,
-    ANSWER_FIELD,
-    SUPPORTING_TITLES_RECALL_FIELD,
-    HotpotQAMetricsCalculator,
-    f1_score,
-    normalize_answer,
-)
-from hotpotqa.optimization.runtime import HotpotQARunResult
+from hotpotqa.data.eval import f1_score, normalize_answer
+from hotpotqa.optimization.spec import HotpotQAMetrics
 
 
 # ─── dataset ────────────────────────────────────────────────────────────
@@ -61,7 +54,7 @@ def test_cases_from_records_normalizes_hf_shape() -> None:
     assert record.supporting_sentence_ids == {"Eiffel Tower": (0,), "Paris": (2,)}
 
 
-def test_record_to_case_exposes_ground_truth_fields_for_metrics() -> None:
+def test_record_to_sample_exposes_ground_truth_fields_for_metrics() -> None:
     cases = cases_from_records([_HF_RECORD])
     case = cases[0]
     assert case.ground_truth["answer"] == "Paris"
@@ -185,7 +178,7 @@ def test_load_hotpotqa_paper_split_rejects_unknown_partition() -> None:
         load_hotpotqa_paper_split("dev", max_cases=10)
 
 
-def test_record_to_case_explicit_group_key_wins() -> None:
+def test_record_to_sample_explicit_group_key_wins() -> None:
     record = HotpotQARecord(
         sample_id="rec-2",
         question="Q?",
@@ -195,7 +188,7 @@ def test_record_to_case_explicit_group_key_wins() -> None:
         paragraphs=(),
         supporting_titles=(),
     )
-    case = record_to_case(record, group_key="train-split")
+    case = record_to_sample(record, group_key="train-split")
     assert case.group_key == "train-split"
 
 
@@ -230,16 +223,10 @@ def test_f1_score_yes_no_short_circuits_to_exact_match() -> None:
 
 
 def test_metrics_calculator_aggregates_em_f1_and_recall() -> None:
-    metrics = HotpotQAMetricsCalculator()
+    metrics = HotpotQAMetrics()
     results = {
-        "case-a": HotpotQARunResult(
-            answer="Eiffel Tower",
-            retrieved_titles=["Eiffel Tower", "Paris"],
-        ),
-        "case-b": HotpotQARunResult(
-            answer="wrong answer",
-            retrieved_titles=["Some Other Page"],
-        ),
+        "case-a": {"answer": "Eiffel Tower", "retrieved_titles": ["Eiffel Tower", "Paris"]},
+        "case-b": {"answer": "wrong answer", "retrieved_titles": ["Some Other Page"]},
     }
     ground_truth = {
         "case-a": {"answer": "Eiffel Tower", "supporting_titles": ["Eiffel Tower", "Paris"]},
@@ -247,39 +234,35 @@ def test_metrics_calculator_aggregates_em_f1_and_recall() -> None:
     }
     aggregate = metrics.calculate_metrics(results, ground_truth)
 
-    assert aggregate.field_sample_counts[ANSWER_FIELD] == 2
-    assert aggregate.field_sample_counts[ANSWER_F1_FIELD] == 2
-    assert aggregate.field_sample_counts[SUPPORTING_TITLES_RECALL_FIELD] == 2
+    assert aggregate.field_sample_counts["answer"] == 2
+    assert aggregate.field_sample_counts["answer_f1"] == 2
+    assert aggregate.field_sample_counts["titles_recall"] == 2
 
-    assert aggregate.field_accuracies[ANSWER_FIELD] == pytest.approx(0.5)
+    assert aggregate.field_accuracies["answer"] == pytest.approx(0.5)
     # Sample A: F1=1.0 (perfect), Sample B: F1=0.0 (no token overlap with "Statue of Liberty")
-    assert aggregate.field_accuracies[ANSWER_F1_FIELD] == pytest.approx(0.5)
+    assert aggregate.field_accuracies["answer_f1"] == pytest.approx(0.5)
     # Sample A: 2/2 gold titles retrieved; Sample B: 0/1 retrieved → mean 0.5.
-    assert aggregate.field_accuracies[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(0.5)
+    assert aggregate.field_accuracies["titles_recall"] == pytest.approx(0.5)
 
 
 def test_metrics_calculator_skips_samples_without_supervised_signal() -> None:
-    metrics = HotpotQAMetricsCalculator()
-    results = {"case-x": HotpotQARunResult(answer="anything", retrieved_titles=[])}
+    metrics = HotpotQAMetrics()
+    results = {"case-x": {"answer": "anything", "retrieved_titles": []}}
     ground_truth = {"case-x": {"answer": "", "supporting_titles": []}}
     aggregate = metrics.calculate_metrics(results, ground_truth)
 
-    assert aggregate.field_sample_counts[ANSWER_FIELD] == 0
-    assert aggregate.field_sample_counts[ANSWER_F1_FIELD] == 0
-    assert aggregate.field_sample_counts[SUPPORTING_TITLES_RECALL_FIELD] == 0
+    assert aggregate.field_sample_counts["answer"] == 0
+    assert aggregate.field_sample_counts["answer_f1"] == 0
+    assert aggregate.field_sample_counts["titles_recall"] == 0
 
 
 def test_supporting_titles_recall_is_case_insensitive() -> None:
-    metrics = HotpotQAMetricsCalculator()
+    metrics = HotpotQAMetrics()
     aggregate = metrics.calculate_metrics(
-        results={
-            "case": HotpotQARunResult(answer="x", retrieved_titles=["EIFFEL TOWER", "paris"]),
-        },
-        ground_truth={
-            "case": {"answer": "x", "supporting_titles": ["Eiffel Tower", "Paris"]},
-        },
+        results={"case": {"answer": "x", "retrieved_titles": ["EIFFEL TOWER", "paris"]}},
+        ground_truth={"case": {"answer": "x", "supporting_titles": ["Eiffel Tower", "Paris"]}},
     )
-    assert aggregate.field_accuracies[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(1.0)
+    assert aggregate.field_accuracies["titles_recall"] == pytest.approx(1.0)
 
 
 # ─── rilixai Modal sandbox @spec wiring ─────────────────────────────────
@@ -355,34 +338,38 @@ def test_sandbox_runner_builds_valid_spec(monkeypatch: pytest.MonkeyPatch) -> No
     assert set(built.samples_by_split) == {"train", "validation"}
 
 
-def test_sandbox_metrics_scores_answer_and_titles() -> None:
-    """The class-style metrics calculator scores EM/F1 + supporting-title recall."""
-    from hotpotqa.optimization.spec import HotpotQASandboxMetrics
-
-    metrics = HotpotQASandboxMetrics()
+def test_sandbox_metrics_emits_paper_weighted_scores() -> None:
+    """HotpotQAMetrics emits EM (weight 1.0) + F1 + title recall (diagnostics)."""
+    metrics = HotpotQAMetrics()
     emitted = {slot.field_name for slot in metrics.field_configs}
-    assert emitted == {"answer_hotpot_exact_match", "answer_hotpot_f1", "titles_recall"}
+    assert emitted == {"answer", "answer_f1", "titles_recall"}
+    # Paper-faithful weighting: only exact-match drives selection.
+    assert metrics.field_weights == {"answer": 1.0, "answer_f1": 0.0, "titles_recall": 0.0}
 
-    results = {
-        "s1": {"answer": "Paris", "retrieved_titles": ["France", "Paris"]},
-        "s2": {"answer": "wrong", "retrieved_titles": ["Foo"]},
-    }
-    ground_truth = {
-        "s1": {"answer": "Paris", "supporting_titles": ["France", "Paris"]},
-        "s2": {"answer": "Berlin", "supporting_titles": ["Germany"]},
-    }
-    out = metrics.calculate_metrics(results, ground_truth)
-    # s1 exact + full recall; s2 miss + zero recall → 0.5 EM, 0.5 titles recall.
-    assert out.field_accuracies["answer_hotpot_exact_match"] == pytest.approx(0.5)
+    out = metrics.calculate_metrics(
+        results={
+            "s1": {"answer": "Paris", "retrieved_titles": ["France", "Paris"]},
+            "s2": {"answer": "wrong", "retrieved_titles": ["Foo"]},
+        },
+        ground_truth={
+            "s1": {"answer": "Paris", "supporting_titles": ["France", "Paris"]},
+            "s2": {"answer": "Berlin", "supporting_titles": ["Germany"]},
+        },
+    )
+    assert out.field_accuracies["answer"] == pytest.approx(0.5)
     assert out.field_accuracies["titles_recall"] == pytest.approx(0.5)
 
 
-def test_sandbox_feedback_emits_per_component_narratives() -> None:
-    """The class-style feedback delegates to the agent feedback builder."""
-    from types import SimpleNamespace
+def test_sandbox_runner_package_result_embeds_trace_and_feedback() -> None:
+    """The runner's _package_result emits the paper trace + per-component feedback."""
+    from hotpotqa.agent.types import AgentToolCall, HotpotQAAgentOutput
+    from hotpotqa.config import HotpotQAConfig
+    from hotpotqa.optimization.spec import HotpotQARunner
 
-    from hotpotqa.agent.types import HotpotQAAgentOutput
-    from hotpotqa.optimization.spec import HotpotQASandboxFeedback
+    # Build a runner without invoking __init__ (which constructs an LLM client);
+    # we only exercise the pure _package_result path.
+    runner = HotpotQARunner.__new__(HotpotQARunner)
+    runner.cfg = HotpotQAConfig(retrieval_mode="distractor", retrieve_k=1)
 
     record = HotpotQARecord(
         sample_id="r1",
@@ -393,13 +380,21 @@ def test_sandbox_feedback_emits_per_component_narratives() -> None:
         paragraphs=(HotpotQAParagraph(title="T", sentences=("S",)),),
         supporting_titles=("T",),
     )
-    output = HotpotQAAgentOutput(answer="Ada", retrieved_paragraphs=[], tool_calls=[])
-    feedback = HotpotQASandboxFeedback()
-    sample = SimpleNamespace(sample_id="r1", input=record, ground_truth={"answer": "Ada"})
-
-    narratives = {
-        "policy_prompt": feedback._policy(sample, output),
-        "summarize_prompt": feedback._summarize(sample, output),
-    }
-    assert narratives["policy_prompt"]
-    assert narratives["summarize_prompt"]
+    output = HotpotQAAgentOutput(
+        answer="Ada",
+        retrieved_paragraphs=[],
+        tool_calls=[
+            AgentToolCall(
+                step_index=0,
+                tool_name="retrieve_k",
+                tool_args={"query": "Who?"},
+                observation="...",
+                thought="look it up",
+            )
+        ],
+    )
+    result = runner._package_result(record, output, {})
+    rm = result.run_metrics
+    assert "trace_evidence" in rm
+    assert set(rm["trace_evidence"]["per_component_feedback"]) == {"policy_prompt", "summarize_prompt"}
+    assert rm["tool_counts"] == {"hotpotqa_retrieve_k": 1}
