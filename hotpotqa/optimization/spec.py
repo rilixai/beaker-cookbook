@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from rilixai import spec
-from rilixai.prompt_optimization.models import Case, PromptCandidate
+from rilixai.prompt_optimization.models import Sample, PromptCandidate
 from rilixai.prompt_optimization.protocols import EvaluationProfile
 from rilixai.prompt_optimization.spec import OptimizationContext, PromptOptimizationSpec
 
@@ -53,7 +53,7 @@ def _build_hotpotqa_profile_resolver(
 
 def build_hotpotqa_spec(
     *,
-    cases_by_split: dict[str, Sequence[Case]],
+    samples_by_split: dict[str, Sequence[Sample]],
     seed_candidate: PromptCandidate | None = None,
     config: HotpotQAConfig | None = None,
     pydantic_agent: Any | None = None,
@@ -68,7 +68,7 @@ def build_hotpotqa_spec(
 
     Pass ``config.pydantic_agent_model`` (a PydanticAI model spec like
     ``"openai:gpt-4.1-mini"``) or a pre-built ``pydantic_agent``
-    instance. ``cases_by_split`` must include at least ``train`` and
+    instance. ``samples_by_split`` must include at least ``train`` and
     (``validation`` or ``val``) keys for optimization; evaluation-only
     uses can supply just one split. ``curated_plus_trace`` is the
     default reflection mode because the runtime populates per-tool
@@ -82,7 +82,7 @@ def build_hotpotqa_spec(
         pydantic_agent=pydantic_agent,
     )
     return PromptOptimizationSpec(
-        cases_by_split=cases_by_split,
+        samples_by_split=samples_by_split,
         seed_candidate=seed,
         extraction_runtime=runtime,
         agent_resolver=_hotpotqa_agent_resolver,
@@ -152,7 +152,7 @@ def build_spec(ctx: OptimizationContext) -> PromptOptimizationSpec:
         ),
     }
     return build_hotpotqa_spec(
-        cases_by_split={k: list(v) for k, v in splits.items()},
+        samples_by_split={k: list(v) for k, v in splits.items()},
         config=hotpot_cfg,
         model=cfg_in.get("model") or ctx.model,
         max_concurrency=int(cfg_in["max_concurrency"]),

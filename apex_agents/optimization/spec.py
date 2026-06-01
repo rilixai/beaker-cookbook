@@ -23,7 +23,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from rilixai import spec
-from rilixai.prompt_optimization.models import Case, PromptCandidate
+from rilixai.prompt_optimization.models import Sample, PromptCandidate
 from rilixai.prompt_optimization.protocols import EvaluationProfile
 from rilixai.prompt_optimization.spec import OptimizationContext, PromptOptimizationSpec
 
@@ -65,7 +65,7 @@ def _build_apex_agents_profile_resolver(
 
 def build_apex_agents_spec(
     *,
-    cases_by_split: dict[str, Sequence[Case]],
+    samples_by_split: dict[str, Sequence[Sample]],
     seed_candidate: PromptCandidate | None = None,
     config: ApexAgentsConfig | None = None,
     agent: Any | None = None,
@@ -102,7 +102,7 @@ def build_apex_agents_spec(
         judge=judge,
     )
     return PromptOptimizationSpec(
-        cases_by_split=cases_by_split,
+        samples_by_split=samples_by_split,
         seed_candidate=seed,
         extraction_runtime=runtime,
         agent_resolver=_apex_agents_agent_resolver,
@@ -184,7 +184,7 @@ def build_spec(ctx: OptimizationContext) -> PromptOptimizationSpec:
     from ..agent.world.world import build_world_factory
 
     return build_apex_agents_spec(
-        cases_by_split={
+        samples_by_split={
             "train": list(train_cases),
             "validation": list(val_cases),
         },

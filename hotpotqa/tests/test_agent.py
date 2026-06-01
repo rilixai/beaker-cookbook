@@ -28,7 +28,7 @@ from hotpotqa.optimization.runtime import build_hotpotqa_runtime
 
 def _record() -> HotpotQARecord:
     return HotpotQARecord(
-        case_id="case-1",
+        sample_id="case-1",
         question="Which city has the Eiffel Tower?",
         answer="Paris",
         question_type="bridge",
@@ -379,7 +379,7 @@ def test_agent_feedback_correctness_matches_official_em_scorer() -> None:
     )
 
     record = HotpotQARecord(
-        case_id="case-em",
+        sample_id="case-em",
         question="What animal is a dog?",
         answer="dog",
         question_type="bridge",

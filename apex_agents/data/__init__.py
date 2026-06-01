@@ -1,7 +1,7 @@
 """Raw APEX-Agents primitives — no GEPA dependency.
 
 * :mod:`.dataset` — HuggingFace loader (``mercor/apex-agents``), record
-  + rubric dataclasses, ``Case`` conversion.
+  + rubric dataclasses, ``Sample`` conversion.
 * :mod:`.world_splits` — world-level train/val splitters (and the
   k-fold partitioner) plus the stratified case cap used to hold train
   width constant across train-size points.

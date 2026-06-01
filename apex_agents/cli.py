@@ -43,7 +43,7 @@ from rilixai.prompt_optimization.evaluation import (
     field_accuracy_rows,
     serialize_eval_outputs,
 )
-from rilixai.prompt_optimization.models import Case, PromptCandidate
+from rilixai.prompt_optimization.models import Sample, PromptCandidate
 from rilixai.prompt_optimization.optimization import extract_best_candidate, summarize_gepa_result_metadata
 from rilixai.prompt_optimization.spec import (
     PromptOptimizationRunConfig,
@@ -275,7 +275,7 @@ def _resolve_judge(args: argparse.Namespace) -> Callable[[str, str, str], bool] 
     return None
 
 
-def _load_all_cases(args: argparse.Namespace) -> list[Case]:
+def _load_all_cases(args: argparse.Namespace) -> list[Sample]:
     # The dataset loader is a network call (gated HF dataset
     # ``mercor/apex-agents``). Honor ``--no-network`` here too so a dry
     # run fails fast with a clear message instead of leaking the HF
@@ -301,11 +301,11 @@ def _load_all_cases(args: argparse.Namespace) -> list[Case]:
 
 
 def _split_cases_by_world(
-    cases: list[Case],
+    cases: list[Sample],
     *,
     train_world_ids: list[str],
     test_world_ids: list[str],
-) -> tuple[list[Case], list[Case]]:
+) -> tuple[list[Sample], list[Sample]]:
     train_set = set(train_world_ids)
     test_set = set(test_world_ids)
     train = [c for c in cases if str(c.metadata.get("world_id")) in train_set]
@@ -313,7 +313,7 @@ def _split_cases_by_world(
     return train, test
 
 
-def _carve_inner_val(train: list[Case], args: argparse.Namespace) -> tuple[list[Case], list[Case]]:
+def _carve_inner_val(train: list[Sample], args: argparse.Namespace) -> tuple[list[Sample], list[Sample]]:
     """Split a fold's train pool into (inner_train, validation) by WHOLE worlds.
 
     GEPA selects candidates on the validation score; a same-world random
@@ -334,7 +334,7 @@ def _carve_inner_val(train: list[Case], args: argparse.Namespace) -> tuple[list[
     return inner_train, validation
 
 
-def _load_splits_for_command(args: argparse.Namespace) -> dict[str, list[Case]]:
+def _load_splits_for_command(args: argparse.Namespace) -> dict[str, list[Sample]]:
     """Build the cases-by-split mapping for the active command."""
     all_cases = _load_all_cases(args)
     world_ids = world_ids_for_cases(all_cases)
@@ -370,7 +370,7 @@ def _load_splits_for_command(args: argparse.Namespace) -> dict[str, list[Case]]:
     # cross-world held-out subset from the full-dataset eval.
     args._excluded_world_ids = set(val_world_ids) | train_world_ids  # type: ignore[attr-defined]
 
-    splits: dict[str, list[Case]] = {}
+    splits: dict[str, list[Sample]] = {}
     if args.command == "optimize":
         splits["train"] = train
         splits["validation"] = val_cases
@@ -486,7 +486,7 @@ def _fmt_hms(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{sec:02d}"
 
 
-def _build_spec_for_args(args: argparse.Namespace, splits: dict[str, list[Case]]) -> Any:
+def _build_spec_for_args(args: argparse.Namespace, splits: dict[str, list[Sample]]) -> Any:
     config = ApexAgentsConfig(
         task_model=args.task_model,
         task_temperature=args.task_temperature,
@@ -496,7 +496,7 @@ def _build_spec_for_args(args: argparse.Namespace, splits: dict[str, list[Case]]
         llm_timeout=args.llm_timeout,
     )
     return build_apex_agents_spec(
-        cases_by_split={name: list(cases) for name, cases in splits.items()},
+        samples_by_split={name: list(cases) for name, cases in splits.items()},
         model=args.task_model,
         max_concurrency=args.max_concurrency,
         config=config,
@@ -558,7 +558,7 @@ def _heldout_subset_summary(serialized_rows: list[dict[str, Any]], excluded_worl
     }
 
 
-def _run_evaluate(args: argparse.Namespace, spec: Any, splits: dict[str, list[Case]], output_dir: Path) -> int:
+def _run_evaluate(args: argparse.Namespace, spec: Any, splits: dict[str, list[Sample]], output_dir: Path) -> int:
     adapter = build_adapter_from_spec(spec)
     candidate = _load_candidate(args.candidate_json)
     target_cases = list(splits.get(args.split, []))
@@ -567,7 +567,7 @@ def _run_evaluate(args: argparse.Namespace, spec: Any, splits: dict[str, list[Ca
         return 2
     eval_started = time.monotonic()
     logger.info("Starting evaluate on split=%s (%d cases)...", args.split, len(target_cases))
-    report = evaluate_candidate_on_cases(adapter=adapter, candidate=candidate, cases=target_cases)
+    report = evaluate_candidate_on_cases(adapter=adapter, candidate=candidate, samples=target_cases)
     eval_elapsed = time.monotonic() - eval_started
     logger.info("evaluate complete in %s (%d cases)", _fmt_hms(eval_elapsed), len(target_cases))
     serialized = serialize_eval_outputs(report.outputs)

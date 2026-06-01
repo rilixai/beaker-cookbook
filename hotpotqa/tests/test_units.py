@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from rilixai.prompt_optimization.models import Case
+from rilixai.prompt_optimization.models import Sample
 
 from hotpotqa.data.dataset import (
     HotpotQAParagraph,
@@ -47,8 +47,8 @@ def test_cases_from_records_normalizes_hf_shape() -> None:
     cases = cases_from_records([_HF_RECORD])
     assert len(cases) == 1
     case = cases[0]
-    assert isinstance(case, Case)
-    assert case.case_id == "case-1"
+    assert isinstance(case, Sample)
+    assert case.sample_id == "case-1"
     record = case.input
     assert isinstance(record, HotpotQARecord)
     assert record.question == "Which city has the Eiffel Tower?"
@@ -75,7 +75,7 @@ def test_record_to_case_exposes_ground_truth_fields_for_metrics() -> None:
 
 def test_cases_from_records_accepts_pre_normalized_records() -> None:
     record = HotpotQARecord(
-        case_id="rec-7",
+        sample_id="rec-7",
         question="Q?",
         answer="A",
         question_type="comparison",
@@ -84,7 +84,7 @@ def test_cases_from_records_accepts_pre_normalized_records() -> None:
         supporting_titles=("T",),
     )
     cases = cases_from_records([record])
-    assert cases[0].case_id == "rec-7"
+    assert cases[0].sample_id == "rec-7"
     assert cases[0].input is record
     assert cases[0].group_key == "comparison"
 
@@ -172,7 +172,7 @@ def test_load_hotpotqa_paper_split_matches_artifact_slicing(monkeypatch: pytest.
             max_cases=size,
             config="fullwiki",
         )
-        assert [c.case_id for c in cases] == _expected(partition, size), (
+        assert [c.sample_id for c in cases] == _expected(partition, size), (
             f"Partition {partition!r} disagrees with the artifact's "
             f"`Benchmark.trim_dataset` selection — split logic has drifted."
         )
@@ -187,7 +187,7 @@ def test_load_hotpotqa_paper_split_rejects_unknown_partition() -> None:
 
 def test_record_to_case_explicit_group_key_wins() -> None:
     record = HotpotQARecord(
-        case_id="rec-2",
+        sample_id="rec-2",
         question="Q?",
         answer="A",
         question_type="bridge",
@@ -252,9 +252,9 @@ def test_metrics_calculator_aggregates_em_f1_and_recall() -> None:
     assert aggregate.field_sample_counts[SUPPORTING_TITLES_RECALL_FIELD] == 2
 
     assert aggregate.field_accuracies[ANSWER_FIELD] == pytest.approx(0.5)
-    # Case A: F1=1.0 (perfect), Case B: F1=0.0 (no token overlap with "Statue of Liberty")
+    # Sample A: F1=1.0 (perfect), Sample B: F1=0.0 (no token overlap with "Statue of Liberty")
     assert aggregate.field_accuracies[ANSWER_F1_FIELD] == pytest.approx(0.5)
-    # Case A: 2/2 gold titles retrieved; Case B: 0/1 retrieved → mean 0.5.
+    # Sample A: 2/2 gold titles retrieved; Sample B: 0/1 retrieved → mean 0.5.
     assert aggregate.field_accuracies[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(0.5)
 
 

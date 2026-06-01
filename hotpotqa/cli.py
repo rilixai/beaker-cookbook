@@ -52,7 +52,7 @@ from rilixai.prompt_optimization.evaluation import (
     field_accuracy_rows,
     serialize_eval_outputs,
 )
-from rilixai.prompt_optimization.models import Case, PromptCandidate
+from rilixai.prompt_optimization.models import Sample, PromptCandidate
 from rilixai.prompt_optimization.optimization import extract_best_candidate, summarize_gepa_result_metadata
 from rilixai.prompt_optimization.spec import (
     PromptOptimizationRunConfig,
@@ -234,7 +234,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _load_splits_for_command(args: argparse.Namespace) -> dict[str, list[Case]]:
+def _load_splits_for_command(args: argparse.Namespace) -> dict[str, list[Sample]]:
     """Load only the splits the requested command + split flag actually need.
 
     Paper-faithful by default: mirrors the GEPA artifact's data pipeline
@@ -250,7 +250,7 @@ def _load_splits_for_command(args: argparse.Namespace) -> dict[str, list[Case]]:
     """
     cache_dir = str(args.cache_dir) if args.cache_dir else None
     config = "fullwiki" if args.retrieval == "fullwiki" else "distractor"
-    splits: dict[str, list[Case]] = {}
+    splits: dict[str, list[Sample]] = {}
 
     if args.command == "optimize":
         if args.train_size > 0:
@@ -472,12 +472,12 @@ def _format_tool_usage_table(usage: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _placeholder_cases_for_spec(splits: dict[str, list[Case]]) -> dict[str, Sequence[Case]]:
-    """Build a ``cases_by_split`` map the rilixai spec is happy to validate.
+def _placeholder_cases_for_spec(splits: dict[str, list[Sample]]) -> dict[str, Sequence[Sample]]:
+    """Build a ``samples_by_split`` map the rilixai spec is happy to validate.
 
     ``PromptOptimizationSpec`` validates that every split it sees is a
-    non-empty sequence of ``Case``. For ``evaluate`` runs we only need
-    the split being scored, but the spec still needs a ``cases_by_split``
+    non-empty sequence of ``Sample``. For ``evaluate`` runs we only need
+    the split being scored, but the spec still needs a ``samples_by_split``
     mapping. Pass the loaded splits through directly; for optimize runs
     we additionally need ``train``+``validation`` which ``_load_splits_for_command``
     already produced.
@@ -503,7 +503,7 @@ def main(argv: list[str] | None = None) -> int:
         pydantic_agent_temperature=args.task_temperature,
     )
     spec = build_hotpotqa_spec(
-        cases_by_split=_placeholder_cases_for_spec(splits),
+        samples_by_split=_placeholder_cases_for_spec(splits),
         model=args.task_model,
         max_concurrency=args.max_concurrency,
         config=config,
@@ -567,7 +567,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     eval_started = time.monotonic()
     logger.info("Starting evaluate on split=%s (%d cases)...", args.split, len(target_cases))
-    report = evaluate_candidate_on_cases(adapter=adapter, candidate=candidate, cases=target_cases)
+    report = evaluate_candidate_on_cases(adapter=adapter, candidate=candidate, samples=target_cases)
     eval_elapsed = time.monotonic() - eval_started
     logger.info("evaluate complete in %s (%d cases)", _fmt_hms(eval_elapsed), len(target_cases))
     summary: dict[str, Any] = {

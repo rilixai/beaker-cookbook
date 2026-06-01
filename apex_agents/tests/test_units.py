@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 from rilixai.prompt_optimization.evaluation import evaluate_candidate_on_cases
-from rilixai.prompt_optimization.models import Case
+from rilixai.prompt_optimization.models import Sample
 from rilixai.prompt_optimization.spec import build_adapter_from_spec, validate_spec
 
 from apex_agents.agent.prompts import apex_agents_seed_candidate
@@ -88,13 +88,13 @@ def _world_row(world_id: str) -> dict[str, Any]:
 
 
 def test_cases_from_records_normalizes_and_exposes_ground_truth() -> None:
-    """One broad check that the loader emits Case + ApexAgentsRecord with
+    """One broad check that the loader emits Sample + ApexAgentsRecord with
     the expected shape AND that ground_truth is bundle-keyed + flat-keyed."""
     cases = cases_from_records([_task_row(0)])
     assert len(cases) == 1
     case = cases[0]
-    assert isinstance(case, Case)
-    assert case.case_id == "ib-task-0"
+    assert isinstance(case, Sample)
+    assert case.sample_id == "ib-task-0"
     record = case.input
     assert isinstance(record, ApexAgentsRecord)
     assert record.domain == "Investment Banking"
@@ -629,11 +629,11 @@ def test_world_level_folds_uneven_balances_and_rejects_bad_args() -> None:
 
 
 class _C:
-    """Minimal Case-like stub: only ``group_key`` matters to the splitter."""
+    """Minimal Sample-like stub: only ``group_key`` matters to the splitter."""
 
     def __init__(self, world: str, idx: int) -> None:
         self.group_key = world
-        self.case_id = f"{world}-{idx}"
+        self.sample_id = f"{world}-{idx}"
 
 
 def _cases(n_worlds: int, per_world: int = 3) -> list[_C]:
@@ -651,7 +651,7 @@ def test_inner_val_holds_out_whole_worlds_disjoint_and_deterministic() -> None:
     assert it_worlds | val_worlds == {f"world-{w:02d}" for w in range(9)}
     assert len(it) + len(val) == len(train)
     it2, val2 = world_held_out_val_split(train, n_val_worlds=2, seed=0)
-    assert {c.case_id for c in val2} == {c.case_id for c in val}
+    assert {c.sample_id for c in val2} == {c.sample_id for c in val}
     assert {c.group_key for c in world_held_out_val_split(train, n_val_worlds=2, seed=7)[1]} != val_worlds
 
 
@@ -673,7 +673,7 @@ def test_fixed_val_split_constant_and_disjoint() -> None:
     assert {c.group_key for c in val} == vw
     assert len(val) == 20
     _, val2, vw2 = fixed_val_split(cases, n_val_worlds=2, val_size=20, seed=0)
-    assert [c.case_id for c in val2] == [c.case_id for c in val] and vw2 == vw
+    assert [c.sample_id for c in val2] == [c.sample_id for c in val] and vw2 == vw
     assert len({c.group_key for c in val}) == 2
 
 
@@ -684,8 +684,8 @@ def test_stratified_cap_keeps_worlds_wide_vs_frontslice() -> None:
     assert len(strat) == 9 and len({c.group_key for c in strat}) == 9
     assert len(front) == 9 and len({c.group_key for c in front}) == 1
     assert stratified_case_cap(pool, None) == pool
-    assert [c.case_id for c in stratified_case_cap(pool, 18, seed=0)] == [
-        c.case_id for c in stratified_case_cap(pool, 18, seed=0)
+    assert [c.sample_id for c in stratified_case_cap(pool, 18, seed=0)] == [
+        c.sample_id for c in stratified_case_cap(pool, 18, seed=0)
     ]
     assert len({c.group_key for c in stratified_case_cap(pool, 18, seed=0)}) == 9
 
@@ -730,7 +730,7 @@ def _spec_stub_judge(criterion: str, answer: str, task_prompt: str) -> bool:
 
 def test_build_apex_agents_spec_passes_validation_and_accepts_overrides() -> None:
     spec = build_apex_agents_spec(
-        cases_by_split={"train": [], "validation": []},
+        samples_by_split={"train": [], "validation": []},
         world_factory=fake_world_factory({}),
         judge=_spec_stub_judge,
     )
@@ -746,7 +746,7 @@ def test_build_apex_agents_spec_passes_validation_and_accepts_overrides() -> Non
     assert spec.reflection_evidence_mode == "curated_plus_trace"
     # field_weights override flows through to the profile.
     override = build_apex_agents_spec(
-        cases_by_split={"train": []},
+        samples_by_split={"train": []},
         world_factory=fake_world_factory({}),
         judge=_spec_stub_judge,
         field_weights={"rubric_pass_rate": 0.5},
@@ -760,7 +760,7 @@ def test_build_apex_agents_spec_passes_validation_and_accepts_overrides() -> Non
 def test_spec_end_to_end_via_adapter_with_fake_world_and_stub_judge() -> None:
     cases = cases_from_records([_spec_task_row(0), _spec_task_row(1)])
     spec = build_apex_agents_spec(
-        cases_by_split={"test": cases},
+        samples_by_split={"test": cases},
         world_factory=fake_world_factory({"brief.txt": "value"}),
         model_factory=_scripted_model_factory(),
         judge=_spec_stub_judge,
@@ -770,7 +770,7 @@ def test_spec_end_to_end_via_adapter_with_fake_world_and_stub_judge() -> None:
     report = evaluate_candidate_on_cases(
         adapter=adapter,
         candidate=apex_agents_seed_candidate(),
-        cases=cases,
+        samples=cases,
     )
     assert report.field_accuracies["rubric_pass_rate"] == 1.0
     assert report.field_sample_counts["rubric_pass_rate"] == 2

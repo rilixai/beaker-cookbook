@@ -23,7 +23,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from rilixai.prompt_optimization.models import Case
+from rilixai.prompt_optimization.models import Sample
 
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class HotpotQAParagraph:
 class HotpotQARecord:
     """Normalized HotpotQA record used by the runtime and metrics."""
 
-    case_id: str
+    sample_id: str
     question: str
     answer: str
     question_type: str
@@ -113,7 +113,7 @@ def _normalize_context(raw: Any) -> tuple[HotpotQAParagraph, ...]:
 
 
 def _normalize_record(raw: Mapping[str, Any], *, index_hint: int) -> HotpotQARecord:
-    case_id = str(raw.get("id") or raw.get("_id") or f"hotpot-{index_hint}")
+    sample_id = str(raw.get("id") or raw.get("_id") or f"hotpot-{index_hint}")
     question = str(raw.get("question") or "").strip()
     answer = str(raw.get("answer") or "").strip()
     question_type = str(raw.get("type") or "").strip()
@@ -121,7 +121,7 @@ def _normalize_record(raw: Mapping[str, Any], *, index_hint: int) -> HotpotQARec
     paragraphs = _normalize_context(raw.get("context"))
     supporting_titles, supporting_sentence_ids = _normalize_supporting_facts(raw.get("supporting_facts"))
     return HotpotQARecord(
-        case_id=case_id,
+        sample_id=sample_id,
         question=question,
         answer=answer,
         question_type=question_type,
@@ -132,17 +132,17 @@ def _normalize_record(raw: Mapping[str, Any], *, index_hint: int) -> HotpotQARec
     )
 
 
-def record_to_case(record: HotpotQARecord, *, group_key: str | None = None) -> Case:
-    """Convert a normalized HotpotQA record into a rilixai :class:`Case`.
+def record_to_case(record: HotpotQARecord, *, group_key: str | None = None) -> Sample:
+    """Convert a normalized HotpotQA record into a rilixai :class:`Sample`.
 
     The ``input`` payload is the entire record (the pipeline reads question
     plus distractor paragraphs from it). ``ground_truth`` stores the keys the
     metrics calculator scores against.
     """
     resolved_group = group_key or record.question_type or "hotpotqa"
-    return Case(
+    return Sample(
         input=record,
-        case_id=record.case_id,
+        sample_id=record.sample_id,
         ground_truth={
             "answer": record.answer,
             "supporting_titles": list(record.supporting_titles),
@@ -160,9 +160,9 @@ def cases_from_records(
     records: Iterable[Mapping[str, Any] | HotpotQARecord],
     *,
     group_key: str | None = None,
-) -> list[Case]:
+) -> list[Sample]:
     """Build a list of optimizer cases from raw or normalized records."""
-    cases: list[Case] = []
+    cases: list[Sample] = []
     for idx, raw in enumerate(records):
         if isinstance(raw, HotpotQARecord):
             record = raw
@@ -184,7 +184,7 @@ def load_hotpotqa_split(
     cache_dir: str | None = None,
     shuffle_seed: int | None = None,
     skip: int = 0,
-) -> list[Case]:
+) -> list[Sample]:
     """Load a HotpotQA split from HuggingFace and convert it to optimizer cases.
 
     ``shuffle_seed`` controls the partitioning. When set, all examples in
@@ -266,7 +266,7 @@ def load_hotpotqa_paper_split(
     max_cases: int,
     config: str = "fullwiki",
     cache_dir: str | None = None,
-) -> list[Case]:
+) -> list[Sample]:
     """Load one of the GEPA paper's 150/300/300 splits, bit-identical to the artifact.
 
     Reproduces the artifact's data pipeline from

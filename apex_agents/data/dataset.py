@@ -30,7 +30,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from rilixai.prompt_optimization.models import Case
+from rilixai.prompt_optimization.models import Sample
 
 
 logger = logging.getLogger(__name__)
@@ -179,8 +179,8 @@ def _normalize_record(
     )
 
 
-def record_to_case(record: ApexAgentsRecord, *, group_key: str | None = None) -> Case:
-    """Convert a normalized APEX-Agents record into a rilixai :class:`Case`.
+def record_to_case(record: ApexAgentsRecord, *, group_key: str | None = None) -> Sample:
+    """Convert a normalized APEX-Agents record into a rilixai :class:`Sample`.
 
     The ground-truth bundle stashes the rubric + prompt + world/task
     ids the runtime needs to run the LLM judge after the agent
@@ -203,9 +203,9 @@ def record_to_case(record: ApexAgentsRecord, *, group_key: str | None = None) ->
         "rubric": rubric_payload,
         _APEX_AGENTS_GROUND_TRUTH_KEY: bundle,
     }
-    return Case(
+    return Sample(
         input=record,
-        case_id=record.task_id,
+        sample_id=record.task_id,
         ground_truth=ground_truth,
         group_key=resolved_group,
         metadata={
@@ -222,9 +222,9 @@ def cases_from_records(
     records: Iterable[Mapping[str, Any] | ApexAgentsRecord],
     *,
     group_key: str | None = None,
-) -> list[Case]:
+) -> list[Sample]:
     """Build a list of optimizer cases from raw or normalized records."""
-    cases: list[Case] = []
+    cases: list[Sample] = []
     for idx, raw in enumerate(records):
         if isinstance(raw, ApexAgentsRecord):
             record = raw
@@ -335,7 +335,7 @@ def load_apex_agents_cases(
     max_records: int | None = None,
     cache_dir: str | None = None,
     repo_id: str = APEX_AGENTS_HF_REPO,
-) -> list[Case]:
+) -> list[Sample]:
     """Load the APEX-Agents records and convert them to optimizer cases."""
     records = load_apex_agents_records(
         domain=domain,
@@ -346,7 +346,7 @@ def load_apex_agents_cases(
     return cases_from_records(records)
 
 
-def world_ids_for_cases(cases: Iterable[Case]) -> list[str]:
+def world_ids_for_cases(cases: Iterable[Sample]) -> list[str]:
     """Return the sorted distinct ``world_id`` group keys across cases."""
     seen: set[str] = set()
     for case in cases:
