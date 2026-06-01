@@ -14,8 +14,9 @@ Layout (each subpackage groups one concern):
   surface (zip extraction / openpyxl / pypdf / python-docx).
 * :mod:`apex_agents.data` — HF dataset loader + world-level k-fold +
   stratified train cap.
-* :mod:`apex_agents.optimization` — GEPA-facing surface (spec,
-  runtime adapter, metrics, per-component feedback).
+* :mod:`apex_agents.optimization` — GEPA-facing surface (metrics
+  judge + per-component feedback); the spec/runner/run-metrics
+  builder live in :mod:`apex_agents.rilixai_spec`.
 * :mod:`apex_agents.config` — :class:`ApexAgentsConfig` shared by the
   CLI and the runtime.
 * :mod:`apex_agents.cli` — local command-line entry point.
@@ -45,11 +46,11 @@ from .optimization.metrics import (
     build_rubric_judge,
     score_rubric,
 )
-from .optimization.runtime import build_apex_agents_run_metrics
 from .rilixai_spec import (
     ApexAgentsMetrics,
     ApexAgentsRunner,
     ApexAgentsSandboxConfig,
+    build_apex_agents_run_metrics,
     build_apex_agents_spec,
 )
 

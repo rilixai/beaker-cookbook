@@ -40,11 +40,11 @@ from .data.dataset import (
 )
 from .data.eval import exact_match_score, f1_score, f1_score_components, normalize_answer
 from .optimization.feedback import HotpotQAFeedback
-from .optimization.runtime import build_agent_run_metrics
 from .rilixai_spec import (
     HotpotQAMetrics,
     HotpotQARunner,
     HotpotQASandboxConfig,
+    build_agent_run_metrics,
     build_hotpotqa_spec,
 )
 
