@@ -12,7 +12,7 @@ from hotpotqa.data.dataset import (
     record_to_sample,
 )
 from hotpotqa.data.eval import f1_score, normalize_answer
-from hotpotqa.optimization.spec import HotpotQAMetrics
+from hotpotqa.rilixai_spec import HotpotQAMetrics
 
 
 # ─── dataset ────────────────────────────────────────────────────────────
@@ -278,14 +278,14 @@ def test_sandbox_spec_factory_is_registered() -> None:
     """
     from rilixai.testing import assert_spec_registered
 
-    from hotpotqa.optimization.spec import HotpotQARunner
+    from hotpotqa.rilixai_spec import HotpotQARunner
 
     reg = assert_spec_registered(
         HotpotQARunner,
         name="hotpotqa-agent",
         metadata_subset={"benchmark": "hotpotqa", "agent_kind": "pydantic_ai"},
     )
-    assert reg.entrypoint == "hotpotqa.optimization.spec:HotpotQARunner"
+    assert reg.entrypoint == "hotpotqa.rilixai_spec:HotpotQARunner"
     assert reg.metadata.get("task_type") == "hotpotqa_pydantic_agent"
     # Intentionally no version assertion: ``@spec`` doesn't pin a version.
     # ``sandbox.py --build`` supplies ``v<short_sha>`` at push time and
@@ -309,8 +309,8 @@ def test_sandbox_runner_builds_valid_spec(monkeypatch: pytest.MonkeyPatch) -> No
     from rilixai.prompt_optimization.spec import validate_spec
     from rilixai.testing import stub_optimization_context
 
-    import hotpotqa.optimization.spec as spec_mod
-    from hotpotqa.optimization.spec import HotpotQARunner
+    import hotpotqa.rilixai_spec as spec_mod
+    from hotpotqa.rilixai_spec import HotpotQARunner
 
     fake_record = HotpotQARecord(
         sample_id="row-1",
@@ -364,12 +364,15 @@ def test_sandbox_runner_package_result_embeds_trace_and_feedback() -> None:
     """The runner's _package_result emits the paper trace + per-component feedback."""
     from hotpotqa.agent.types import AgentToolCall, HotpotQAAgentOutput
     from hotpotqa.config import HotpotQAConfig
-    from hotpotqa.optimization.spec import HotpotQARunner
+    from hotpotqa.optimization.feedback import HotpotQAFeedback
+    from hotpotqa.rilixai_spec import HotpotQARunner
 
     # Build a runner without invoking __init__ (which constructs an LLM client);
-    # we only exercise the pure _package_result path.
+    # we only exercise the pure _package_result path. Attach the feedback the
+    # sandbox bridge would normally wire via @spec(feedback=...).
     runner = HotpotQARunner.__new__(HotpotQARunner)
     runner.cfg = HotpotQAConfig(retrieval_mode="distractor", retrieve_k=1)
+    runner.attach_feedback(HotpotQAFeedback())
 
     record = HotpotQARecord(
         sample_id="r1",

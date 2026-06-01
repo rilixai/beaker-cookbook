@@ -15,6 +15,10 @@ not anything the agent itself reads at inference time.
 
 from __future__ import annotations
 
+from typing import Any
+
+from rilixai.adapters import per_component_feedback
+
 from ..agent.types import (
     POLICY_COMPONENT,
     SUMMARIZE_COMPONENT,
@@ -34,21 +38,22 @@ AGENT_POLICY_COMPONENT = POLICY_COMPONENT
 AGENT_SUMMARIZE_COMPONENT = SUMMARIZE_COMPONENT
 
 
-def build_agent_per_component_feedback(
-    *,
-    record: HotpotQARecord,
-    output: HotpotQAAgentOutput,
-) -> dict[str, str]:
-    """Return per-component feedback strings the rilixai adapter consumes.
+class HotpotQAFeedback:
+    """Per-component feedback for the reflection LM.
 
-    Keys map onto the agent's two optimizable components; values are
-    the strings the reflection LM sees in the reflective dataset's
-    ``Feedback`` field when rewriting that component.
+    Each ``@per_component_feedback``-decorated method returns the narrative the
+    reflection LM reads when rewriting that component. rilixai collects them via
+    ``@spec(feedback=HotpotQAFeedback)`` — there's no dict-assembly to keep in
+    sync, and adding a third component is just a third decorated method.
     """
-    return {
-        AGENT_SUMMARIZE_COMPONENT: _summarize_feedback(record=record, output=output),
-        AGENT_POLICY_COMPONENT: _policy_prompt_feedback(record=record, output=output),
-    }
+
+    @per_component_feedback(POLICY_COMPONENT)
+    def policy(self, sample: Any, output: HotpotQAAgentOutput) -> str:
+        return _policy_prompt_feedback(record=sample.input, output=output)
+
+    @per_component_feedback(SUMMARIZE_COMPONENT)
+    def summarize(self, sample: Any, output: HotpotQAAgentOutput) -> str:
+        return _summarize_feedback(record=sample.input, output=output)
 
 
 # ─── summarize_prompt feedback ─────────────────────────────────────────
@@ -245,5 +250,5 @@ def _render_missed_evidence(missing_full_text: list[str]) -> str:
 __all__ = [
     "AGENT_POLICY_COMPONENT",
     "AGENT_SUMMARIZE_COMPONENT",
-    "build_agent_per_component_feedback",
+    "HotpotQAFeedback",
 ]

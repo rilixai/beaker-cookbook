@@ -20,7 +20,6 @@ from typing import Any
 from ..agent.types import AgentToolCall, HotpotQAAgentOutput
 from ..config import HotpotQAConfig
 from ..data.dataset import HotpotQARecord
-from .feedback import build_agent_per_component_feedback
 
 
 logger = logging.getLogger(__name__)
@@ -83,12 +82,10 @@ def build_agent_run_metrics(
         f"Gold answer: {record.answer!r}",
     ]
 
-    # Per-component agent feedback the rilixai adapter pulls into the
-    # reflective dataset's ``Feedback`` field. ``summarize_prompt``
-    # aggregates over the agent's variable number of summarize calls;
-    # ``policy_prompt`` analyzes the full tool-call sequence.
-    per_component_feedback = build_agent_per_component_feedback(record=record, output=output)
-
+    # Note: per-component feedback is no longer embedded here — it flows
+    # through ``@spec(feedback=HotpotQAFeedback)`` (the runner merges it into
+    # ``trace_evidence.per_component_feedback`` in ``_package_result``). This
+    # builder owns only the domain-specific trace evidence.
     return {
         "tool_counts": {f"hotpotqa_{name}": count for name, count in tool_counts.items()},
         "tool_calls_detail": tool_calls_detail,
@@ -99,7 +96,6 @@ def build_agent_run_metrics(
             "extraction_reasoning": extraction_reasoning,
             "documents_remaining_per_hop": documents_remaining_per_hop,
             "policy_reasoning": policy_reasoning,
-            "per_component_feedback": per_component_feedback,
         },
         "hotpotqa": {
             "mode": agent_kind + "_agent",

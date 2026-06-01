@@ -63,7 +63,7 @@ from rilixai.prompt_optimization.spec import (
 from .agent.prompts import hotpotqa_pydantic_agent_seed_candidate
 from .config import HotpotQAConfig
 from .data.dataset import load_hotpotqa_paper_split
-from .optimization.spec import build_hotpotqa_spec
+from .rilixai_spec import build_hotpotqa_spec
 
 
 logger = logging.getLogger("hotpotqa")

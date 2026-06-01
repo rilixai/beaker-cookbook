@@ -66,7 +66,7 @@ load_dotenv()
 # ``hotpotqa/sandbox.py``; parents[1] is the cookbook repo root.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MEMBER_PYPROJECT = REPO_ROOT / "hotpotqa" / "pyproject.toml"
-SPEC_TARGET = REPO_ROOT / "hotpotqa" / "optimization" / "spec.py"
+SPEC_TARGET = REPO_ROOT / "hotpotqa" / "rilixai_spec.py"
 SPEC_NAME = "hotpotqa-agent"
 SCOPE_KEY = "hotpotqa-agent"
 TASK_TYPE = "hotpotqa_pydantic_agent"

@@ -39,9 +39,9 @@ from .data.dataset import (
     record_to_sample,
 )
 from .data.eval import exact_match_score, f1_score, f1_score_components, normalize_answer
-from .optimization.feedback import build_agent_per_component_feedback
+from .optimization.feedback import HotpotQAFeedback
 from .optimization.runtime import build_agent_run_metrics
-from .optimization.spec import (
+from .rilixai_spec import (
     HotpotQAMetrics,
     HotpotQARunner,
     HotpotQASandboxConfig,
@@ -55,11 +55,11 @@ __all__ = [
     "DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT",
     "HotpotQAAgentOutput",
     "HotpotQAConfig",
+    "HotpotQAFeedback",
     "HotpotQAMetrics",
     "HotpotQARecord",
     "HotpotQARunner",
     "HotpotQASandboxConfig",
-    "build_agent_per_component_feedback",
     "build_agent_run_metrics",
     "build_hotpotqa_spec",
     "cases_from_records",
