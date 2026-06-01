@@ -8,9 +8,9 @@ name: Push specs to rilixai
 # freshly-pushed version. Triggers referencing ``@production`` (the
 # cookbook's default) pick it up immediately, with no per-merge edits.
 #
-# Push + promote happen via ``<member>/sandbox.py --build --no-trigger``
-# (default version: ``v<short_sha>`` from git; promote: on; trigger: skipped
-# — CI never spends LLM tokens on a smoke run).
+# Push + promote happen via ``rilixai push --member <m>`` (reads the
+# member's [tool.rilixai.spec], auto-discovers deps, builds the image, and
+# flips ``<name>@production``). CI never triggers an optimization run.
 #
 # Per-member triggering: ``dorny/paths-filter`` decides which workspace
 # member's tree changed and the matrix only runs that member's push. A change
@@ -143,26 +143,24 @@ jobs:
         run: uv sync --all-packages --group dev --locked
 
       - name: Push + promote spec
-        # ``<member>/sandbox.py --build --no-trigger`` runs ``rilixai push``
-        # with the deps from that member's pyproject and then ``rilixai spec
-        # promote`` to point ``<name>@production`` at the fresh row.
-        # ``--no-trigger`` keeps CI build-only — optimization runs are
-        # initiated explicitly by humans (or downstream services) against
-        # ``<name>@production``, never auto-fired on every merge.
+        # ``rilixai push --member <m>`` reads that member's
+        # ``[tool.rilixai.spec]`` for the target/name, auto-discovers its
+        # runtime deps, builds the image, and promotes the pushed version to
+        # ``<name>@production``. CI is build-only — it never triggers an
+        # optimization run; those are initiated explicitly by humans (or
+        # downstream services) against ``<name>@production``.
         run: |
           VERSION_OVERRIDE_FLAG=""
           if [ -n "${VERSION_OVERRIDE}" ]; then
             VERSION_OVERRIDE_FLAG="--version ${VERSION_OVERRIDE}"
             echo "Using workflow_dispatch override: --version ${VERSION_OVERRIDE}"
-          else
-            echo "No override; sandbox.py defaults to v\$(git rev-parse --short HEAD)"
           fi
-          SKIP_PROMOTE_FLAG=""
+          PROMOTE_FLAG=""
           if [ "${SKIP_PROMOTE}" = "true" ]; then
-            SKIP_PROMOTE_FLAG="--no-promote"
+            PROMOTE_FLAG="--no-promote"
             echo "workflow_dispatch requested --no-promote (build won't flip @production)"
           fi
-          uv run ${{ matrix.member }}/sandbox.py --build --no-trigger ${VERSION_OVERRIDE_FLAG} ${SKIP_PROMOTE_FLAG}
+          uv run rilixai push --member ${{ matrix.member }} ${VERSION_OVERRIDE_FLAG} ${PROMOTE_FLAG}
         env:
           VERSION_OVERRIDE: ${{ inputs.version_override }}
           SKIP_PROMOTE: ${{ inputs.skip_promote }}

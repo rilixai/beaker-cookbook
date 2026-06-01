@@ -16,7 +16,7 @@ dependencies = [
   # writeback fix. SSH URL (not HTTPS) so CI auth flows through
   # ``RILIXAI_GITHUB_SSH_KEY`` via webfactory's ssh-agent action —
   # matches the rilix repo's auth pattern.
-  "rilixai @ git+ssh://git@github.com/rilixai/rilixai.git@fcba11c7712a86f9ee4e9f7b78218ef1f9f587af",
+  "rilixai @ git+ssh://git@github.com/rilixai/rilixai.git@c02ed1ada1c317a7da93e3c31660012a9dde27c9",
   "litellm>=1.74",
   # litellm lazy-imports tenacity for its retry wrapper but doesn't
   # declare it as a dependency. Locally a transitive dep provides it,
@@ -36,6 +36,12 @@ dependencies = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# Consumed by `rilixai push --member apex_agents` (CI) + `rilixai trigger`.
+[tool.rilixai.spec]
+name = "apex-agents"
+target = "apex_agents/rilixai_spec.py"
+task_type = "apex_agent"
 
 [tool.hatch.build.targets.wheel]
 # The package is the workspace member directory itself. Remap so

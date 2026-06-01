@@ -17,7 +17,7 @@ dependencies = [
   # class-style @spec, and the Case->Sample rename this member adopts.
   # SSH URL (not HTTPS) so CI auth flows through
   # ``RILIXAI_GITHUB_SSH_KEY`` via webfactory's ssh-agent action.
-  "rilixai @ git+ssh://git@github.com/rilixai/rilixai.git@fcba11c7712a86f9ee4e9f7b78218ef1f9f587af",
+  "rilixai @ git+ssh://git@github.com/rilixai/rilixai.git@c02ed1ada1c317a7da93e3c31660012a9dde27c9",
   "pydantic-ai>=0.0.20",
   "rank-bm25>=0.2",
   "datasets>=2.14",
@@ -30,6 +30,14 @@ dependencies = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# Consumed by `rilixai push --member hotpotqa` (CI) + `rilixai trigger`:
+# the spec target (the @spec-decorated runner) + the run task type. The
+# member's deps (above) are auto-discovered, so no per-member sandbox.py.
+[tool.rilixai.spec]
+name = "hotpotqa-agent"
+target = "hotpotqa/rilixai_spec.py"
+task_type = "hotpotqa_pydantic_agent"
 
 [tool.hatch.build.targets.wheel]
 # The package is the workspace member directory itself. Remap so
