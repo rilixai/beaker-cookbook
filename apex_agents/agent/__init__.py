@@ -14,7 +14,7 @@ reference harness shape:
   * ``resum_summary_prompt`` — ReSum compaction prompt
 
 The per-component reflection feedback strings live in
-:mod:`apex_agents.optimization.feedback`.
+:mod:`apex_agents.feedback`.
 """
 
 from .agent import ApexReActAgent

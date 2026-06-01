@@ -6,11 +6,11 @@ sub-agent's system prompt, reused across every summarize call). Both
 get rich, gold-supervised textual feedback the reflection LM reads when
 rewriting them.
 
-Lives under ``optimization/`` (not ``agent/``) because feedback
-strings exist purely to populate
+Feedback strings exist purely to populate
 ``trace_evidence.per_component_feedback`` for the rilixai reflection
-LM — they're GEPA-facing infrastructure the runtime adapter wraps,
-not anything the agent itself reads at inference time.
+LM — they're GEPA-facing infrastructure the runner wraps (via
+``@spec(feedback=HotpotQAFeedback)``), not anything the agent itself
+reads at inference time.
 """
 
 from __future__ import annotations
@@ -19,20 +19,20 @@ from typing import Any
 
 from rilixai.adapters import per_component_feedback
 
-from ..agent.types import (
+from .agent.types import (
     POLICY_COMPONENT,
     SUMMARIZE_COMPONENT,
     AgentToolCall,
     HotpotQAAgentOutput,
 )
-from ..data.dataset import HotpotQARecord
-from ..data.eval import exact_match_score
-from ..data.gold import ideal_summary_from_supporting_facts
+from .data.dataset import HotpotQARecord
+from .data.eval import exact_match_score
+from .data.gold import ideal_summary_from_supporting_facts
 
 
 # Legacy aliases — keep so external consumers importing
 # ``AGENT_POLICY_COMPONENT`` / ``AGENT_SUMMARIZE_COMPONENT`` from
-# this module (or via ``hotpotqa.optimization``) don't break.
+# this module don't break.
 # The canonical names live in ``agent.types`` so they can't drift.
 AGENT_POLICY_COMPONENT = POLICY_COMPONENT
 AGENT_SUMMARIZE_COMPONENT = SUMMARIZE_COMPONENT

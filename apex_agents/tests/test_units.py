@@ -46,10 +46,10 @@ from apex_agents.data.world_splits import (
     world_held_out_val_split,
     world_level_folds,
 )
-from apex_agents.optimization.feedback import (
+from apex_agents.feedback import (
     _system_prompt_feedback,
 )
-from apex_agents.optimization.metrics import (
+from apex_agents.metrics import (
     RUBRIC_FIELD,
     build_rubric_judge,
     score_rubric,
@@ -558,7 +558,7 @@ def test_parse_verdict_is_robust_to_verbose_reasoning_judges() -> None:
     That systematically depressed scores for reasoning/'thinking'
     judges (gemini-2.5-flash) vs terse ones (gpt-4.1).
     """
-    from apex_agents.optimization.metrics import _parse_verdict
+    from apex_agents.metrics import _parse_verdict
 
     assert _parse_verdict("The value matches; there are no errors.\nVERDICT: MET") is True
     assert _parse_verdict("Reasoning: it fails the threshold.\nVERDICT: NOT MET") is False

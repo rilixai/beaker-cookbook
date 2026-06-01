@@ -9,7 +9,7 @@ PydanticAI's built-in ``final_result`` mechanism.
 
 Two optimizable components — ``policy_prompt`` + ``summarize_prompt``
 — get rewritten by rilixai's GEPA loop. The per-component feedback
-strings the reflection LM reads live in :mod:`hotpotqa.optimization.feedback`
+strings the reflection LM reads live in :mod:`hotpotqa.feedback`
 (they're GEPA-facing infrastructure, not agent internals the agent
 itself reads).
 """

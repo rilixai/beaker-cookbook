@@ -31,8 +31,8 @@ from .agent.types import ApexAgentsAgentOutput
 from .config import ApexAgentsConfig
 from .data.dataset import _APEX_AGENTS_GROUND_TRUTH_KEY, ApexAgentsRecord, load_apex_agents_cases
 from .data.world_splits import stratified_case_cap, world_held_out_val_split
-from .optimization.feedback import ApexAgentsFeedback
-from .optimization.metrics import RUBRIC_FIELD, build_rubric_judge, coerce_pass_rate, score_rubric
+from .feedback import ApexAgentsFeedback
+from .metrics import RUBRIC_FIELD, build_rubric_judge, coerce_pass_rate, score_rubric
 
 
 _APEX_AGENTS_PROFILE_KEY = "apex_agents"

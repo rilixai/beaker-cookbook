@@ -4,7 +4,7 @@ The "ground truth" shelf: dataset loading, the official scorer
 primitives, and supporting-fact utilities. None of these modules
 import from rilixai. A reader writing a new benchmark looks here to
 see what the underlying dataset surface looks like, then to
-:mod:`hotpotqa.optimization` to see how it gets wired into GEPA.
+:mod:`hotpotqa.rilixai_spec` to see how it gets wired into GEPA.
 """
 
 from __future__ import annotations

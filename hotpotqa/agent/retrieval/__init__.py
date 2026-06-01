@@ -15,7 +15,7 @@ Lives under ``agent/`` because retrieval is the agent's tool surface —
 ``retrieve_k(query)`` is one of two tools the agent calls. The runtime
 adapter consumes ``build_retrieve_k_fn_for_case`` from here to
 parameterize the agent's per-case retriever; that crossing is fine
-because ``optimization/runtime.py`` already composes the agent —
+because ``rilixai_spec.py`` already composes the agent —
 one more agent/* import doesn't add coupling.
 
 ``RetrievalMode`` (the ``Literal["distractor", "fullwiki"]`` type) lives

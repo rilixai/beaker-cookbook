@@ -4,7 +4,7 @@
 and the spec all share. Lives at the top level (as a peer of ``cli.py``)
 because it's consumed by both the CLI and the optimization runtime —
 keeping it here avoids a cycle between ``cli.py`` and
-``optimization/runtime.py``.
+``rilixai_spec.py``.
 
 (Renamed from ``HotpotQAPipelineConfig`` post-workflow-deletion — the
 "Pipeline" qualifier was disambiguating against the deleted DSPy

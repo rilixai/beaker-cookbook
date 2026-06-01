@@ -7,7 +7,7 @@
   width constant across train-size points.
 
 A reader writing a new benchmark looks here to see what the underlying
-dataset surface looks like, then goes to :mod:`apex_agents.optimization`
+dataset surface looks like, then goes to :mod:`apex_agents.rilixai_spec`
 to see how it gets wired into GEPA.
 """
 

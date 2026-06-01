@@ -21,13 +21,13 @@ from typing import Any
 
 from rilixai.adapters import per_component_feedback
 
-from ..agent.prompts import (
+from .agent.prompts import (
     RESUM_SUMMARY_PROMPT_COMPONENT,
     SYSTEM_PROMPT_COMPONENT,
     TASK_TEMPLATE_COMPONENT,
 )
-from ..agent.types import AgentToolCall, ApexAgentsAgentOutput
-from ..data.dataset import ApexAgentsRecord
+from .agent.types import AgentToolCall, ApexAgentsAgentOutput
+from .data.dataset import ApexAgentsRecord
 
 
 class ApexAgentsFeedback:

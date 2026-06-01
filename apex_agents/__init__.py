@@ -14,9 +14,11 @@ Layout (each subpackage groups one concern):
   surface (zip extraction / openpyxl / pypdf / python-docx).
 * :mod:`apex_agents.data` — HF dataset loader + world-level k-fold +
   stratified train cap.
-* :mod:`apex_agents.optimization` — GEPA-facing surface (metrics
-  judge + per-component feedback); the spec/runner/run-metrics
-  builder live in :mod:`apex_agents.rilixai_spec`.
+* :mod:`apex_agents.rilixai_spec` — the whole GEPA-facing
+  integration (``@spec`` runner, metrics, run-metrics builder).
+* :mod:`apex_agents.metrics` — the LLM rubric judge.
+* :mod:`apex_agents.feedback` — :class:`ApexAgentsFeedback`, the
+  per-component reflection narratives.
 * :mod:`apex_agents.config` — :class:`ApexAgentsConfig` shared by the
   CLI and the runtime.
 * :mod:`apex_agents.cli` — local command-line entry point.
@@ -39,8 +41,8 @@ from .data.dataset import (
     load_apex_agents_records,
     record_to_sample,
 )
-from .optimization.feedback import ApexAgentsFeedback
-from .optimization.metrics import (
+from .feedback import ApexAgentsFeedback
+from .metrics import (
     DEFAULT_JUDGE_MODEL,
     RUBRIC_FIELD,
     build_rubric_judge,

@@ -326,7 +326,7 @@ def test_summarize_feedback_reads_pydantic_ai_tool_arg_names() -> None:
     silently misleading the reflection LM.
     """
     from hotpotqa.agent.types import AgentToolCall
-    from hotpotqa.optimization.feedback import _format_summarize_call
+    from hotpotqa.feedback import _format_summarize_call
 
     step_with_context = AgentToolCall(
         step_index=0,
@@ -370,7 +370,7 @@ def test_agent_feedback_correctness_matches_official_em_scorer() -> None:
     so feedback labels agree with the scored metric for every case.
     """
     from hotpotqa.agent.types import AgentToolCall, HotpotQAAgentOutput
-    from hotpotqa.optimization.feedback import (
+    from hotpotqa.feedback import (
         _policy_prompt_feedback,
         _summarize_feedback,
     )

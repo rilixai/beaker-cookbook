@@ -2,7 +2,7 @@
 
 ``ApexAgentsConfig`` is the single knob bag shared by the CLI, the
 runtime adapter, and the spec. Lives at the top level (peer of
-``cli.py``) so both ``cli.py`` and ``optimization/runtime.py`` can
+``cli.py``) so both ``cli.py`` and ``rilixai_spec.py`` can
 import it without a cycle.
 
 (Renamed from ``ApexAgentsPipelineConfig`` — the "Pipeline" qualifier
@@ -15,12 +15,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-# Kept inline (not imported from ``optimization.metrics``) so this
-# module sits at the very bottom of the package import graph: both
-# ``optimization.runtime`` and ``optimization.spec`` import
-# :class:`ApexAgentsConfig` from here, so a back-edge to
-# ``optimization.metrics`` would cycle. The canonical definition lives
-# in ``optimization.metrics``; this mirror is kept in lockstep.
+# Kept inline (not imported from ``metrics``) so this module sits at
+# the very bottom of the package import graph: ``rilixai_spec`` imports
+# :class:`ApexAgentsConfig` from here, so a back-edge to ``metrics``
+# would cycle. The canonical definition lives in ``metrics``; this
+# mirror is kept in lockstep.
 DEFAULT_JUDGE_MODEL = "gemini/gemini-2.5-flash"
 
 

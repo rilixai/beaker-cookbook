@@ -29,7 +29,7 @@ from .agent.types import AgentToolCall, HotpotQAAgentOutput
 from .config import HotpotQAConfig
 from .data.dataset import HotpotQARecord, load_hotpotqa_paper_split
 from .data.eval import exact_match_score, f1_score
-from .optimization.feedback import HotpotQAFeedback
+from .feedback import HotpotQAFeedback
 
 
 _HOTPOTQA_PROFILE_KEY = "hotpotqa"

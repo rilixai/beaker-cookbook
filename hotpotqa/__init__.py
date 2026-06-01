@@ -17,10 +17,12 @@ Layout (each subpackage groups one concern):
   ``retrieve_k`` tool implementation under :mod:`.agent.retrieval`).
 * :mod:`hotpotqa.data` — raw HotpotQA primitives (dataset loader,
   official scorer, supporting-fact helpers).
-* :mod:`hotpotqa.optimization` — GEPA-facing surface (spec, runtime
-  adapter, metrics aggregator, per-component feedback strings).
+* :mod:`hotpotqa.rilixai_spec` — the whole GEPA-facing integration
+  (``@spec`` runner, metrics, run-metrics builder).
+* :mod:`hotpotqa.feedback` — :class:`HotpotQAFeedback`, the
+  per-component reflection narratives.
 * :mod:`hotpotqa.config` — :class:`HotpotQAConfig` shared by the CLI
-  and the runtime.
+  and the runner.
 * :mod:`hotpotqa.cli` — command-line entry point.
 """
 
@@ -39,7 +41,7 @@ from .data.dataset import (
     record_to_sample,
 )
 from .data.eval import exact_match_score, f1_score, f1_score_components, normalize_answer
-from .optimization.feedback import HotpotQAFeedback
+from .feedback import HotpotQAFeedback
 from .rilixai_spec import (
     HotpotQAMetrics,
     HotpotQARunner,

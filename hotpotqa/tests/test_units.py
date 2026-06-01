@@ -364,7 +364,7 @@ def test_sandbox_runner_package_result_embeds_trace_and_feedback() -> None:
     """The runner's _package_result emits the paper trace + per-component feedback."""
     from hotpotqa.agent.types import AgentToolCall, HotpotQAAgentOutput
     from hotpotqa.config import HotpotQAConfig
-    from hotpotqa.optimization.feedback import HotpotQAFeedback
+    from hotpotqa.feedback import HotpotQAFeedback
     from hotpotqa.rilixai_spec import HotpotQARunner
 
     # Build a runner without invoking __init__ (which constructs an LLM client);
