@@ -55,3 +55,12 @@ class HotpotQAAgentOutput:
     answer: str
     retrieved_paragraphs: list[HotpotQAParagraph]
     tool_calls: list[AgentToolCall]
+
+    @property
+    def retrieved_titles(self) -> list[str]:
+        """Titles of the retrieved paragraphs, in retrieval order.
+
+        Exposed as a flat list so a ``FieldConfig(extract_from="retrieved_titles")``
+        resolves directly against this output for supporting-title recall scoring.
+        """
+        return [p.title for p in self.retrieved_paragraphs]

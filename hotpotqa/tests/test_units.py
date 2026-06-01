@@ -288,25 +288,118 @@ def test_supporting_titles_recall_is_case_insensitive() -> None:
 def test_sandbox_spec_factory_is_registered() -> None:
     """Lock the @spec(...) registration contract so ``rilixai push`` discovery can't silently break.
 
-    ``rilixai push --target hotpotqa/optimization/spec.py --name hotpotqa-agent``
-    enumerates ``@spec``-decorated factories via the ``__rilixai_spec__``
-    attribute the decorator stamps. If anyone renames ``build_spec`` or
-    drops the decorator, this test fails loudly before a stale-image
-    push reaches the build worker.
+    ``rilixai push`` enumerates ``@spec``-decorated targets via the
+    ``__rilixai_spec__`` attribute the decorator stamps. If anyone renames
+    ``HotpotQARunner`` or drops the decorator, this test fails loudly before a
+    stale-image push reaches the build worker.
     """
-    from rilixai.spec import get_registration
+    from rilixai.testing import assert_spec_registered
 
-    from hotpotqa.optimization.spec import build_spec
+    from hotpotqa.optimization.spec import HotpotQARunner
 
-    reg = get_registration(build_spec)
-    assert reg is not None, "build_spec must carry @spec registration"
-    assert reg.name == "hotpotqa-agent"
-    assert reg.entrypoint == "hotpotqa.optimization.spec:build_spec"
-    assert reg.metadata.get("benchmark") == "hotpotqa"
-    assert reg.metadata.get("agent_kind") == "pydantic_ai"
+    reg = assert_spec_registered(
+        HotpotQARunner,
+        name="hotpotqa-agent",
+        metadata_subset={"benchmark": "hotpotqa", "agent_kind": "pydantic_ai"},
+    )
+    assert reg.entrypoint == "hotpotqa.optimization.spec:HotpotQARunner"
+    assert reg.metadata.get("task_type") == "hotpotqa_pydantic_agent"
     # Intentionally no version assertion: ``@spec`` doesn't pin a version.
     # ``sandbox.py --build`` supplies ``v<short_sha>`` at push time and
     # promotes to ``@production``. ``reg.version`` will be whatever
     # rilixai's ``DEFAULT_SPEC_VERSION`` constant is (currently ``"v1"``),
     # but that value never reaches the spec_versions table for normal
     # ``--build`` flows because the CLI ``--version`` flag overrides it.
+
+
+def test_sandbox_runner_builds_valid_spec(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The class-style @spec runner assembles a valid PromptOptimizationSpec.
+
+    Exercises the full rilixai bridge (build_spec_from_runner_class):
+    constructs HotpotQARunner from a stub context, validates ctx.config
+    against the runner's config_schema, auto-reads the seed from the
+    applier, builds the metrics calculator from the declared field_configs,
+    and loads samples. Data loading is monkeypatched so the test stays
+    hermetic (no HF download).
+    """
+    from rilixai.adapters.spec_builder import build_spec_from_runner_class
+    from rilixai.prompt_optimization.spec import validate_spec
+    from rilixai.testing import stub_optimization_context
+
+    import hotpotqa.optimization.spec as spec_mod
+    from hotpotqa.optimization.spec import HotpotQARunner
+
+    fake_record = HotpotQARecord(
+        sample_id="row-1",
+        question="Q?",
+        answer="A",
+        question_type="bridge",
+        level="easy",
+        paragraphs=(HotpotQAParagraph(title="T", sentences=("S",)),),
+        supporting_titles=("T",),
+    )
+    fake_samples = cases_from_records([fake_record])
+    monkeypatch.setattr(spec_mod, "load_hotpotqa_paper_split", lambda *a, **k: list(fake_samples))
+    # The agent builds an OpenAI client at construction (no network call until
+    # forward()); a dummy key lets the constructor succeed in-test.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy")
+
+    ctx = stub_optimization_context(config={"train_size": 1, "val_size": 1, "retrieval_mode": "distractor"})
+    built = build_spec_from_runner_class(HotpotQARunner, ctx)
+
+    validate_spec(built)
+    assert built.name == "hotpotqa-agent"
+    assert built.task_type == "hotpotqa_pydantic_agent"
+    # Seed auto-read from the agent's prompts via the applier.
+    assert set(built.seed_candidate.components) == {"policy_prompt", "summarize_prompt"}
+    assert set(built.samples_by_split) == {"train", "validation"}
+
+
+def test_sandbox_metrics_scores_answer_and_titles() -> None:
+    """The class-style metrics calculator scores EM/F1 + supporting-title recall."""
+    from hotpotqa.optimization.spec import HotpotQASandboxMetrics
+
+    metrics = HotpotQASandboxMetrics()
+    emitted = {slot.field_name for slot in metrics.field_configs}
+    assert emitted == {"answer_hotpot_exact_match", "answer_hotpot_f1", "titles_recall"}
+
+    results = {
+        "s1": {"answer": "Paris", "retrieved_titles": ["France", "Paris"]},
+        "s2": {"answer": "wrong", "retrieved_titles": ["Foo"]},
+    }
+    ground_truth = {
+        "s1": {"answer": "Paris", "supporting_titles": ["France", "Paris"]},
+        "s2": {"answer": "Berlin", "supporting_titles": ["Germany"]},
+    }
+    out = metrics.calculate_metrics(results, ground_truth)
+    # s1 exact + full recall; s2 miss + zero recall → 0.5 EM, 0.5 titles recall.
+    assert out.field_accuracies["answer_hotpot_exact_match"] == pytest.approx(0.5)
+    assert out.field_accuracies["titles_recall"] == pytest.approx(0.5)
+
+
+def test_sandbox_feedback_emits_per_component_narratives() -> None:
+    """The class-style feedback delegates to the agent feedback builder."""
+    from types import SimpleNamespace
+
+    from hotpotqa.agent.types import HotpotQAAgentOutput
+    from hotpotqa.optimization.spec import HotpotQASandboxFeedback
+
+    record = HotpotQARecord(
+        sample_id="r1",
+        question="Who?",
+        answer="Ada",
+        question_type="bridge",
+        level="easy",
+        paragraphs=(HotpotQAParagraph(title="T", sentences=("S",)),),
+        supporting_titles=("T",),
+    )
+    output = HotpotQAAgentOutput(answer="Ada", retrieved_paragraphs=[], tool_calls=[])
+    feedback = HotpotQASandboxFeedback()
+    sample = SimpleNamespace(sample_id="r1", input=record, ground_truth={"answer": "Ada"})
+
+    narratives = {
+        "policy_prompt": feedback._policy(sample, output),
+        "summarize_prompt": feedback._summarize(sample, output),
+    }
+    assert narratives["policy_prompt"]
+    assert narratives["summarize_prompt"]
