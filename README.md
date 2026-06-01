@@ -19,7 +19,7 @@ apex_agents/      Mercor APEX-Agents (Law / IB) — ReAct toolbelt agent + LLM r
 ```
 
 Each folder is the whole rilixai integration in one file — a single
-`@spec`-decorated `BaseSampleRunner` in `rilixai_spec.py` — plus a README
+`@spec`-decorated `BaseCaseRunner` in `rilixai_spec.py` — plus a README
 with the canonical commands and a hermetic test suite so you can verify
 the harness end-to-end before spending anything on LLM calls. There's no
 per-recipe CLI or build script: the top-level `rilixai` CLI (`dry-run`,
@@ -41,7 +41,7 @@ follow the commands in its README.
 ## Onboarding your own agent
 
 The recipes here are worked examples of one contract: a single
-`@spec`-decorated `BaseSampleRunner` class wires your production agent
+`@spec`-decorated `BaseCaseRunner` class wires your production agent
 into rilixai's optimizer. **[`ONBOARDING.md`](ONBOARDING.md)** is the
 full contract reference — what rilixai expects from your agent, the
 `ComponentApplier` framework cheatsheet (PydanticAI, OpenAI, Anthropic,
@@ -76,7 +76,7 @@ Every recipe is driven by the top-level `rilixai` CLI:
 
 | Command | Where it runs | When to use |
 |---|---|---|
-| `rilixai dry-run` | Your laptop | One sample with the seed candidate — confirm wiring before pushing |
+| `rilixai dry-run` | Your laptop | One case with the seed candidate — confirm wiring before pushing |
 | `rilixai push` + `trigger` + `status` + `pull` | rilixai hosted Modal sandbox | Real optimization runs at scale, scheduled retraining, sharing optimized prompts across teams |
 
 `dry-run` uses your `OPENAI_API_KEY` directly and prints to your

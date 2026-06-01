@@ -37,7 +37,7 @@ from .data.dataset import (
     cases_from_records,
     load_apex_agents_cases,
     load_apex_agents_records,
-    record_to_sample,
+    record_to_case,
 )
 from .feedback import ApexAgentsFeedback
 from .metrics import (
@@ -75,6 +75,6 @@ __all__ = [
     "cases_from_records",
     "load_apex_agents_cases",
     "load_apex_agents_records",
-    "record_to_sample",
+    "record_to_case",
     "score_rubric",
 ]

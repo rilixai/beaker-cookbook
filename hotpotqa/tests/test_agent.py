@@ -25,7 +25,7 @@ from hotpotqa.data.dataset import HotpotQAParagraph, HotpotQARecord
 
 def _record() -> HotpotQARecord:
     return HotpotQARecord(
-        sample_id="case-1",
+        case_id="case-1",
         question="Which city has the Eiffel Tower?",
         answer="Paris",
         question_type="bridge",
@@ -376,7 +376,7 @@ def test_agent_feedback_correctness_matches_official_em_scorer() -> None:
     )
 
     record = HotpotQARecord(
-        sample_id="case-em",
+        case_id="case-em",
         question="What animal is a dog?",
         answer="dog",
         question_type="bridge",

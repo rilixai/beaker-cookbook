@@ -295,7 +295,7 @@ _DOMAIN_TOOL_SPECS: dict[str, dict[str, Any]] = {
         },
     },
     "search_files": {
-        "description": "Sample-insensitive substring search over the world's text files.",
+        "description": "Case-insensitive substring search over the world's text files.",
         "parameters": {
             "type": "object",
             "properties": {"query": {"type": "string"}},

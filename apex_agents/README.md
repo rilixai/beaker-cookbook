@@ -27,7 +27,7 @@ export GOOGLE_API_KEY=...       # judge (gemini-2.5-flash default)
 
 ## Sanity-check locally
 
-`rilixai dry-run` builds the spec and runs one sample with the seed candidate
+`rilixai dry-run` builds the spec and runs one case with the seed candidate
 — no push, no optimizer loop. Run it from the member directory so it picks up
 `[tool.rilixai.spec]`:
 
@@ -82,7 +82,7 @@ Hermetic — a `FakeWorld` shim + stub judge, no network.
 ## Adapting this recipe to your agent
 
 The whole rilixai integration is `rilixai_spec.py` — one `@spec`-decorated
-`ApexAgentsRunner(BaseSampleRunner)` (with an LLM rubric judge as a custom
+`ApexAgentsRunner(BaseCaseRunner)` (with an LLM rubric judge as a custom
 comparator). To wire your own agent, see the cookbook's
 **[`ONBOARDING.md`](../ONBOARDING.md)** for the full contract.
 

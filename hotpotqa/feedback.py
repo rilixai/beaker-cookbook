@@ -48,12 +48,12 @@ class HotpotQAFeedback:
     """
 
     @per_component_feedback(POLICY_COMPONENT)
-    def policy(self, sample: Any, output: HotpotQAAgentOutput) -> str:
-        return _policy_prompt_feedback(record=sample.input, output=output)
+    def policy(self, case: Any, output: HotpotQAAgentOutput) -> str:
+        return _policy_prompt_feedback(record=case.input, output=output)
 
     @per_component_feedback(SUMMARIZE_COMPONENT)
-    def summarize(self, sample: Any, output: HotpotQAAgentOutput) -> str:
-        return _summarize_feedback(record=sample.input, output=output)
+    def summarize(self, case: Any, output: HotpotQAAgentOutput) -> str:
+        return _summarize_feedback(record=case.input, output=output)
 
 
 # ─── summarize_prompt feedback ─────────────────────────────────────────

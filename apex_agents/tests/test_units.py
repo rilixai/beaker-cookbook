@@ -3,7 +3,7 @@
 The FakeWorld-driven ReAct loop behavioral suite lives in
 ``test_apex_agents_agent.py``. This file consolidates the rest:
 
-- dataset normalization + IB filter + record_to_sample + WorldFiles
+- dataset normalization + IB filter + record_to_case + WorldFiles
 - pipeline config + runtime + CLI plumbing
 - metrics + LLM judge (incl. parse-verdict calibration)
 - world-level k-fold + val splitters
@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 from rilixai.prompt_optimization.evaluation import evaluate_candidate_on_cases
-from rilixai.prompt_optimization.models import Sample
+from rilixai.prompt_optimization.models import Case
 from rilixai.prompt_optimization.spec import build_adapter_from_spec, validate_spec
 
 from apex_agents.agent.prompts import apex_agents_seed_candidate
@@ -36,7 +36,7 @@ from apex_agents.data.dataset import (
     cases_from_records,
     filter_investment_banking,
     load_apex_agents_records,
-    record_to_sample,
+    record_to_case,
     world_ids_for_cases,
 )
 from apex_agents.data.world_splits import (
@@ -83,13 +83,13 @@ def _world_row(world_id: str) -> dict[str, Any]:
 
 
 def test_cases_from_records_normalizes_and_exposes_ground_truth() -> None:
-    """One broad check that the loader emits Sample + ApexAgentsRecord with
+    """One broad check that the loader emits Case + ApexAgentsRecord with
     the expected shape AND that ground_truth is bundle-keyed + flat-keyed."""
     cases = cases_from_records([_task_row(0)])
     assert len(cases) == 1
     case = cases[0]
-    assert isinstance(case, Sample)
-    assert case.sample_id == "ib-task-0"
+    assert isinstance(case, Case)
+    assert case.case_id == "ib-task-0"
     record = case.input
     assert isinstance(record, ApexAgentsRecord)
     assert record.domain == "Investment Banking"
@@ -125,7 +125,7 @@ def test_cases_from_records_rejects_unsupported_items() -> None:
         cases_from_records([object()])  # type: ignore[list-item]
 
 
-def test_record_to_sample_explicit_group_key_wins() -> None:
+def test_record_to_case_explicit_group_key_wins() -> None:
     record = ApexAgentsRecord(
         task_id="t-2",
         task_name="name",
@@ -136,7 +136,7 @@ def test_record_to_sample_explicit_group_key_wins() -> None:
         task_input_files=(),
         raw_task={"task_id": "t-2"},
     )
-    case = record_to_sample(record, group_key="train-split")
+    case = record_to_case(record, group_key="train-split")
     assert case.group_key == "train-split"
 
 
@@ -318,13 +318,13 @@ def _offline_apex_spec(
 
     Injects the agent / world factory / model factory / judge the runner would
     otherwise build against the network via ``ctx.metadata``, and bypasses the
-    HF-backed ``samples_by_split`` so the test stays hermetic.
+    HF-backed ``cases_by_split`` so the test stays hermetic.
     """
     from rilixai.adapters.spec_builder import build_spec_from_runner_class
     from rilixai.testing import stub_optimization_context
 
     rows = list(cases or [])
-    monkeypatch.setattr(ApexAgentsRunner, "samples_by_split", lambda self, ctx: {"train": rows, "validation": rows})
+    monkeypatch.setattr(ApexAgentsRunner, "cases_by_split", lambda self, ctx: {"train": rows, "validation": rows})
     metadata: dict[str, Any] = {"judge": judge}
     if agent is not None:
         metadata["agent"] = agent
@@ -574,11 +574,11 @@ def test_world_level_folds_uneven_balances_and_rejects_bad_args() -> None:
 
 
 class _C:
-    """Minimal Sample-like stub: only ``group_key`` matters to the splitter."""
+    """Minimal Case-like stub: only ``group_key`` matters to the splitter."""
 
     def __init__(self, world: str, idx: int) -> None:
         self.group_key = world
-        self.sample_id = f"{world}-{idx}"
+        self.case_id = f"{world}-{idx}"
 
 
 def _cases(n_worlds: int, per_world: int = 3) -> list[_C]:
@@ -596,7 +596,7 @@ def test_inner_val_holds_out_whole_worlds_disjoint_and_deterministic() -> None:
     assert it_worlds | val_worlds == {f"world-{w:02d}" for w in range(9)}
     assert len(it) + len(val) == len(train)
     it2, val2 = world_held_out_val_split(train, n_val_worlds=2, seed=0)
-    assert {c.sample_id for c in val2} == {c.sample_id for c in val}
+    assert {c.case_id for c in val2} == {c.case_id for c in val}
     assert {c.group_key for c in world_held_out_val_split(train, n_val_worlds=2, seed=7)[1]} != val_worlds
 
 
@@ -618,7 +618,7 @@ def test_fixed_val_split_constant_and_disjoint() -> None:
     assert {c.group_key for c in val} == vw
     assert len(val) == 20
     _, val2, vw2 = fixed_val_split(cases, n_val_worlds=2, val_size=20, seed=0)
-    assert [c.sample_id for c in val2] == [c.sample_id for c in val] and vw2 == vw
+    assert [c.case_id for c in val2] == [c.case_id for c in val] and vw2 == vw
     assert len({c.group_key for c in val}) == 2
 
 
@@ -629,8 +629,8 @@ def test_stratified_cap_keeps_worlds_wide_vs_frontslice() -> None:
     assert len(strat) == 9 and len({c.group_key for c in strat}) == 9
     assert len(front) == 9 and len({c.group_key for c in front}) == 1
     assert stratified_case_cap(pool, None) == pool
-    assert [c.sample_id for c in stratified_case_cap(pool, 18, seed=0)] == [
-        c.sample_id for c in stratified_case_cap(pool, 18, seed=0)
+    assert [c.case_id for c in stratified_case_cap(pool, 18, seed=0)] == [
+        c.case_id for c in stratified_case_cap(pool, 18, seed=0)
     ]
     assert len({c.group_key for c in stratified_case_cap(pool, 18, seed=0)}) == 9
 
@@ -688,7 +688,7 @@ def test_spec_passes_validation_and_carries_spec_metadata(monkeypatch: Any) -> N
     # The default field weights flow through to the profile.
     profile = spec.evaluation_profile_resolver()
     assert profile.field_weights == {"rubric_pass_rate": 1.0}
-    # The runtime is a BaseSampleRunner instance with an async __call__.
+    # The runtime is a BaseCaseRunner instance with an async __call__.
     assert callable(spec.extraction_runtime)
     assert asyncio.iscoroutinefunction(spec.extraction_runtime.__call__)
 
@@ -707,7 +707,7 @@ def test_spec_end_to_end_via_adapter_with_fake_world_and_stub_judge(monkeypatch:
     report = evaluate_candidate_on_cases(
         adapter=adapter,
         candidate=apex_agents_seed_candidate(),
-        samples=cases,
+        cases=cases,
     )
     assert report.field_accuracies["rubric_pass_rate"] == 1.0
     assert report.field_sample_counts["rubric_pass_rate"] == 2

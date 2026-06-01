@@ -15,7 +15,7 @@ from .dataset import (
     cases_from_records,
     load_hotpotqa_paper_split,
     load_hotpotqa_split,
-    record_to_sample,
+    record_to_case,
 )
 from .eval import exact_match_score, f1_score, f1_score_components, normalize_answer
 from .gold import ideal_summary_from_supporting_facts, remaining_gold_titles
@@ -32,6 +32,6 @@ __all__ = [
     "load_hotpotqa_paper_split",
     "load_hotpotqa_split",
     "normalize_answer",
-    "record_to_sample",
+    "record_to_case",
     "remaining_gold_titles",
 ]

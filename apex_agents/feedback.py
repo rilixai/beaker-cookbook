@@ -39,16 +39,16 @@ class ApexAgentsFeedback:
     """
 
     @per_component_feedback(SYSTEM_PROMPT_COMPONENT)
-    def system_prompt(self, sample: Any, output: ApexAgentsAgentOutput) -> str:
-        return _system_prompt_feedback(record=sample.input, output=output)
+    def system_prompt(self, case: Any, output: ApexAgentsAgentOutput) -> str:
+        return _system_prompt_feedback(record=case.input, output=output)
 
     @per_component_feedback(TASK_TEMPLATE_COMPONENT)
-    def task_template(self, sample: Any, output: ApexAgentsAgentOutput) -> str:
-        return _task_template_feedback(record=sample.input, output=output)
+    def task_template(self, case: Any, output: ApexAgentsAgentOutput) -> str:
+        return _task_template_feedback(record=case.input, output=output)
 
     @per_component_feedback(RESUM_SUMMARY_PROMPT_COMPONENT)
-    def resum_summary_prompt(self, sample: Any, output: ApexAgentsAgentOutput) -> str:
-        return _resum_summary_prompt_feedback(record=sample.input, output=output)
+    def resum_summary_prompt(self, case: Any, output: ApexAgentsAgentOutput) -> str:
+        return _resum_summary_prompt_feedback(record=case.input, output=output)
 
 
 # Tools that actually read the workspace. If NONE of these were called

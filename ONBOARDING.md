@@ -5,7 +5,7 @@ prompts. This doc is the whole contract — read it once and you'll know exactly
 what to write.
 
 The short version: your integration is **one `@spec`-decorated
-[`BaseSampleRunner`](https://github.com/rilixai/rilixai) subclass** in a file
+[`BaseCaseRunner`](https://github.com/rilixai/rilixai) subclass** in a file
 conventionally named `rilixai_spec.py`. rilixai assembles everything else
 (scoring, the seed candidate, per-component feedback) from what you declare on
 the class. The two cookbook recipes — `hotpotqa/rilixai_spec.py` and
@@ -13,9 +13,9 @@ the class. The two cookbook recipes — `hotpotqa/rilixai_spec.py` and
 
 ```python
 from rilixai import spec
-from rilixai.adapters import BaseSampleRunner, AttributeApplier
+from rilixai.adapters import BaseCaseRunner, AttributeApplier
 from rilixai.metrics import FieldConfig
-from rilixai.prompt_optimization import Sample
+from rilixai.prompt_optimization import Case
 
 from .agent import MyAgent, MyRecord, MyOutput
 
@@ -25,16 +25,16 @@ from .agent import MyAgent, MyRecord, MyOutput
     field_configs=[FieldConfig(name="answer", comparators="exact_match")],
     task_type="my-agent",
 )
-class MyAgentRunner(BaseSampleRunner[MyRecord, MyOutput]):
+class MyAgentRunner(BaseCaseRunner[MyRecord, MyOutput]):
     def __init__(self, ctx):
         self.agent = MyAgent()
         super().__init__(applier=AttributeApplier(target=self.agent, mapping={"system": "system_prompt"}))
 
-    async def run_sample(self, record):
+    async def run_case(self, record):
         return await self.agent.run(record)
 
-    def samples_by_split(self, ctx):
-        return {"train": [...], "validation": [...]}  # list[Sample]
+    def cases_by_split(self, ctx):
+        return {"train": [...], "validation": [...]}  # list[Case]
 ```
 
 ---
@@ -44,8 +44,8 @@ class MyAgentRunner(BaseSampleRunner[MyRecord, MyOutput]):
 Exactly two things:
 
 1. **An async callable that takes one record and returns one output** — your
-   `run_sample(record)` method. The record is whatever you put in
-   `Sample.input`; the output is what gets scored.
+   `run_case(record)` method. The record is whatever you put in
+   `Case.input`; the output is what gets scored.
 2. **A way to receive the candidate's prompt components** — a `dict[str, str]`
    rilixai hands you each evaluation pass. You expose that through a
    `ComponentApplier` (§3): an attribute setter, deps injection, or a custom
@@ -53,7 +53,7 @@ Exactly two things:
 
 That's the entire surface. rilixai never inspects your agent internals, your
 tool definitions, your dataset format, or your scoring math. It only touches
-the components dict and your `run_sample` callable.
+the components dict and your `run_case` callable.
 
 ---
 
@@ -67,7 +67,7 @@ and what your feedback (§6) keys off.
 
 ### Output format expectations
 
-Your `run_sample(record)` must return one of:
+Your `run_case(record)` must return one of:
 
 | Output type | Field access | Supported? |
 |---|---|---|
@@ -84,14 +84,14 @@ first, items second. If your agent currently returns a bare string, wrap it:
 
 ```python
 # Don't:
-async def run_sample(self, record):
+async def run_case(self, record):
     return await self.agent.run(record.question)  # returns str
 
 # Do:
 class Output(BaseModel):
     answer: str
 
-async def run_sample(self, record):
+async def run_case(self, record):
     answer = await self.agent.run(record.question)
     return Output(answer=answer)
 ```
@@ -152,15 +152,15 @@ super().__init__(applier=CallableApplier(
 
 rilixai does **not** ship a data loader — formats vary too much (HuggingFace,
 JSONL, Postgres, pandas, an internal eval harness) for a base class to be
-net-positive. You own `samples_by_split(ctx) -> dict[str, list[Sample]]`. A
-`Sample` is:
+net-positive. You own `cases_by_split(ctx) -> dict[str, list[Case]]`. A
+`Case` is:
 
 ```python
-from rilixai.prompt_optimization import Sample
+from rilixai.prompt_optimization import Case
 
-Sample(
-    input=record,                       # your domain object — passed to run_sample
-    sample_id="row-42",                 # stable id
+Case(
+    input=record,                       # your domain object — passed to run_case
+    case_id="row-42",                 # stable id
     ground_truth={"answer": "Paris"},   # dict the metrics compare against
     group_key="default",                # optional; used by the failure-focused sampler
 )
@@ -170,35 +170,35 @@ Three common shapes:
 
 ```python
 # (a) HuggingFace — see hotpotqa/data/dataset.py for the full version
-def samples_by_split(self, ctx):
+def cases_by_split(self, ctx):
     from datasets import load_dataset
     rows = load_dataset("my-org/my-bench", split="train")
-    samples = [
-        Sample(input=_to_record(r), sample_id=r["id"], ground_truth={"answer": r["answer"]})
+    cases = [
+        Case(input=_to_record(r), case_id=r["id"], ground_truth={"answer": r["answer"]})
         for r in rows
     ]
-    return {"train": samples[:150], "validation": samples[150:250]}
+    return {"train": cases[:150], "validation": cases[150:250]}
 
 # (b) JSONL on disk
-def samples_by_split(self, ctx):
+def cases_by_split(self, ctx):
     import json
     from pathlib import Path
     rows = [json.loads(line) for line in Path("data/train.jsonl").read_text().splitlines()]
-    samples = [Sample(input=_to_record(r), sample_id=r["id"], ground_truth=r["gt"]) for r in rows]
-    return {"train": samples, "validation": samples}  # split however you like
+    cases = [Case(input=_to_record(r), case_id=r["id"], ground_truth=r["gt"]) for r in rows]
+    return {"train": cases, "validation": cases}  # split however you like
 
 # (c) In-memory from a pandas DataFrame
-def samples_by_split(self, ctx):
+def cases_by_split(self, ctx):
     df = my_dataframe()
-    samples = [
-        Sample(input=row.to_dict(), sample_id=str(i), ground_truth={"label": row.label})
+    cases = [
+        Case(input=row.to_dict(), case_id=str(i), ground_truth={"label": row.label})
         for i, row in df.iterrows()
     ]
-    return {"train": samples, "validation": samples}
+    return {"train": cases, "validation": cases}
 ```
 
 `ctx.config` (§7) carries the run's knobs (split sizes, model, etc.), so size
-your splits from it: `samples[: ctx.config.train_size]`.
+your splits from it: `cases[: ctx.config.train_size]`.
 
 ---
 
@@ -274,9 +274,9 @@ from rilixai.adapters import per_component_feedback
 
 class MyFeedback:
     @per_component_feedback("system")
-    def system(self, sample, output) -> str:
-        return f"On sample {sample.sample_id} the agent answered {output.answer!r}; " \
-               f"expected {sample.ground_truth['answer']!r}. ..."
+    def system(self, case, output) -> str:
+        return f"On case {case.case_id} the agent answered {output.answer!r}; " \
+               f"expected {case.ground_truth['answer']!r}. ..."
 ```
 
 Custom narratives typically improve convergence by 20–40% on tasks with rich
@@ -292,7 +292,7 @@ domain signal. Add them incrementally — one component at a time. See
    the applier + component names pre-detected from your agent file. Or copy a
    cookbook recipe.
 2. **Fill in** `agent.py` (your production agent), the `FieldConfig`s, and
-   `run_sample` / `samples_by_split` in `rilixai_spec.py`.
+   `run_case` / `cases_by_split` in `rilixai_spec.py`.
 3. **Verify** the registration test passes:
    `uv run python -m pytest <member>/tests` — the one-line
    `assert_spec_registered("my-agent")` confirms `@spec` discovery works.

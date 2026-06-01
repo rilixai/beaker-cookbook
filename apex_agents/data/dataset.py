@@ -30,7 +30,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from rilixai.prompt_optimization.models import Sample
+from rilixai.prompt_optimization.models import Case
 
 
 logger = logging.getLogger(__name__)
@@ -179,8 +179,8 @@ def _normalize_record(
     )
 
 
-def record_to_sample(record: ApexAgentsRecord, *, group_key: str | None = None) -> Sample:
-    """Convert a normalized APEX-Agents record into a rilixai :class:`Sample`.
+def record_to_case(record: ApexAgentsRecord, *, group_key: str | None = None) -> Case:
+    """Convert a normalized APEX-Agents record into a rilixai :class:`Case`.
 
     The ground-truth bundle stashes the rubric + prompt + world/task
     ids the runtime needs to run the LLM judge after the agent
@@ -203,9 +203,9 @@ def record_to_sample(record: ApexAgentsRecord, *, group_key: str | None = None) 
         "rubric": rubric_payload,
         _APEX_AGENTS_GROUND_TRUTH_KEY: bundle,
     }
-    return Sample(
+    return Case(
         input=record,
-        sample_id=record.task_id,
+        case_id=record.task_id,
         ground_truth=ground_truth,
         group_key=resolved_group,
         metadata={
@@ -222,9 +222,9 @@ def cases_from_records(
     records: Iterable[Mapping[str, Any] | ApexAgentsRecord],
     *,
     group_key: str | None = None,
-) -> list[Sample]:
+) -> list[Case]:
     """Build a list of optimizer cases from raw or normalized records."""
-    cases: list[Sample] = []
+    cases: list[Case] = []
     for idx, raw in enumerate(records):
         if isinstance(raw, ApexAgentsRecord):
             record = raw
@@ -234,7 +234,7 @@ def cases_from_records(
             raise TypeError(
                 f"cases_from_records expected Mapping or ApexAgentsRecord at position {idx}, got {type(raw).__name__}."
             )
-        cases.append(record_to_sample(record, group_key=group_key))
+        cases.append(record_to_case(record, group_key=group_key))
     return cases
 
 
@@ -335,7 +335,7 @@ def load_apex_agents_cases(
     max_records: int | None = None,
     cache_dir: str | None = None,
     repo_id: str = APEX_AGENTS_HF_REPO,
-) -> list[Sample]:
+) -> list[Case]:
     """Load the APEX-Agents records and convert them to optimizer cases."""
     records = load_apex_agents_records(
         domain=domain,
@@ -346,7 +346,7 @@ def load_apex_agents_cases(
     return cases_from_records(records)
 
 
-def world_ids_for_cases(cases: Iterable[Sample]) -> list[str]:
+def world_ids_for_cases(cases: Iterable[Case]) -> list[str]:
     """Return the sorted distinct ``world_id`` group keys across cases."""
     seen: set[str] = set()
     for case in cases:
@@ -366,6 +366,6 @@ __all__ = [
     "filter_investment_banking",
     "load_apex_agents_cases",
     "load_apex_agents_records",
-    "record_to_sample",
+    "record_to_case",
     "world_ids_for_cases",
 ]

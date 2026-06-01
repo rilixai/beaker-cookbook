@@ -17,9 +17,9 @@ from typing import Any
 
 from pydantic import BaseModel
 from rilixai import spec
-from rilixai.adapters import BaseSampleRunner, CallableApplier, SampleRunResult
+from rilixai.adapters import BaseCaseRunner, CallableApplier, CaseRunResult
 from rilixai.metrics import BaseMetricsCalculator, FieldConfig
-from rilixai.prompt_optimization.models import Sample
+from rilixai.prompt_optimization.models import Case
 
 from .agent.prompts import apex_agents_seed_candidate
 from .agent.types import ApexAgentsAgentOutput
@@ -123,7 +123,7 @@ def _apex_config_from(sandbox_cfg: ApexAgentsSandboxConfig) -> ApexAgentsConfig:
     # rilixai's default max_concurrency is 8; 4 is the cost-bounded demo value.
     max_concurrency=4,
 )
-class ApexAgentsRunner(BaseSampleRunner[ApexAgentsRecord, _ApexResult]):
+class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
     """The entire APEX-Agents integration: one runner the rilixai sandbox drives."""
 
     def __init__(self, ctx: Any) -> None:
@@ -158,7 +158,7 @@ class ApexAgentsRunner(BaseSampleRunner[ApexAgentsRecord, _ApexResult]):
             )
         )
 
-    async def run_sample(self, record: ApexAgentsRecord) -> _ApexResult:
+    async def run_case(self, record: ApexAgentsRecord) -> _ApexResult:
         output = await self.agent.forward(record=record)
         rubric_payload = [{"verifier_id": c.verifier_id, "criteria": c.criteria} for c in record.rubric]
         rubric_pass_rate = await asyncio.to_thread(
@@ -175,7 +175,7 @@ class ApexAgentsRunner(BaseSampleRunner[ApexAgentsRecord, _ApexResult]):
         record: ApexAgentsRecord,
         output: _ApexResult,
         runtime_kwargs: Mapping[str, Any],
-    ) -> SampleRunResult[_ApexResult]:
+    ) -> CaseRunResult[_ApexResult]:
         run_metrics = build_apex_agents_run_metrics(
             record=record,
             output=output.agent_output,
@@ -187,9 +187,9 @@ class ApexAgentsRunner(BaseSampleRunner[ApexAgentsRecord, _ApexResult]):
         feedback = self._build_feedback(record, output.agent_output, runtime_kwargs)  # type: ignore[arg-type]
         if feedback:
             run_metrics.setdefault("trace_evidence", {})["per_component_feedback"] = feedback
-        return SampleRunResult(output=output, run_metrics=run_metrics)
+        return CaseRunResult(output=output, run_metrics=run_metrics)
 
-    def samples_by_split(self, ctx: Any) -> dict[str, list[Sample]]:
+    def cases_by_split(self, ctx: Any) -> dict[str, list[Case]]:
         sc = self._sandbox_cfg
         all_cases = load_apex_agents_cases(domain=sc.domain)
         inner_train, validation = world_held_out_val_split(all_cases, n_val_worlds=sc.val_worlds, seed=sc.seed)

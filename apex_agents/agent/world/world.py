@@ -292,7 +292,7 @@ class WorldFiles:
         return "\n".join(parts)[:max_bytes]
 
     def search(self, query: str, *, max_results: int = 50) -> list[dict[str, Any]]:
-        """Sample-insensitive substring grep over the world's text files.
+        """Case-insensitive substring grep over the world's text files.
 
         Returns ``[{"file": rel, "line": n, "text": line}, ...]``.
         Binary / oversized files are skipped.

@@ -30,7 +30,7 @@ export OPENAI_API_KEY=sk-...    # agent + summarize (gpt-4.1-mini default)
 
 ## Sanity-check locally
 
-`rilixai dry-run` builds the spec and runs one sample with the seed candidate
+`rilixai dry-run` builds the spec and runs one case with the seed candidate
 — no push, no optimizer loop. Run it from the member directory so it picks up
 `[tool.rilixai.spec]`:
 
@@ -94,7 +94,7 @@ Hermetic — scripted PydanticAI `FunctionModel`s, no network.
 ## Adapting this recipe to your agent
 
 The whole rilixai integration is `rilixai_spec.py` — one `@spec`-decorated
-`HotpotQARunner(BaseSampleRunner)`. To wire your own agent, see the
+`HotpotQARunner(BaseCaseRunner)`. To wire your own agent, see the
 cookbook's **[`ONBOARDING.md`](../ONBOARDING.md)** for the full contract
 (agent expectations, `ComponentApplier` cheatsheet, `FieldConfig` scoring,
 feedback, data loading).

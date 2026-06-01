@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from rilixai.prompt_optimization.models import Sample
+from rilixai.prompt_optimization.models import Case
 
 from hotpotqa.data.dataset import (
     HotpotQAParagraph,
     HotpotQARecord,
     cases_from_records,
-    record_to_sample,
+    record_to_case,
 )
 from hotpotqa.data.eval import f1_score, normalize_answer
 from hotpotqa.rilixai_spec import HotpotQAMetrics
@@ -40,8 +40,8 @@ def test_cases_from_records_normalizes_hf_shape() -> None:
     cases = cases_from_records([_HF_RECORD])
     assert len(cases) == 1
     case = cases[0]
-    assert isinstance(case, Sample)
-    assert case.sample_id == "case-1"
+    assert isinstance(case, Case)
+    assert case.case_id == "case-1"
     record = case.input
     assert isinstance(record, HotpotQARecord)
     assert record.question == "Which city has the Eiffel Tower?"
@@ -54,7 +54,7 @@ def test_cases_from_records_normalizes_hf_shape() -> None:
     assert record.supporting_sentence_ids == {"Eiffel Tower": (0,), "Paris": (2,)}
 
 
-def test_record_to_sample_exposes_ground_truth_fields_for_metrics() -> None:
+def test_record_to_case_exposes_ground_truth_fields_for_metrics() -> None:
     cases = cases_from_records([_HF_RECORD])
     case = cases[0]
     assert case.ground_truth["answer"] == "Paris"
@@ -68,7 +68,7 @@ def test_record_to_sample_exposes_ground_truth_fields_for_metrics() -> None:
 
 def test_cases_from_records_accepts_pre_normalized_records() -> None:
     record = HotpotQARecord(
-        sample_id="rec-7",
+        case_id="rec-7",
         question="Q?",
         answer="A",
         question_type="comparison",
@@ -77,7 +77,7 @@ def test_cases_from_records_accepts_pre_normalized_records() -> None:
         supporting_titles=("T",),
     )
     cases = cases_from_records([record])
-    assert cases[0].sample_id == "rec-7"
+    assert cases[0].case_id == "rec-7"
     assert cases[0].input is record
     assert cases[0].group_key == "comparison"
 
@@ -123,7 +123,7 @@ def test_load_hotpotqa_paper_split_matches_artifact_slicing(monkeypatch: pytest.
 
     The artifact takes the HotpotQA train split, slices fractionally
     (test = [0, 40%), val = [40%, 80%), train = [80%, 100%)), then
-    samples each slice with ``random.Random(1).sample(slice, size)``.
+    cases each slice with ``random.Random(1).sample(slice, size)``.
     Verifies that ``load_hotpotqa_paper_split`` returns exactly the rows
     a hand-rolled emulation of that pipeline returns.
     """
@@ -165,7 +165,7 @@ def test_load_hotpotqa_paper_split_matches_artifact_slicing(monkeypatch: pytest.
             max_cases=size,
             config="fullwiki",
         )
-        assert [c.sample_id for c in cases] == _expected(partition, size), (
+        assert [c.case_id for c in cases] == _expected(partition, size), (
             f"Partition {partition!r} disagrees with the artifact's "
             f"`Benchmark.trim_dataset` selection — split logic has drifted."
         )
@@ -178,9 +178,9 @@ def test_load_hotpotqa_paper_split_rejects_unknown_partition() -> None:
         load_hotpotqa_paper_split("dev", max_cases=10)
 
 
-def test_record_to_sample_explicit_group_key_wins() -> None:
+def test_record_to_case_explicit_group_key_wins() -> None:
     record = HotpotQARecord(
-        sample_id="rec-2",
+        case_id="rec-2",
         question="Q?",
         answer="A",
         question_type="bridge",
@@ -188,7 +188,7 @@ def test_record_to_sample_explicit_group_key_wins() -> None:
         paragraphs=(),
         supporting_titles=(),
     )
-    case = record_to_sample(record, group_key="train-split")
+    case = record_to_case(record, group_key="train-split")
     assert case.group_key == "train-split"
 
 
@@ -239,9 +239,9 @@ def test_metrics_calculator_aggregates_em_f1_and_recall() -> None:
     assert aggregate.field_sample_counts["titles_recall"] == 2
 
     assert aggregate.field_accuracies["answer"] == pytest.approx(0.5)
-    # Sample A: F1=1.0 (perfect), Sample B: F1=0.0 (no token overlap with "Statue of Liberty")
+    # Case A: F1=1.0 (perfect), Case B: F1=0.0 (no token overlap with "Statue of Liberty")
     assert aggregate.field_accuracies["answer_f1"] == pytest.approx(0.5)
-    # Sample A: 2/2 gold titles retrieved; Sample B: 0/1 retrieved → mean 0.5.
+    # Case A: 2/2 gold titles retrieved; Case B: 0/1 retrieved → mean 0.5.
     assert aggregate.field_accuracies["titles_recall"] == pytest.approx(0.5)
 
 
@@ -302,7 +302,7 @@ def test_sandbox_runner_builds_valid_spec(monkeypatch: pytest.MonkeyPatch) -> No
     constructs HotpotQARunner from a stub context, validates ctx.config
     against the runner's config_schema, auto-reads the seed from the
     applier, builds the metrics calculator from the declared field_configs,
-    and loads samples. Data loading is monkeypatched so the test stays
+    and loads cases. Data loading is monkeypatched so the test stays
     hermetic (no HF download).
     """
     from rilixai.adapters.spec_builder import build_spec_from_runner_class
@@ -313,7 +313,7 @@ def test_sandbox_runner_builds_valid_spec(monkeypatch: pytest.MonkeyPatch) -> No
     from hotpotqa.rilixai_spec import HotpotQARunner
 
     fake_record = HotpotQARecord(
-        sample_id="row-1",
+        case_id="row-1",
         question="Q?",
         answer="A",
         question_type="bridge",
@@ -335,7 +335,7 @@ def test_sandbox_runner_builds_valid_spec(monkeypatch: pytest.MonkeyPatch) -> No
     assert built.task_type == "hotpotqa_pydantic_agent"
     # Seed auto-read from the agent's prompts via the applier.
     assert set(built.seed_candidate.components) == {"policy_prompt", "summarize_prompt"}
-    assert set(built.samples_by_split) == {"train", "validation"}
+    assert set(built.cases_by_split) == {"train", "validation"}
 
 
 def test_sandbox_metrics_emits_paper_weighted_scores() -> None:
@@ -375,7 +375,7 @@ def test_sandbox_runner_package_result_embeds_trace_and_feedback() -> None:
     runner.attach_feedback(HotpotQAFeedback())
 
     record = HotpotQARecord(
-        sample_id="r1",
+        case_id="r1",
         question="Who?",
         answer="Ada",
         question_type="bridge",

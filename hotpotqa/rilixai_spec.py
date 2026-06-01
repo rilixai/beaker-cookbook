@@ -15,9 +15,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 from rilixai import spec
-from rilixai.adapters import BaseSampleRunner, CallableApplier, SampleRunResult
+from rilixai.adapters import BaseCaseRunner, CallableApplier, CaseRunResult
 from rilixai.metrics import BaseMetricsCalculator, FieldConfig
-from rilixai.prompt_optimization.models import Sample
+from rilixai.prompt_optimization.models import Case
 
 from .agent.prompts import hotpotqa_pydantic_agent_seed_candidate
 from .agent.types import HotpotQAAgentOutput
@@ -106,7 +106,7 @@ class HotpotQASandboxConfig(BaseModel):
     # rilixai's default max_concurrency is 8; 4 is the cost-bounded demo value.
     max_concurrency=4,
 )
-class HotpotQARunner(BaseSampleRunner[HotpotQARecord, HotpotQAAgentOutput]):
+class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
     """The entire HotpotQA integration: one runner the rilixai sandbox drives.
 
     No ``version=`` on ``@spec`` — ``rilixai push`` supplies the push-time
@@ -141,7 +141,7 @@ class HotpotQARunner(BaseSampleRunner[HotpotQARecord, HotpotQAAgentOutput]):
             )
         )
 
-    async def run_sample(self, record: HotpotQARecord) -> HotpotQAAgentOutput:
+    async def run_case(self, record: HotpotQARecord) -> HotpotQAAgentOutput:
         from .agent.retrieval import build_retrieve_k_fn_for_case
 
         retrieve_k_fn = build_retrieve_k_fn_for_case(record=record, cfg=self.cfg)
@@ -157,7 +157,7 @@ class HotpotQARunner(BaseSampleRunner[HotpotQARecord, HotpotQAAgentOutput]):
         record: HotpotQARecord,
         output: HotpotQAAgentOutput,
         runtime_kwargs: Mapping[str, Any],
-    ) -> SampleRunResult[HotpotQAAgentOutput]:
+    ) -> CaseRunResult[HotpotQAAgentOutput]:
         # Domain-specific trace evidence (per-hop retrieval reasoning,
         # documents-remaining, missing/spurious titles) is richer than the base
         # hook set, so build it here. Per-component feedback flows through
@@ -171,9 +171,9 @@ class HotpotQARunner(BaseSampleRunner[HotpotQARecord, HotpotQAAgentOutput]):
         feedback = self._build_feedback(record, output, runtime_kwargs)
         if feedback:
             run_metrics.setdefault("trace_evidence", {})["per_component_feedback"] = feedback
-        return SampleRunResult(output=output, run_metrics=run_metrics)
+        return CaseRunResult(output=output, run_metrics=run_metrics)
 
-    def samples_by_split(self, ctx: Any) -> dict[str, list[Sample]]:
+    def cases_by_split(self, ctx: Any) -> dict[str, list[Case]]:
         hf_config = "fullwiki" if self._sandbox_cfg.retrieval_mode == "fullwiki" else "distractor"
         return {
             "train": list(

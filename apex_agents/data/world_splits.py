@@ -239,7 +239,7 @@ def world_held_out_val_split(
     transfer instead.
 
     Cases are grouped by ``group_key`` (set to ``world_id`` in
-    :func:`record_to_sample`). ``n_val_worlds`` whole worlds are chosen
+    :func:`record_to_case`). ``n_val_worlds`` whole worlds are chosen
     deterministically (``random.Random(seed)``) as validation; the rest are
     inner-train. At least one world is always left for inner-train; if the
     pool has only one world the split degenerates to (all, all) so optimize
