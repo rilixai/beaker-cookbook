@@ -1,8 +1,7 @@
 """Runtime configuration for the APEX-Agents benchmark.
 
-``ApexAgentsConfig`` is the single knob bag shared by the CLI, the
-runtime adapter, and the spec. Lives at the top level (peer of
-``cli.py``) so both ``cli.py`` and ``rilixai_spec.py`` can
+``ApexAgentsConfig`` is the single knob bag the runner reads. Lives at the
+top level so ``rilixai_spec.py`` (and the agent / data subpackages) can
 import it without a cycle.
 
 (Renamed from ``ApexAgentsPipelineConfig`` — the "Pipeline" qualifier

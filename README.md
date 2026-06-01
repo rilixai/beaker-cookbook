@@ -15,15 +15,15 @@ production setups.*
 
 ```
 hotpotqa/         Multi-hop QA — PydanticAI tool-using agent (retrieve_k + summarize)
-apex_agents/      (planned follow-up)
+apex_agents/      Mercor APEX-Agents (Law / IB) — ReAct toolbelt agent + LLM rubric judge
 ```
 
-Each folder contains everything you need to reproduce the recipe: a
-README with the canonical reproduce commands and expected scores, a
-local CLI (`cli.py`) for fast iteration on your laptop, an optional
-Modal sandbox path (`sandbox.py`) for hosted runs at scale, and a
-hermetic test suite so you can verify the harness end-to-end before
-spending anything on LLM calls.
+Each folder is the whole rilixai integration in one file — a single
+`@spec`-decorated `BaseSampleRunner` in `rilixai_spec.py` — plus a README
+with the canonical commands and a hermetic test suite so you can verify
+the harness end-to-end before spending anything on LLM calls. There's no
+per-recipe CLI or build script: the top-level `rilixai` CLI (`dry-run`,
+`push`, `trigger`, `status`, `pull`) drives every recipe.
 
 ## Quick start
 
@@ -50,16 +50,15 @@ cookbook, and the path from `rilixai init spec` to a queued run.
 
 ## Configuration
 
-The recipes need credentials for the LLM provider and, if you're
-using the hosted path, for the rilixai control plane. The easiest
-setup is a `.env` file at the cookbook root with the variables below;
-they'll be picked up automatically by both the local CLIs and the
-sandbox scripts.
+The recipes need credentials for the LLM provider and, for the hosted
+path, for the rilixai control plane. The easiest setup is a `.env` file
+at the cookbook root with the variables below; they're picked up
+automatically by the `rilixai` CLI.
 
 | Variable | Required for | Where to get it |
 |---|---|---|
-| `OPENAI_API_KEY` | Local runs (every recipe's `cli.py`) | [OpenAI dashboard](https://platform.openai.com/api-keys) |
-| `RILIXAI_API_KEY` | Hosted runs (every recipe's `sandbox.py`) | rilixai dashboard |
+| `OPENAI_API_KEY` | Local `rilixai dry-run` (calls the model directly) | [OpenAI dashboard](https://platform.openai.com/api-keys) |
+| `RILIXAI_API_KEY` | Hosted runs (`rilixai push` / `trigger`) | rilixai dashboard |
 | `RILIXAI_API_BASE_URL` | Hosted runs | rilixai dashboard — looks like `https://<id>.execute-api.us-east-2.amazonaws.com/prod/` |
 
 For hosted runs you don't need `OPENAI_API_KEY` on your machine — it's
@@ -67,26 +66,23 @@ bound at the rilixai *project* level, and each sandbox container that
 spawns inherits it as an env var. Set it once in the rilixai dashboard
 and forget about it locally.
 
-Per-recipe knobs like model choice, dataset size, and retrieval mode
-are documented in each recipe's README and surfaced as CLI flags, so
-you can usually go from "first time looking at this folder" to "smoke
-run" without touching code.
+Per-recipe knobs like model choice, dataset size, and retrieval mode are
+the fields of each recipe's `*SandboxConfig` in `rilixai_spec.py`, passed
+as a JSON `--config` to `dry-run` / `trigger`.
 
 ## What runs where
 
-Each recipe ships two entry points so you can pick the right tool for
-the job:
+Every recipe is driven by the top-level `rilixai` CLI:
 
-| Path | Where it runs | When to use |
+| Command | Where it runs | When to use |
 |---|---|---|
-| `<recipe>/cli.py` | Your laptop | Fast iteration, local debugging, no rilixai account needed |
-| `<recipe>/sandbox.py` | rilixai hosted Modal sandbox | Real optimization runs at scale, scheduled retraining, sharing optimized prompts across teams |
+| `rilixai dry-run` | Your laptop | One sample with the seed candidate — confirm wiring before pushing |
+| `rilixai push` + `trigger` + `status` + `pull` | rilixai hosted Modal sandbox | Real optimization runs at scale, scheduled retraining, sharing optimized prompts across teams |
 
-The local CLI uses your `OPENAI_API_KEY` directly and writes results
-to local files. The hosted path packages the recipe into a Modal
-image, queues the run through rilixai's API, and writes the optimized
-prompts back to your rilixai project so any service of yours can
-fetch them at runtime.
+`dry-run` uses your `OPENAI_API_KEY` directly and prints to your
+terminal. The hosted path packages the recipe into a Modal image, queues
+the run through rilixai's API, and writes the optimized prompts back to
+your rilixai project so any service of yours can fetch them at runtime.
 
 ## Development
 

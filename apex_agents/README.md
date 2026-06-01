@@ -25,44 +25,51 @@ export OPENAI_API_KEY=sk-...    # agent (gpt-4.1-mini default)
 export GOOGLE_API_KEY=...       # judge (gemini-2.5-flash default)
 ```
 
-## Run locally
+## Sanity-check locally
+
+`rilixai dry-run` builds the spec and runs one sample with the seed candidate
+— no push, no optimizer loop. Run it from the member directory so it picks up
+`[tool.rilixai.spec]`:
 
 ```bash
-# Optimize on a small Law slice
-uv run python -m apex_agents.cli optimize \
-    --domain law --train-size 25 --val-size 20 --val-worlds 2 \
-    --max-metric-calls 100 --output-dir apex_agents_results/smoke
-
-# Evaluate (omit --candidate-json to score the seed prompts)
-uv run python -m apex_agents.cli evaluate \
-    --domain law --candidate-json apex_agents_results/smoke/best_candidate.json
+cd apex_agents
+uv run rilixai dry-run --config '{"domain": "law", "train_size": 1, "val_size": 1}'
 ```
 
-`--val-worlds` holds out whole worlds for validation so GEPA selects for
-cross-world transfer, not in-world fit. See `--help` for all flags.
+It prints the agent output, the per-field `rubric_pass_rate`, and the feedback
+narratives the reflection LM would see.
 
-## Run on Modal (rilixai sandbox)
+## Run on rilixai
 
-`optimization/spec.py` registers a `@spec(name="apex-agents")` factory that
-rilixai's sandbox runs. `sandbox.py` builds the image, promotes it to
-`apex-agents@production`, and triggers a run in one shot:
+`rilixai_spec.py` registers the `@spec(name="apex-agents")` runner. The full
+build → optimize → pull flow:
 
 ```bash
 export RILIXAI_API_KEY=sk-...
 export RILIXAI_API_BASE_URL=https://<id>.execute-api.<region>.amazonaws.com/prod/
 
-uv run apex_agents/sandbox.py --build   # build + promote + trigger
-uv run apex_agents/sandbox.py           # trigger only (current @production)
+# Build the image + promote it to apex-agents@production (run from repo root)
+uv run rilixai push --member apex_agents
+
+# Queue a run; --val-worlds holds out whole worlds so GEPA selects for
+# cross-world transfer, not in-world fit
+cd apex_agents
+uv run rilixai trigger --config '{"domain": "law", "train_size": 25, "val_size": 20, "val_worlds": 2, "max_metric_calls": 100}'
+
+# Watch it, then download the optimized candidate + per-split reports
+uv run rilixai status <run_id>
+uv run rilixai pull <run_id> --output-dir apex_agents_results
 ```
 
-Provider keys (`OPENAI_API_KEY`, `GOOGLE_API_KEY`) and `HF_TOKEN` are bound
-as project-level secrets on rilixai's side, injected into each sandbox.
-
-To trigger from code, or to tune knobs (`max_metric_calls`, `domain`,
-`train_size`, models, …), call `client.create_optimization_run(...)` — the
-run config keys are documented in `_DEFAULT_SANDBOX_CONFIG` at the top of
-`apex_agents/optimization/spec.py`. Roll back with
+The run config keys are the fields of `ApexAgentsSandboxConfig` in
+`rilixai_spec.py`. Provider keys (`OPENAI_API_KEY`, `GOOGLE_API_KEY`) and
+`HF_TOKEN` are bound as project-level secrets on rilixai's side, injected into
+each sandbox. Roll back with
 `uv run rilixai spec promote apex-agents --version <older-sha>`.
+
+CI (`.github/workflows/push-spec.yml`) runs `rilixai push --member apex_agents`
+on every merge to `main` that touches `apex_agents/`: it ships the image and
+flips `@production` without spending LLM tokens on a smoke run.
 
 ## Tests
 

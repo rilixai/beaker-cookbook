@@ -15,14 +15,12 @@ Layout (each subpackage groups one concern):
 * :mod:`apex_agents.data` — HF dataset loader + world-level k-fold +
   stratified train cap.
 * :mod:`apex_agents.rilixai_spec` — the whole GEPA-facing
-  integration (``@spec`` runner, metrics, run-metrics builder).
-* :mod:`apex_agents.metrics` — the LLM rubric judge.
+  integration (``@spec`` runner + ``@spec`` metrics calculator).
+* :mod:`apex_agents.metrics` — the LLM rubric judge + the run-metrics
+  trajectory builder.
 * :mod:`apex_agents.feedback` — :class:`ApexAgentsFeedback`, the
   per-component reflection narratives.
-* :mod:`apex_agents.config` — :class:`ApexAgentsConfig` shared by the
-  CLI and the runtime.
-* :mod:`apex_agents.cli` — local command-line entry point.
-* :mod:`apex_agents.sandbox` — rilixai Modal sandbox entry point.
+* :mod:`apex_agents.config` — :class:`ApexAgentsConfig` the runner reads.
 """
 
 from .agent.prompts import (
@@ -45,6 +43,7 @@ from .feedback import ApexAgentsFeedback
 from .metrics import (
     DEFAULT_JUDGE_MODEL,
     RUBRIC_FIELD,
+    build_apex_agents_run_metrics,
     build_rubric_judge,
     score_rubric,
 )
@@ -52,8 +51,6 @@ from .rilixai_spec import (
     ApexAgentsMetrics,
     ApexAgentsRunner,
     ApexAgentsSandboxConfig,
-    build_apex_agents_run_metrics,
-    build_apex_agents_spec,
 )
 
 
@@ -74,7 +71,6 @@ __all__ = [
     "RubricCriterion",
     "apex_agents_seed_candidate",
     "build_apex_agents_run_metrics",
-    "build_apex_agents_spec",
     "build_rubric_judge",
     "cases_from_records",
     "load_apex_agents_cases",

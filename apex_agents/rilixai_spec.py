@@ -4,17 +4,14 @@
 sandbox integration — rilixai assembles the metrics calculator, seed
 candidate, and per-component feedback from the ``@spec`` declarations and the
 runner's ``_package_result`` (which runs the rubric judge + emits the trace).
-
-:func:`build_apex_agents_spec` is the factory the local CLI + tests use: it
-loads its own splits and may inject a world factory, judge, model factory, or
-pre-built agent. It reuses :class:`ApexAgentsRunner` so the runtime + scoring
-match the sandbox path exactly.
+The ``@spec`` decorator builds the :class:`PromptOptimizationSpec` from the
+runner class; rilixai resolves it via ``load_spec_from_target``.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,8 +20,6 @@ from rilixai import spec
 from rilixai.adapters import BaseSampleRunner, CallableApplier, SampleRunResult
 from rilixai.metrics import BaseMetricsCalculator, FieldConfig
 from rilixai.prompt_optimization.models import Sample
-from rilixai.prompt_optimization.protocols import ErrorOutput, EvaluationProfile
-from rilixai.prompt_optimization.spec import PromptOptimizationSpec
 
 from .agent.prompts import apex_agents_seed_candidate
 from .agent.types import ApexAgentsAgentOutput
@@ -32,10 +27,13 @@ from .config import ApexAgentsConfig
 from .data.dataset import _APEX_AGENTS_GROUND_TRUTH_KEY, ApexAgentsRecord, load_apex_agents_cases
 from .data.world_splits import stratified_case_cap, world_held_out_val_split
 from .feedback import ApexAgentsFeedback
-from .metrics import RUBRIC_FIELD, build_rubric_judge, coerce_pass_rate, score_rubric
-
-
-_APEX_AGENTS_PROFILE_KEY = "apex_agents"
+from .metrics import (
+    RUBRIC_FIELD,
+    build_apex_agents_run_metrics,
+    build_rubric_judge,
+    coerce_pass_rate,
+    score_rubric,
+)
 
 
 @dataclass
@@ -132,11 +130,21 @@ class ApexAgentsRunner(BaseSampleRunner[ApexAgentsRecord, _ApexResult]):
         sandbox_cfg = ctx.config if isinstance(ctx.config, ApexAgentsSandboxConfig) else ApexAgentsSandboxConfig()
         self._sandbox_cfg = sandbox_cfg
         cfg = _apex_config_from(sandbox_cfg)
-        # Lazy HF world download per case; network is available in the sandbox.
-        from .agent.world.world import build_world_factory
+        # Offline-test injection seam: a stub context may carry pre-built deps in
+        # ``metadata`` (agent / world_factory / model_factory / judge) so the
+        # runner constructs without network — the HF world download + the live
+        # rubric judge. A production sandbox context carries none of these, so the
+        # real factory + judge are built lazily here.
+        injected: Mapping[str, Any] = getattr(ctx, "metadata", None) or {}
+        agent = injected.get("agent")
+        if agent is None:
+            world_factory = injected.get("world_factory")
+            if world_factory is None:
+                from .agent.world.world import build_world_factory
 
-        agent = _build_agent(cfg, world_factory=build_world_factory(), model_factory=None)
-        judge = build_rubric_judge(model=cfg.judge_model, timeout=cfg.llm_timeout)
+                world_factory = build_world_factory()
+            agent = _build_agent(cfg, world_factory=world_factory, model_factory=injected.get("model_factory"))
+        judge = injected.get("judge") or build_rubric_judge(model=cfg.judge_model, timeout=cfg.llm_timeout)
         self._setup(cfg, agent, judge)
 
     def _setup(self, cfg: ApexAgentsConfig, agent: Any, judge: Callable[[str, str, str], bool]) -> None:
@@ -214,156 +222,3 @@ def _build_agent(
         model_factory=model_factory,
         llm_timeout=cfg.llm_timeout,
     )
-
-
-# ─── Local-CLI / test factory ───────────────────────────────────────────
-
-
-def _field_extractor(obj: Any, path: str) -> Any:
-    if obj is None or isinstance(obj, ErrorOutput):
-        return None
-    current: Any = obj
-    for segment in path.split("."):
-        if current is None:
-            return None
-        if isinstance(current, Mapping):
-            current = current.get(segment)
-        else:
-            current = getattr(current, segment, None)
-    return current
-
-
-def build_apex_agents_spec(
-    *,
-    samples_by_split: dict[str, Sequence[Sample]],
-    seed_candidate: Any | None = None,
-    config: ApexAgentsConfig | None = None,
-    agent: Any | None = None,
-    world_factory: Callable[[Any], Any] | None = None,
-    model_factory: Callable[[str, float], Any] | None = None,
-    judge: Callable[[str, str, str], bool] | None = None,
-    name: str = "apex_agents",
-    user_id: str = "__apex_agents_benchmark__",
-    model: str | None = None,
-    max_concurrency: int = 4,
-    reflection_evidence_mode: str = "curated_plus_trace",
-    field_weights: dict[str, float] | None = None,
-) -> PromptOptimizationSpec:
-    """Assemble a :class:`PromptOptimizationSpec` from explicit splits.
-
-    ``world_factory`` is required when ``agent`` is None (so the runner can
-    build per-case worlds); tests pass a FakeWorld factory + a stub judge.
-    Reuses :class:`ApexAgentsRunner` so the runtime + scoring match the sandbox
-    path exactly.
-    """
-    cfg = config or ApexAgentsConfig()
-    if agent is None and world_factory is None:
-        raise ValueError(
-            "build_apex_agents_spec requires either a pre-built agent or a "
-            "world_factory so the runner can construct per-case worlds."
-        )
-    resolved_agent = (
-        agent if agent is not None else _build_agent(cfg, world_factory=world_factory, model_factory=model_factory)
-    )
-    resolved_judge = judge if judge is not None else build_rubric_judge(model=cfg.judge_model, timeout=cfg.llm_timeout)
-
-    runner = ApexAgentsRunner.__new__(ApexAgentsRunner)
-    runner._sandbox_cfg = ApexAgentsSandboxConfig(
-        task_model=cfg.task_model,
-        task_temperature=cfg.task_temperature,
-        judge_model=cfg.judge_model,
-        max_steps=cfg.max_steps,
-        cost_limit=cfg.cost_limit,
-    )
-    runner._setup(cfg, resolved_agent, resolved_judge)
-    runner.attach_feedback(ApexAgentsFeedback())
-
-    metrics = ApexAgentsMetrics()
-    weights = dict(field_weights) if field_weights is not None else dict(metrics.field_weights)
-    profile = EvaluationProfile(
-        profile_key=_APEX_AGENTS_PROFILE_KEY,
-        metrics_calculator=metrics,
-        field_weights=weights,
-    )
-    return PromptOptimizationSpec(
-        samples_by_split=samples_by_split,
-        seed_candidate=seed_candidate or apex_agents_seed_candidate(),
-        extraction_runtime=runner,
-        agent_resolver=lambda **_: (None, None),
-        field_extractor=_field_extractor,
-        evaluation_profile_resolver=lambda **_: profile,
-        name=name,
-        user_id=user_id,
-        model=model,
-        task_type="apex_agent",
-        max_concurrency=max_concurrency,
-        reflection_evidence_mode=reflection_evidence_mode,
-    )
-
-
-# ─── Trajectory metadata builder (called by the runner's _package_result) ─
-
-
-def build_apex_agents_run_metrics(
-    *,
-    record: ApexAgentsRecord,
-    output: ApexAgentsAgentOutput,
-    config: ApexAgentsConfig,
-    rubric_pass_rate: float,
-) -> dict[str, Any]:
-    """Translate the agent's output into rilixai trajectory metadata.
-
-    Per-component feedback is no longer embedded here — it flows through
-    ``@spec(feedback=ApexAgentsFeedback)`` (the runner merges it into
-    ``trace_evidence.per_component_feedback`` in ``_package_result``). This
-    builder owns only the domain-specific trace evidence.
-    """
-    policy_reasoning = [
-        _truncate(m.content, config.max_preview_chars) for m in output.messages if m.role == "assistant"
-    ][:5]
-    tools_called = [m.tool_name for m in output.messages if m.role == "assistant" and m.tool_name]
-
-    tool_counts: dict[str, int] = {}
-    for name in tools_called:
-        tool_counts[name] = tool_counts.get(name, 0) + 1
-
-    tool_calls_detail: list[dict[str, Any]] = []
-    for step in output.messages:
-        tool_calls_detail.append(
-            {
-                "step_index": step.step_index,
-                "role": step.role,
-                "tool_name": step.tool_name,
-                "tool_args": step.tool_args,
-                "output_preview": (_truncate(step.output or "", config.max_preview_chars) if step.output else None),
-                "content_preview": _truncate(step.content, config.max_preview_chars),
-            }
-        )
-
-    return {
-        "tool_counts": tool_counts,
-        "tool_calls_detail": tool_calls_detail,
-        "trace_evidence": {
-            "policy_reasoning": policy_reasoning,
-            "tools_called": tools_called[:25],
-        },
-        "apex_agents": {
-            "task_id": record.task_id,
-            "world_id": record.world_id,
-            "domain": record.domain,
-            "status": output.status,
-            "rubric_pass_rate": rubric_pass_rate,
-            "num_rubric_criteria": len(record.rubric),
-            "total_steps": output.total_steps,
-            "total_cost": output.total_cost,
-            "wall_seconds": output.wall_seconds,
-            "resum_count": output.resum_count,
-            "answer_chars": len(output.final_answer),
-        },
-    }
-
-
-def _truncate(text: str, max_chars: int) -> str:
-    if max_chars <= 0 or len(text) <= max_chars:
-        return text
-    return text[: max(0, max_chars - 1)].rstrip() + "…"

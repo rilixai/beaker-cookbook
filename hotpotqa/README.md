@@ -28,57 +28,48 @@ Env vars (needed for any run that calls a model):
 export OPENAI_API_KEY=sk-...    # agent + summarize (gpt-4.1-mini default)
 ```
 
-## Run locally
+## Sanity-check locally
+
+`rilixai dry-run` builds the spec and runs one sample with the seed candidate
+— no push, no optimizer loop. Run it from the member directory so it picks up
+`[tool.rilixai.spec]`:
 
 ```bash
-# Optimize on a paper-aligned slice (use a smaller --max-metric-calls for smoke)
-uv run python -m hotpotqa.cli optimize \
-    --train-size 150 --max-metric-calls 6871 \
-    --reflection-model openai/gpt-4.1 \
-    --output-dir hotpotqa_results/optimize-150
-
-# Evaluate (omit --candidate-json to score the seed prompts)
-uv run python -m hotpotqa.cli evaluate \
-    --candidate-json hotpotqa_results/optimize-150/best_candidate.json \
-    --output-dir hotpotqa_results/after-150
+cd hotpotqa
+uv run rilixai dry-run --config '{"retrieval_mode": "distractor", "train_size": 1}'
 ```
 
-Defaults are paper-aligned (`--max-metric-calls 6871` matches the artifact's
-HotpotQA budget; `--reflection-model openai/gpt-4.1` matches the paper's
-stronger reflection LM). Evaluate with no flags scores the seed candidate on
-the 300-case fullwiki test slice. See `--help` for all flags.
+It prints the agent output, the per-field scores, and the feedback narratives
+the reflection LM would see.
 
-A train-size sweep is also available:
+## Run on rilixai
 
-```bash
-uv run python -m hotpotqa.scripts.run_train_size_sweep \
-    --output-root hotpotqa_sweep --skip-existing
-```
-
-## Run on Modal (rilixai sandbox)
-
-`optimization/spec.py` registers a `@spec(name="hotpotqa-agent")` factory
-that rilixai's sandbox runs. `sandbox.py` builds the image, promotes it to
-`hotpotqa-agent@production`, and triggers a run in one shot:
+`rilixai_spec.py` registers the `@spec(name="hotpotqa-agent")` runner. The
+full build → optimize → pull flow:
 
 ```bash
 export RILIXAI_API_KEY=sk-...
 export RILIXAI_API_BASE_URL=https://<id>.execute-api.<region>.amazonaws.com/prod/
 
-uv run hotpotqa/sandbox.py --build   # build + promote + trigger
-uv run hotpotqa/sandbox.py           # trigger only (current @production)
+# Build the image + promote it to hotpotqa-agent@production (run from repo root)
+uv run rilixai push --member hotpotqa
+
+# Queue a run (reads name/task_type from [tool.rilixai.spec]); tune knobs via --config
+cd hotpotqa
+uv run rilixai trigger --config '{"max_metric_calls": 6871, "retrieval_mode": "fullwiki", "train_size": 150}'
+
+# Watch it, then download the optimized candidate + per-split reports
+uv run rilixai status <run_id>
+uv run rilixai pull <run_id> --output-dir hotpotqa_results
 ```
 
-`OPENAI_API_KEY` is bound as a project-level secret on rilixai's side,
-injected into each sandbox.
-
-To trigger from code, or to tune knobs (`max_metric_calls`, `retrieval_mode`,
-`train_size`, models, …), call `client.create_optimization_run(...)` — the
-run config keys are documented in `_DEFAULT_SANDBOX_CONFIG` at the top of
-`hotpotqa/optimization/spec.py`. Roll back with
+Defaults are paper-aligned (`max_metric_calls=6871` matches the artifact's
+HotpotQA budget). The run config keys are the fields of `HotpotQASandboxConfig`
+in `rilixai_spec.py`. `OPENAI_API_KEY` is bound as a project-level secret on
+rilixai's side, injected into each sandbox. Roll back with
 `uv run rilixai spec promote hotpotqa-agent --version <older-sha>`.
 
-CI (`.github/workflows/push-spec.yml`) runs `sandbox.py --build --no-trigger`
+CI (`.github/workflows/push-spec.yml`) runs `rilixai push --member hotpotqa`
 on every merge to `main` that touches `hotpotqa/`: it ships the image and
 flips `@production` without spending LLM tokens on a smoke run.
 

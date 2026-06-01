@@ -104,7 +104,7 @@ and makes the output self-documenting.
 generation, summaries, multi-paragraph answers) are scored with an LLM-judge
 comparator — register one as a custom comparator on your metrics class (§5).
 The wrapper above still applies: name the field; the judge does the comparison.
-apex_agents does exactly this — see `apex_agents/optimization/metrics.py`
+apex_agents does exactly this — see `apex_agents/metrics.py`
 (`score_rubric` / `build_rubric_judge`) and `ApexAgentsMetrics` in
 `apex_agents/rilixai_spec.py`.
 
@@ -281,8 +281,7 @@ class MyFeedback:
 
 Custom narratives typically improve convergence by 20–40% on tasks with rich
 domain signal. Add them incrementally — one component at a time. See
-`hotpotqa/optimization/feedback.py` and `apex_agents/optimization/feedback.py`
-for full examples.
+`hotpotqa/feedback.py` and `apex_agents/feedback.py` for full examples.
 
 ---
 
@@ -297,11 +296,11 @@ for full examples.
 3. **Verify** the registration test passes:
    `uv run python -m pytest <member>/tests` — the one-line
    `assert_spec_registered("my-agent")` confirms `@spec` discovery works.
-4. **Push + run.** Set `RILIXAI_API_KEY` / `RILIXAI_API_BASE_URL`, then build
-   the image and trigger a run (see each recipe's README for the exact
-   `sandbox.py` / `rilixai push` commands). `OPENAI_API_KEY` and any other
-   provider keys are bound as project-level secrets on rilixai's side, injected
-   into each sandbox.
+4. **Push + run.** Set `RILIXAI_API_KEY` / `RILIXAI_API_BASE_URL`, then
+   `uv run rilixai push --member <member>` to build + promote the image and
+   `uv run rilixai trigger` to queue a run (see each recipe's README for the
+   exact commands). `OPENAI_API_KEY` and any other provider keys are bound as
+   project-level secrets on rilixai's side, injected into each sandbox.
 
 `ctx.config` inside the sandbox is validated against the Pydantic schema you
 pass to `@spec(config_schema=...)`, so a typo'd trigger key fails fast with a

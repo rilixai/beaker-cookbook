@@ -29,7 +29,6 @@ from apex_agents.agent.types import (
     AgentToolCall,
     ApexAgentsAgentOutput,
 )
-from apex_agents.config import ApexAgentsConfig
 from apex_agents.data.dataset import (
     _APEX_AGENTS_GROUND_TRUTH_KEY,
     ApexAgentsRecord,
@@ -54,7 +53,7 @@ from apex_agents.metrics import (
     build_rubric_judge,
     score_rubric,
 )
-from apex_agents.rilixai_spec import ApexAgentsMetrics, build_apex_agents_spec
+from apex_agents.rilixai_spec import ApexAgentsMetrics, ApexAgentsRunner
 from apex_agents.tests.fake_world import FakeWorld, fake_world_factory
 
 
@@ -306,7 +305,41 @@ def _scripted_model() -> Any:
     return _M()
 
 
-def test_runner_emits_per_component_feedback_and_scores_with_stub_judge() -> None:
+def _offline_apex_spec(
+    monkeypatch: Any,
+    *,
+    judge: Any,
+    agent: Any = None,
+    world_factory: Any = None,
+    model_factory: Any = None,
+    cases: Any = None,
+) -> Any:
+    """Build an APEX spec offline through the ``@spec`` path.
+
+    Injects the agent / world factory / model factory / judge the runner would
+    otherwise build against the network via ``ctx.metadata``, and bypasses the
+    HF-backed ``samples_by_split`` so the test stays hermetic.
+    """
+    from rilixai.adapters.spec_builder import build_spec_from_runner_class
+    from rilixai.testing import stub_optimization_context
+
+    rows = list(cases or [])
+    monkeypatch.setattr(ApexAgentsRunner, "samples_by_split", lambda self, ctx: {"train": rows, "validation": rows})
+    metadata: dict[str, Any] = {"judge": judge}
+    if agent is not None:
+        metadata["agent"] = agent
+    if world_factory is not None:
+        metadata["world_factory"] = world_factory
+    if model_factory is not None:
+        metadata["model_factory"] = model_factory
+    ctx = stub_optimization_context(
+        config={"domain": "Investment Banking", "train_size": 1, "val_size": 1},
+        metadata=metadata,
+    )
+    return build_spec_from_runner_class(ApexAgentsRunner, ctx)
+
+
+def test_runner_emits_per_component_feedback_and_scores_with_stub_judge(monkeypatch: Any) -> None:
     from apex_agents.agent.agent import ApexReActAgent
     from apex_agents.agent.prompts import load_apex_agents_seed_prompts
 
@@ -326,14 +359,11 @@ def test_runner_emits_per_component_feedback_and_scores_with_stub_judge() -> Non
         judged.append((criterion, answer))
         return "EV" in answer
 
-    # Build the spec via the factory (which wraps the runner) and drive its
-    # extraction_runtime the way the optimizer adapter would.
+    # Build the spec via the @spec path (injecting the pre-built agent + stub
+    # judge through ctx.metadata) and drive its extraction_runtime the way the
+    # optimizer adapter would.
     record = _pipeline_record()
-    spec = build_apex_agents_spec(
-        samples_by_split={"train": [record_to_sample(record)], "validation": [record_to_sample(record)]},
-        agent=agent,
-        judge=_stub_judge,
-    )
+    spec = _offline_apex_spec(monkeypatch, agent=agent, judge=_stub_judge)
     result = asyncio.run(spec.extraction_runtime(input=record, candidate=apex_agents_seed_candidate()))
 
     assert result.rubric_pass_rate == 1.0  # forwarded from the _ApexResult output
@@ -347,89 +377,6 @@ def test_runner_emits_per_component_feedback_and_scores_with_stub_judge() -> Non
     assert aa["task_id"] == "ib-1"
     assert aa["world_id"] == "world-a"
     assert aa["rubric_pass_rate"] == 1.0
-
-
-def test_build_apex_agents_spec_requires_agent_or_world_factory() -> None:
-    with pytest.raises(ValueError, match="world_factory"):
-        build_apex_agents_spec(samples_by_split={"train": [], "validation": []}, config=ApexAgentsConfig())
-
-
-def test_wrap_runtime_with_progress_preserves_runtime_result_when_throttled() -> None:
-    """``_wrap_runtime_with_progress`` must return the inner result on every call.
-
-    Same regression as IFBench / HotpotQA / SWE-bench: an earlier
-    version ``return``-ed inside the ``finally`` block, silently
-    overriding the runtime's actual result with ``None``.
-    """
-    from apex_agents.cli import _wrap_runtime_with_progress
-
-    async def _inner_runtime(**kwargs: object) -> dict[str, object]:
-        return {"rubric_pass_rate": 1.0, "kwargs_seen": kwargs}
-
-    wrapped = _wrap_runtime_with_progress(
-        _inner_runtime,
-        label="test",
-        total=None,
-        log_every_n=10,
-        log_every_seconds=10_000.0,
-    )
-
-    async def _drive() -> list[dict[str, object]]:
-        results = []
-        for i in range(12):
-            results.append(await wrapped(case_index=i))
-        return results
-
-    results = asyncio.run(_drive())
-    assert len(results) == 12
-    for i, r in enumerate(results):
-        assert r is not None, f"call {i} returned None — finally-return regression"
-        assert r["rubric_pass_rate"] == 1.0
-        assert r["kwargs_seen"]["case_index"] == i
-
-
-def test_no_network_guard_blocks_gated_dataset_download(monkeypatch: Any) -> None:
-    """``--no-network`` must refuse the gated HF dataset download too.
-
-    Regression: the guard originally only covered the world factory +
-    judge, so ``_load_splits_for_command`` hit ``hf_hub_download``
-    before the guard was consulted and leaked the HF client's "gated
-    repo" traceback.
-    """
-    import argparse
-
-    from apex_agents import cli as apex_cli
-
-    def _must_not_be_called(*_args: Any, **_kwargs: Any) -> Any:
-        raise AssertionError("load_apex_agents_cases was called despite --no-network")
-
-    monkeypatch.setattr(apex_cli, "load_apex_agents_cases", _must_not_be_called)
-
-    args = argparse.Namespace(no_network=True, domain="Investment Banking", cache_dir=None)
-    with pytest.raises(RuntimeError, match="Refusing to download the gated HF dataset"):
-        apex_cli._load_all_cases(args)
-
-
-def test_heldout_subset_summary_excludes_trained_validated_worlds() -> None:
-    """Full-dataset eval must also report the clean cross-world subset."""
-    from apex_agents.cli import _heldout_subset_summary
-
-    rows = [
-        {"ground_truth": {"world_id": "w-train"}, "field_scores": {"rubric_pass_rate": 1.0}},
-        {"ground_truth": {"world_id": "w-val"}, "field_scores": {"rubric_pass_rate": 1.0}},
-        {"ground_truth": {"world_id": "w-clean1"}, "field_scores": {"rubric_pass_rate": 0.5}},
-        {"ground_truth": {"world_id": "w-clean2"}, "field_scores": {"rubric_pass_rate": 0.1}},
-        {
-            "prediction": {"run_metrics": {"apex_agents": {"world_id": "w-clean2"}}},
-            "field_scores": {"rubric_pass_rate": 0.3},
-        },
-    ]
-    out = _heldout_subset_summary(rows, {"w-train", "w-val"})
-    assert out["num_heldout_cases"] == 3
-    assert abs(out["rubric_pass_rate_heldout"] - (0.5 + 0.1 + 0.3) / 3) < 1e-9
-    assert out["excluded_world_ids"] == ["w-train", "w-val"]
-    empty = _heldout_subset_summary(rows[:2], {"w-train", "w-val"})
-    assert empty["num_heldout_cases"] == 0 and empty["rubric_pass_rate_heldout"] is None
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -726,43 +673,34 @@ def _spec_stub_judge(criterion: str, answer: str, task_prompt: str) -> bool:
     return "enterprise value" in answer.lower()
 
 
-def test_build_apex_agents_spec_passes_validation_and_accepts_overrides() -> None:
-    spec = build_apex_agents_spec(
-        samples_by_split={"train": [], "validation": []},
-        world_factory=fake_world_factory({}),
-        judge=_spec_stub_judge,
-    )
+def test_spec_passes_validation_and_carries_spec_metadata(monkeypatch: Any) -> None:
+    spec = _offline_apex_spec(monkeypatch, world_factory=fake_world_factory({}), judge=_spec_stub_judge)
     validate_spec(spec)
     assert set(spec.seed_candidate.components.keys()) == {
         "system_prompt",
         "task_template",
         "resum_summary_prompt",
     }
-    assert spec.name == "apex_agents"
+    assert spec.name == "apex-agents"
     assert spec.task_type == "apex_agent"
     assert spec.max_concurrency == 4
     assert spec.reflection_evidence_mode == "curated_plus_trace"
-    # field_weights override flows through to the profile.
-    override = build_apex_agents_spec(
-        samples_by_split={"train": []},
-        world_factory=fake_world_factory({}),
-        judge=_spec_stub_judge,
-        field_weights={"rubric_pass_rate": 0.5},
-    )
-    profile = override.evaluation_profile_resolver()
-    assert profile.field_weights == {"rubric_pass_rate": 0.5}
-    # The runtime is now a BaseSampleRunner instance with an async __call__.
+    # The default field weights flow through to the profile.
+    profile = spec.evaluation_profile_resolver()
+    assert profile.field_weights == {"rubric_pass_rate": 1.0}
+    # The runtime is a BaseSampleRunner instance with an async __call__.
     assert callable(spec.extraction_runtime)
     assert asyncio.iscoroutinefunction(spec.extraction_runtime.__call__)
 
 
-def test_spec_end_to_end_via_adapter_with_fake_world_and_stub_judge() -> None:
+def test_spec_end_to_end_via_adapter_with_fake_world_and_stub_judge(monkeypatch: Any) -> None:
     cases = cases_from_records([_spec_task_row(0), _spec_task_row(1)])
-    spec = build_apex_agents_spec(
-        samples_by_split={"test": cases},
+    spec = _offline_apex_spec(
+        monkeypatch,
         world_factory=fake_world_factory({"brief.txt": "value"}),
         model_factory=_scripted_model_factory(),
         judge=_spec_stub_judge,
+        cases=cases,
     )
     validate_spec(spec)
     adapter = build_adapter_from_spec(spec)

@@ -477,21 +477,16 @@ def test_agent_runtime_dispatches_retrieval_by_cfg_mode() -> None:
     assert all(p.title in {"Eiffel Tower", "Paris", "Berlin"} for p in deps_legacy.retrieved)
 
 
-def test_load_candidate_uses_mode_specific_seed_when_no_path_given() -> None:
-    """Default-seed selection must match the runtime's expected component vocabulary.
+def test_seed_candidate_matches_runtime_component_vocabulary() -> None:
+    """The seed's component vocabulary must match what the runtime applies.
 
-    Regression: ``_load_candidate(None)`` previously returned the
-    workflow seed unconditionally. The agent's runtime calls
-    ``apply_candidate`` looking for ``policy_prompt`` /
-    ``summarize_prompt`` — workflow keys (``summarize1_prompt`` etc.)
-    are silently ignored, so the agent stayed at hardcoded fallback
-    strings. The fallbacks happened to be byte-identical to the
-    agent's actual seed values, so results were correct by accident.
-    This test pins the contract so any future drift in either seed
-    constant doesn't silently break agent evaluate-without-candidate
-    runs.
+    The agent's runtime calls ``apply_candidate`` looking for ``policy_prompt``
+    / ``summarize_prompt``; rilixai auto-reads the seed from the agent via the
+    applier's ``read()`` at spec-build time. This pins the seed vocabulary so
+    any future drift in the seed constants can't silently leave the agent on
+    hardcoded fallback strings.
     """
-    from hotpotqa.cli import _load_candidate
+    from hotpotqa.agent.prompts import hotpotqa_pydantic_agent_seed_candidate
 
-    default = _load_candidate(None)
+    default = hotpotqa_pydantic_agent_seed_candidate()
     assert set(default.components.keys()) == {"policy_prompt", "summarize_prompt"}

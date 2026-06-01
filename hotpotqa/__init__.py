@@ -18,12 +18,11 @@ Layout (each subpackage groups one concern):
 * :mod:`hotpotqa.data` — raw HotpotQA primitives (dataset loader,
   official scorer, supporting-fact helpers).
 * :mod:`hotpotqa.rilixai_spec` — the whole GEPA-facing integration
-  (``@spec`` runner, metrics, run-metrics builder).
+  (``@spec`` runner + ``@spec`` metrics calculator).
+* :mod:`hotpotqa.metrics` — the run-metrics trajectory builder.
 * :mod:`hotpotqa.feedback` — :class:`HotpotQAFeedback`, the
   per-component reflection narratives.
-* :mod:`hotpotqa.config` — :class:`HotpotQAConfig` shared by the CLI
-  and the runner.
-* :mod:`hotpotqa.cli` — command-line entry point.
+* :mod:`hotpotqa.config` — :class:`HotpotQAConfig` the runner reads.
 """
 
 from .agent.prompts import (
@@ -42,12 +41,11 @@ from .data.dataset import (
 )
 from .data.eval import exact_match_score, f1_score, f1_score_components, normalize_answer
 from .feedback import HotpotQAFeedback
+from .metrics import build_agent_run_metrics
 from .rilixai_spec import (
     HotpotQAMetrics,
     HotpotQARunner,
     HotpotQASandboxConfig,
-    build_agent_run_metrics,
-    build_hotpotqa_spec,
 )
 
 
@@ -63,7 +61,6 @@ __all__ = [
     "HotpotQARunner",
     "HotpotQASandboxConfig",
     "build_agent_run_metrics",
-    "build_hotpotqa_spec",
     "cases_from_records",
     "exact_match_score",
     "f1_score",

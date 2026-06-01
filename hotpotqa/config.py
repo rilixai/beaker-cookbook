@@ -1,10 +1,8 @@
 """Runtime configuration for the HotpotQA agent benchmark.
 
-``HotpotQAConfig`` is the single knob bag the CLI, the runtime adapter,
-and the spec all share. Lives at the top level (as a peer of ``cli.py``)
-because it's consumed by both the CLI and the optimization runtime —
-keeping it here avoids a cycle between ``cli.py`` and
-``rilixai_spec.py``.
+``HotpotQAConfig`` is the single knob bag the runner reads. Lives at the top
+level so ``rilixai_spec.py`` (and the agent / data subpackages) can import it
+without a cycle.
 
 (Renamed from ``HotpotQAPipelineConfig`` post-workflow-deletion — the
 "Pipeline" qualifier was disambiguating against the deleted DSPy
