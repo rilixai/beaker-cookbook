@@ -106,8 +106,12 @@ class HotpotQASandboxConfig(BaseModel):
     config_schema=HotpotQASandboxConfig,
     field_configs=HotpotQAMetrics,
     feedback=HotpotQAFeedback,
-    seed=hotpotqa_pydantic_agent_seed_candidate(),
+    # No explicit seed: rilixai auto-reads it from the agent's current
+    # prompts via the applier's read() at spec-build time.
+    # reflection_evidence_mode is kept (rilixai's default is "curated");
+    # this agent emits rich trace_evidence the reflection LM should use.
     reflection_evidence_mode="curated_plus_trace",
+    # rilixai's default max_concurrency is 8; 4 is the cost-bounded demo value.
     max_concurrency=4,
 )
 class HotpotQARunner(BaseSampleRunner[HotpotQARecord, HotpotQAAgentOutput]):

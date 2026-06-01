@@ -118,8 +118,12 @@ def _apex_config_from(sandbox_cfg: ApexAgentsSandboxConfig) -> ApexAgentsConfig:
     config_schema=ApexAgentsSandboxConfig,
     field_configs=ApexAgentsMetrics,
     feedback=ApexAgentsFeedback,
-    seed=apex_agents_seed_candidate(),
+    # No explicit seed: rilixai auto-reads it from the agent's current
+    # prompts via the applier's read() at spec-build time.
+    # reflection_evidence_mode is kept (rilixai's default is "curated");
+    # this agent emits rich trace_evidence the reflection LM should use.
     reflection_evidence_mode="curated_plus_trace",
+    # rilixai's default max_concurrency is 8; 4 is the cost-bounded demo value.
     max_concurrency=4,
 )
 class ApexAgentsRunner(BaseSampleRunner[ApexAgentsRecord, _ApexResult]):
