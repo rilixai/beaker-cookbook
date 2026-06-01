@@ -99,3 +99,11 @@ Hermetic — scripted PydanticAI `FunctionModel`s, no network.
   (90k cases) sliced `[0, 40%)` → test, `[40%, 80%)` → val, `[80%, 100%)` →
   train, sampled with `random.Random(1)`. The 300/300/150 picks match the
   paper.
+
+## Adapting this recipe to your agent
+
+The whole rilixai integration is `rilixai_spec.py` — one `@spec`-decorated
+`HotpotQARunner(BaseSampleRunner)`. To wire your own agent, see the
+cookbook's **[`ONBOARDING.md`](../ONBOARDING.md)** for the full contract
+(agent expectations, `ComponentApplier` cheatsheet, `FieldConfig` scoring,
+feedback, data loading).

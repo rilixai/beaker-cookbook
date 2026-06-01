@@ -38,6 +38,16 @@ uv sync --all-packages --group dev
 From there each recipe is independently runnable — pick one and
 follow the commands in its README.
 
+## Onboarding your own agent
+
+The recipes here are worked examples of one contract: a single
+`@spec`-decorated `BaseSampleRunner` class wires your production agent
+into rilixai's optimizer. **[`ONBOARDING.md`](ONBOARDING.md)** is the
+full contract reference — what rilixai expects from your agent, the
+`ComponentApplier` framework cheatsheet (PydanticAI, OpenAI, Anthropic,
+LangChain, …), data-loading patterns, the `FieldConfig` scoring
+cookbook, and the path from `rilixai init spec` to a queued run.
+
 ## Configuration
 
 The recipes need credentials for the LLM provider and, if you're

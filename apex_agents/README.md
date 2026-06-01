@@ -72,6 +72,13 @@ uv run python -m pytest apex_agents/tests -q
 
 Hermetic — a `FakeWorld` shim + stub judge, no network.
 
+## Adapting this recipe to your agent
+
+The whole rilixai integration is `rilixai_spec.py` — one `@spec`-decorated
+`ApexAgentsRunner(BaseSampleRunner)` (with an LLM rubric judge as a custom
+comparator). To wire your own agent, see the cookbook's
+**[`ONBOARDING.md`](../ONBOARDING.md)** for the full contract.
+
 ## Notes
 
 - rilixai is pinned via git in `pyproject.toml` until it's on PyPI.
