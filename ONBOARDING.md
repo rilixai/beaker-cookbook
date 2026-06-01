@@ -166,6 +166,10 @@ Case(
 )
 ```
 
+Most production teams start with a local JSONL eval set or an immutable hosted
+dataset artifact. rilixai ships small helpers for those repetitive pieces while
+leaving your domain row → record mapping in your code.
+
 Three common shapes:
 
 ```python
@@ -179,13 +183,21 @@ def cases_by_split(self, ctx):
     ]
     return {"train": cases[:150], "validation": cases[150:250]}
 
-# (b) JSONL on disk
+# (b) JSONL on disk — the common "I have an eval file" path
 def cases_by_split(self, ctx):
-    import json
     from pathlib import Path
-    rows = [json.loads(line) for line in Path("data/train.jsonl").read_text().splitlines()]
-    cases = [Case(input=_to_record(r), case_id=r["id"], ground_truth=r["gt"]) for r in rows]
-    return {"train": cases, "validation": cases}  # split however you like
+    from rilixai.data import load_jsonl_cases
+
+    return load_jsonl_cases(
+        Path("data"),
+        {"train": "train.jsonl", "validation": "validation.jsonl"},
+        row_to_case=lambda row, split: Case(
+            input=_to_record(row),
+            case_id=str(row["id"]),
+            ground_truth=row["gt"],
+            group_key=row.get("customer_id") or "default",
+        ),
+    )
 
 # (c) In-memory from a pandas DataFrame
 def cases_by_split(self, ctx):
@@ -199,6 +211,37 @@ def cases_by_split(self, ctx):
 
 `ctx.config` (§7) carries the run's knobs (split sizes, model, etc.), so size
 your splits from it: `cases[: ctx.config.train_size]`.
+
+For hosted production runs where your app snapshots eval data before queuing a
+run, attach the snapshot as an input artifact and materialize it inside the
+runner:
+
+```python
+import tempfile
+from pathlib import Path
+
+from rilixai.data import (
+    find_dataset_artifact,
+    load_jsonl_cases,
+    materialize_dataset_artifact,
+)
+
+
+def cases_by_split(self, ctx):
+    artifact = find_dataset_artifact(ctx, kinds=["dataset_snapshot", "my_agent_dataset"])
+    split_files = {"train": "train.jsonl", "validation": "validation.jsonl"}
+    with tempfile.TemporaryDirectory(prefix="my-agent-dataset-") as tmpdir:
+        dataset_dir = materialize_dataset_artifact(
+            artifact,
+            Path(tmpdir) / "dataset",
+            required_files=tuple(split_files.values()),  # needed for s3:// artifacts
+        )
+        return load_jsonl_cases(dataset_dir, split_files, row_to_case=_row_to_case)
+```
+
+That is the same pattern production integrations use for immutable S3 snapshots:
+your app owns the snapshot; rilixai owns applying candidates, running cases, and
+recording optimized prompts.
 
 ---
 
@@ -296,7 +339,10 @@ domain signal. Add them incrementally — one component at a time. See
 3. **Verify** the registration test passes:
    `uv run python -m pytest <member>/tests` — the one-line
    `assert_spec_registered("my-agent")` confirms `@spec` discovery works.
-4. **Push + run.** Set `RILIXAI_API_KEY` / `RILIXAI_API_BASE_URL`, then
+4. **Dry-run one case locally.** `uv run rilixai dry-run --config '{...}'`
+   builds the spec, applies the seed prompts, runs one case, and prints scores
+   before you spend hosted optimization budget.
+5. **Push + run.** Set `RILIXAI_API_KEY` / `RILIXAI_API_BASE_URL`, then
    `uv run rilixai push --member <member>` to build + promote the image and
    `uv run rilixai trigger` to queue a run (see each recipe's README for the
    exact commands). `OPENAI_API_KEY` and any other provider keys are bound as

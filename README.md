@@ -45,8 +45,8 @@ The recipes here are worked examples of one contract: a single
 into rilixai's optimizer. **[`ONBOARDING.md`](ONBOARDING.md)** is the
 full contract reference — what rilixai expects from your agent, the
 `ComponentApplier` framework cheatsheet (PydanticAI, OpenAI, Anthropic,
-LangChain, …), data-loading patterns, the `FieldConfig` scoring
-cookbook, and the path from `rilixai init spec` to a queued run.
+LangChain, …), JSONL/artifact data-loading helpers, the `FieldConfig`
+scoring cookbook, and the path from `rilixai init spec` to a queued run.
 
 ## Configuration
 
