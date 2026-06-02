@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 from typing import Any
 
 from rilixai.adapters import AttributeApplier
@@ -23,7 +24,6 @@ from apex_agents.rilixai_spec import (
     RESUM_SUMMARY_PROMPT_COMPONENT,
     SYSTEM_PROMPT_COMPONENT,
     TASK_TEMPLATE_COMPONENT,
-    _ApexPrompts,
 )
 from apex_agents.tests.fake_world import FakeWorld
 
@@ -240,7 +240,11 @@ def test_constructor_prompts_reach_inner_agent_on_next_forward() -> None:
 
 
 def test_rilixai_spec_component_mapping_reads_and_applies_runner_prompt_state() -> None:
-    prompts = _ApexPrompts()
+    prompts = SimpleNamespace(
+        system_prompt="seed system",
+        task_template="seed task {{task}}",
+        resum_summary_prompt="seed resum {conversation}",
+    )
     applier = AttributeApplier(
         target=prompts,
         mapping={

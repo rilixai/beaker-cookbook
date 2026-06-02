@@ -11,8 +11,9 @@ runner class; rilixai resolves it via ``load_spec_from_target``.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from pydantic import BaseModel
@@ -55,15 +56,6 @@ class _ApexResult:
 SYSTEM_PROMPT_COMPONENT = "system_prompt"
 TASK_TEMPLATE_COMPONENT = "task_template"
 RESUM_SUMMARY_PROMPT_COMPONENT = "resum_summary_prompt"
-
-
-@dataclass
-class _ApexPrompts:
-    """Runner-owned prompt state that rilixai candidates mutate."""
-
-    system_prompt: str = DEFAULT_SYSTEM_PROMPT
-    task_template: str = DEFAULT_TASK_TEMPLATE
-    resum_summary_prompt: str = DEFAULT_RESUM_SUMMARY_PROMPT
 
 
 # ─── Scoring (judge runs in the runner; the metric reads the result) ─────
@@ -111,16 +103,6 @@ class ApexAgentsSandboxConfig(BaseModel):
     max_concurrency: int = 4
 
 
-def _apex_config_from(sandbox_cfg: ApexAgentsSandboxConfig) -> ApexAgentsConfig:
-    return ApexAgentsConfig(
-        task_model=sandbox_cfg.task_model,
-        task_temperature=sandbox_cfg.task_temperature,
-        judge_model=sandbox_cfg.judge_model,
-        max_steps=sandbox_cfg.max_steps,
-        cost_limit=sandbox_cfg.cost_limit,
-    )
-
-
 # ─── The integration: one @spec runner class ────────────────────────────
 
 
@@ -146,41 +128,30 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
     def __init__(self, ctx: Any) -> None:
         sandbox_cfg = ctx.config if isinstance(ctx.config, ApexAgentsSandboxConfig) else ApexAgentsSandboxConfig()
         self._sandbox_cfg = sandbox_cfg
-        cfg = _apex_config_from(sandbox_cfg)
-        # Offline-test injection seam: a stub context may carry pre-built deps in
-        # ``metadata`` (world_factory / model_factory / judge) so the runner
-        # constructs without network — the HF world download + the live rubric
-        # judge. A production sandbox context carries none of these, so the real
-        # factory + judge are built lazily here.
+        self.cfg = ApexAgentsConfig(
+            task_model=sandbox_cfg.task_model,
+            task_temperature=sandbox_cfg.task_temperature,
+            judge_model=sandbox_cfg.judge_model,
+            max_steps=sandbox_cfg.max_steps,
+            cost_limit=sandbox_cfg.cost_limit,
+        )
         injected: Mapping[str, Any] = getattr(ctx, "metadata", None) or {}
         world_factory = injected.get("world_factory")
         if world_factory is None:
             from .agent.world.world import build_world_factory
 
             world_factory = build_world_factory()
-        judge = injected.get("judge") or build_rubric_judge(model=cfg.judge_model, timeout=cfg.llm_timeout)
-        self._setup(
-            cfg,
-            world_factory=world_factory,
-            model_factory=injected.get("model_factory"),
-            judge=judge,
-            prompts=_ApexPrompts(),
-        )
-
-    def _setup(
-        self,
-        cfg: ApexAgentsConfig,
-        *,
-        world_factory: Callable[[Any], Any],
-        model_factory: Callable[[str, float], Any] | None,
-        judge: Callable[[str, str, str], bool],
-        prompts: _ApexPrompts,
-    ) -> None:
-        self.cfg = cfg
         self._world_factory = world_factory
-        self._model_factory = model_factory
-        self.judge = judge
-        self.prompts = prompts
+        self._model_factory = injected.get("model_factory")
+        self.judge = injected.get("judge") or build_rubric_judge(
+            model=self.cfg.judge_model,
+            timeout=self.cfg.llm_timeout,
+        )
+        self.prompts = SimpleNamespace(
+            system_prompt=DEFAULT_SYSTEM_PROMPT,
+            task_template=DEFAULT_TASK_TEMPLATE,
+            resum_summary_prompt=DEFAULT_RESUM_SUMMARY_PROMPT,
+        )
         super().__init__(
             applier=AttributeApplier(
                 target=self.prompts,
@@ -193,11 +164,22 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
         )
 
     async def run_case(self, record: ApexAgentsRecord) -> _ApexResult:
-        agent = _build_agent(
-            self.cfg,
-            prompts=self.prompts,
-            world_factory=self._world_factory,
+        from .agent.agent import ApexReActAgent
+
+        cfg = self.cfg
+        agent = ApexReActAgent(
+            model_name=cfg.task_model,
+            model_temperature=cfg.task_temperature,
+            max_steps=cfg.max_steps,
+            cost_limit=cfg.cost_limit,
+            max_toolbelt_size=cfg.max_toolbelt_size,
+            max_context_tokens=cfg.max_context_tokens,
+            default_system_prompt=self.prompts.system_prompt,
+            default_task_template=self.prompts.task_template,
+            default_resum_summary_prompt=self.prompts.resum_summary_prompt,
+            world_factory=self._world_factory,  # type: ignore[arg-type]
             model_factory=self._model_factory,
+            llm_timeout=cfg.llm_timeout,
         )
         output = await agent.forward(record=record)
         rubric_payload = [{"verifier_id": c.verifier_id, "criteria": c.criteria} for c in record.rubric]
@@ -236,28 +218,3 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
         train_cases = stratified_case_cap(inner_train, sc.train_size, seed=sc.seed)
         val_cases = stratified_case_cap(validation, sc.val_size, seed=sc.seed)
         return {"train": list(train_cases), "validation": list(val_cases)}
-
-
-def _build_agent(
-    cfg: ApexAgentsConfig,
-    *,
-    prompts: _ApexPrompts,
-    world_factory: Callable[[Any], Any] | None,
-    model_factory: Callable[[str, float], Any] | None,
-) -> Any:
-    from .agent.agent import ApexReActAgent
-
-    return ApexReActAgent(
-        model_name=cfg.task_model,
-        model_temperature=cfg.task_temperature,
-        max_steps=cfg.max_steps,
-        cost_limit=cfg.cost_limit,
-        max_toolbelt_size=cfg.max_toolbelt_size,
-        max_context_tokens=cfg.max_context_tokens,
-        default_system_prompt=prompts.system_prompt,
-        default_task_template=prompts.task_template,
-        default_resum_summary_prompt=prompts.resum_summary_prompt,
-        world_factory=world_factory,  # type: ignore[arg-type]
-        model_factory=model_factory,
-        llm_timeout=cfg.llm_timeout,
-    )

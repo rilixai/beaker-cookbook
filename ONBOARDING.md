@@ -12,7 +12,7 @@ the class. The two cookbook recipes — `hotpotqa/rilixai_spec.py` and
 `apex_agents/rilixai_spec.py` — are working references for everything below.
 
 ```python
-from dataclasses import dataclass
+from types import SimpleNamespace
 
 from rilixai import spec
 from rilixai.adapters import BaseCaseRunner, AttributeApplier
@@ -22,11 +22,6 @@ from rilixai.prompt_optimization import Case
 from .agent import MyAgent, MyRecord, MyOutput
 
 
-@dataclass
-class Prompts:
-    system_prompt: str = "You are a helpful assistant."
-
-
 @spec(
     name="my-agent",
     field_configs=[FieldConfig(name="answer", comparators="exact_match")],
@@ -34,7 +29,7 @@ class Prompts:
 )
 class MyAgentRunner(BaseCaseRunner[MyRecord, MyOutput]):
     def __init__(self, ctx):
-        self.prompts = Prompts()
+        self.prompts = SimpleNamespace(system_prompt="You are a helpful assistant.")
         super().__init__(applier=AttributeApplier(target=self.prompts, mapping={"system": "system_prompt"}))
 
     async def run_case(self, record):
@@ -150,17 +145,16 @@ constructor, while `rilixai_spec.py` declares the rilixai component names and
 passes the current prompt state into the agent when running a case:
 
 ```python
+from types import SimpleNamespace
+
 SYSTEM = "system_prompt"
 SUMMARY = "summarize_prompt"
 
 
-@dataclass
-class Prompts:
-    system_prompt: str = DEFAULT_SYSTEM_PROMPT
-    summarize_prompt: str = DEFAULT_SUMMARIZE_PROMPT
-
-
-self.prompts = Prompts()
+self.prompts = SimpleNamespace(
+    system_prompt=DEFAULT_SYSTEM_PROMPT,
+    summarize_prompt=DEFAULT_SUMMARIZE_PROMPT,
+)
 
 super().__init__(
     applier=AttributeApplier(

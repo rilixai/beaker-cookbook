@@ -10,6 +10,7 @@ that scripts each turn.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -20,7 +21,6 @@ from hotpotqa.data.dataset import HotpotQAParagraph, HotpotQARecord
 from hotpotqa.rilixai_spec import (
     POLICY_PROMPT_COMPONENT,
     SUMMARIZE_PROMPT_COMPONENT,
-    _HotpotQAPrompts,
 )
 
 
@@ -420,7 +420,7 @@ def test_agent_runtime_dispatches_retrieval_by_cfg_mode() -> None:
 
 def test_rilixai_spec_component_mapping_reads_and_applies_runner_prompt_state() -> None:
     """The integration maps rilixai component names onto runner-owned prompt state."""
-    prompts = _HotpotQAPrompts()
+    prompts = SimpleNamespace(policy_prompt="seed policy", summarize_prompt="seed summary")
     applier = AttributeApplier(
         target=prompts,
         mapping={
