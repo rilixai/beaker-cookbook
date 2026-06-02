@@ -327,14 +327,60 @@ class HotpotQAMetrics(BaseMetricsCalculator):
     comparators = {"hotpot_f1": _hotpot_f1}  # only where shipped scorers diverge
 ```
 
-A comparator is just `(predicted, expected) -> float in [0, 1]`. For LLM-judge
-scoring, your comparator can ignore `expected` and read a precomputed score off
-the output (apex_agents runs the judge in the runner and reads it back this
-way).
+A comparator is just `(predicted, expected) -> float in [0, 1]`.
 
 ---
 
-## 6. Custom feedback narratives — when to bother
+## 6. LLM-as-judge scoring
+
+Use rilixai's shipped `llm_judge` comparator when the output is too open-ended
+for exact string or token matching. Declare it like any other comparator, then
+add `judge_config` on the metrics class:
+
+```python
+from rilixai.metrics import BaseMetricsCalculator, FieldConfig, LLMJudgeConfig
+
+class MyMetrics(BaseMetricsCalculator):
+    fields = [
+        FieldConfig(
+            name="rubric_pass_rate",
+            extract_from="answer",      # path on your output
+            compare_to="judge",         # path on Case.ground_truth
+            comparators="llm_judge",
+            weight=1.0,
+        )
+    ]
+    judge_config = LLMJudgeConfig(
+        model="gpt-4.1",
+        template="rubric",              # or "open_ended"
+        rubric_path="rubric",           # relative to ground_truth["judge"]
+        task_prompt_path="prompt",      # relative to ground_truth["judge"]
+    )
+```
+
+For that example, each case's `ground_truth` should carry the judge bundle:
+
+```python
+Case(
+    input=record,
+    case_id=record.id,
+    ground_truth={
+        "judge": {
+            "prompt": record.prompt,
+            "rubric": [{"criteria": "The answer states an enterprise value."}],
+        }
+    },
+)
+```
+
+`llm_judge` returns the fraction of rubric criteria marked `MET`. If you already
+have a domain judge inside your application, you can also run it in `run_case`
+and expose the numeric result as an output field; APEX uses that advanced
+pattern so rubric judging can share its benchmark-specific parser.
+
+---
+
+## 7. Custom feedback narratives — when to bother
 
 The reflection LM rewrites prompts better when it sees *why* a case scored the
 way it did. By default you get `GenericFeedback`, which builds a narrative from
@@ -362,7 +408,7 @@ domain signal. Add them incrementally — one component at a time. See
 
 ---
 
-## 7. End-to-end: from zero to a queued run
+## 8. End-to-end: from zero to a queued run
 
 1. **Scaffold** (optional): `uv run rilixai init spec --name my-agent
    --from-agent ./my_agent/agent.py` writes a `rilixai_spec.py` skeleton with
