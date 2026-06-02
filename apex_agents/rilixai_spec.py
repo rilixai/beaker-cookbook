@@ -17,7 +17,7 @@ from typing import Any
 
 from pydantic import BaseModel
 from rilixai import spec
-from rilixai.adapters import BaseCaseRunner, CallableApplier, CaseRunResult
+from rilixai.adapters import AttributeApplier, BaseCaseRunner, CaseRunResult
 from rilixai.metrics import BaseMetricsCalculator, FieldConfig
 from rilixai.prompt_optimization.models import Case
 
@@ -160,9 +160,13 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
         self.agent = agent
         self.judge = judge
         super().__init__(
-            applier=CallableApplier(
-                apply=lambda components: _apply_apex_components(agent, components),
-                read=lambda: _read_apex_components(agent),
+            applier=AttributeApplier(
+                target=agent,
+                mapping={
+                    SYSTEM_PROMPT_COMPONENT: "system_prompt",
+                    TASK_TEMPLATE_COMPONENT: "task_template",
+                    RESUM_SUMMARY_PROMPT_COMPONENT: "resum_summary_prompt",
+                },
             )
         )
 
@@ -227,22 +231,4 @@ def _build_agent(
         world_factory=world_factory,  # type: ignore[arg-type]
         model_factory=model_factory,
         llm_timeout=cfg.llm_timeout,
-    )
-
-
-def _read_apex_components(agent: Any) -> dict[str, str]:
-    """Read the seed/current prompts from the live agent instance."""
-    return {
-        SYSTEM_PROMPT_COMPONENT: agent.current_system_prompt,
-        TASK_TEMPLATE_COMPONENT: agent.current_task_template,
-        RESUM_SUMMARY_PROMPT_COMPONENT: agent.current_resum_summary_prompt,
-    }
-
-
-def _apply_apex_components(agent: Any, components: Mapping[str, str]) -> None:
-    """Map rilixai component names onto the production agent's prompt API."""
-    agent.set_prompts(
-        system_prompt=components.get(SYSTEM_PROMPT_COMPONENT),
-        task_template=components.get(TASK_TEMPLATE_COMPONENT),
-        resum_summary_prompt=components.get(RESUM_SUMMARY_PROMPT_COMPONENT),
     )

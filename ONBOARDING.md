@@ -136,36 +136,30 @@ author one by hand. (`AttributeApplier` reads/writes the same attributes;
 `CallableApplier` / `PydanticAIDepsApplier` take a `read` / `seed_reader`
 callable.)
 
-Both cookbook recipes use `CallableApplier` because it keeps the rilixai
-component vocabulary in `rilixai_spec.py`, while the agents expose neutral
-prompt setters/readers:
+Both cookbook recipes use `AttributeApplier` directly. The agent exposes normal
+prompt attributes, and `rilixai_spec.py` is the single place that declares the
+rilixai component names and maps them onto those attributes:
 
 ```python
 SYSTEM = "system_prompt"
 SUMMARY = "summarize_prompt"
 
 
-def _apply_components(agent, components):
-    agent.set_prompts(
-        system_prompt=components.get(SYSTEM),
-        summarize_prompt=components.get(SUMMARY),
-    )
-
-
-def _read_components(agent):
-    return {
-        SYSTEM: agent.current_system_prompt,
-        SUMMARY: agent.current_summarize_prompt,
-    }
-
-
 super().__init__(
-    applier=CallableApplier(
-        apply=lambda components: _apply_components(self.agent, components),
-        read=lambda: _read_components(self.agent),
+    applier=AttributeApplier(
+        target=self.agent,
+        mapping={
+            SYSTEM: "system_prompt",
+            SUMMARY: "summarize_prompt",
+        },
     )
 )
 ```
+
+If changing a prompt needs side effects, make the attribute a property on your
+agent. For example, the HotpotQA recipe uses a `policy_prompt` setter to rebuild
+its inner PydanticAI `Agent` because that framework bakes `system_prompt` into
+the agent at construction time.
 
 ---
 

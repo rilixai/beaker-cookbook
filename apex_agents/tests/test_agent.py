@@ -10,6 +10,8 @@ import asyncio
 import json
 from typing import Any
 
+from rilixai.adapters import AttributeApplier
+
 from apex_agents.agent.agent import ApexReActAgent
 from apex_agents.agent.prompts import (
     DEFAULT_RESUM_SUMMARY_PROMPT,
@@ -21,8 +23,6 @@ from apex_agents.rilixai_spec import (
     RESUM_SUMMARY_PROMPT_COMPONENT,
     SYSTEM_PROMPT_COMPONENT,
     TASK_TEMPLATE_COMPONENT,
-    _apply_apex_components,
-    _read_apex_components,
 )
 from apex_agents.tests.fake_world import FakeWorld
 
@@ -181,11 +181,11 @@ def test_final_answer_rejected_with_open_todos() -> None:
     assert any("final_answer rejected" in (o or "") for o in tool_outputs)
 
 
-def test_set_prompts_updates_inner_agent_prompts_on_next_forward() -> None:
+def test_prompt_attributes_update_inner_agent_prompts_on_next_forward() -> None:
     """Rewritten prompts must reach the next loop snapshot.
 
     Mirrors SWE-bench's prompt-update visibility check:
-    after ``set_prompts``, the system/user content the LLM sees must be the
+    after updating prompt attributes, the system/user content the LLM sees must be the
     updated values, not the defaults.
     """
     world = FakeWorld({})
@@ -213,17 +213,12 @@ def test_set_prompts_updates_inner_agent_prompts_on_next_forward() -> None:
     custom_system = "BRAND_NEW_SYSTEM_PROMPT_42"
     custom_task = "BRAND_NEW_TASK_FRAMING_99 :: {{task}}"
     custom_resum = "BRAND_NEW_RESUM {conversation}"
-    _apply_apex_components(
-        agent,
-        {
-            SYSTEM_PROMPT_COMPONENT: custom_system,
-            TASK_TEMPLATE_COMPONENT: custom_task,
-            RESUM_SUMMARY_PROMPT_COMPONENT: custom_resum,
-        },
-    )
-    assert agent.current_system_prompt == custom_system
-    assert agent.current_task_template == custom_task
-    assert agent.current_resum_summary_prompt == custom_resum
+    agent.system_prompt = custom_system
+    agent.task_template = custom_task
+    agent.resum_summary_prompt = custom_resum
+    assert agent.system_prompt == custom_system
+    assert agent.task_template == custom_task
+    assert agent.resum_summary_prompt == custom_resum
 
     model2 = _finish_immediately()
     agent._model_factory = lambda _n, _t: model2  # type: ignore[attr-defined]
@@ -236,36 +231,33 @@ def test_set_prompts_updates_inner_agent_prompts_on_next_forward() -> None:
     assert "Read the brief" in last_user
 
 
-def test_set_prompts_ignores_none_values() -> None:
-    world = FakeWorld({})
-    agent = _build_agent(model=_ScriptedModel([]), world=world)
-    initial_sys = agent.current_system_prompt
-    initial_task = agent.current_task_template
-    agent.set_prompts(system_prompt=None, task_template=None, resum_summary_prompt=None)
-    assert agent.current_system_prompt == initial_sys
-    assert agent.current_task_template == initial_task
-
-
 def test_rilixai_spec_component_mapping_reads_and_applies_agent_prompts() -> None:
     agent = _build_agent(model=_ScriptedModel([]), world=FakeWorld({}))
-    components = _read_apex_components(agent)
+    applier = AttributeApplier(
+        target=agent,
+        mapping={
+            SYSTEM_PROMPT_COMPONENT: "system_prompt",
+            TASK_TEMPLATE_COMPONENT: "task_template",
+            RESUM_SUMMARY_PROMPT_COMPONENT: "resum_summary_prompt",
+        },
+    )
+    components = applier.read()
     assert set(components) == {
         SYSTEM_PROMPT_COMPONENT,
         TASK_TEMPLATE_COMPONENT,
         RESUM_SUMMARY_PROMPT_COMPONENT,
     }
 
-    _apply_apex_components(
-        agent,
+    applier.apply(
         {
             SYSTEM_PROMPT_COMPONENT: "NEW SYSTEM",
             TASK_TEMPLATE_COMPONENT: "NEW TASK {{task}}",
             RESUM_SUMMARY_PROMPT_COMPONENT: "NEW RESUM {conversation}",
         },
     )
-    assert agent.current_system_prompt == "NEW SYSTEM"
-    assert agent.current_task_template == "NEW TASK {{task}}"
-    assert agent.current_resum_summary_prompt == "NEW RESUM {conversation}"
+    assert agent.system_prompt == "NEW SYSTEM"
+    assert agent.task_template == "NEW TASK {{task}}"
+    assert agent.resum_summary_prompt == "NEW RESUM {conversation}"
 
 
 def test_task_template_substitutes_task_variable() -> None:

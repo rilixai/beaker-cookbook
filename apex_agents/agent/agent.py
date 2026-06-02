@@ -311,10 +311,10 @@ def _domain_tool_schema(name: str) -> dict[str, Any]:
 class ApexReActAgent:
     """Faithful async ReAct toolbelt agent for one APEX-Agents task.
 
-    ``set_prompts`` updates the stashed prompt strings under a build lock; the
-    next :meth:`forward` snapshots them inside the lock and runs a fresh loop.
-    The wrapper does NOT keep long-lived loop state — every case needs its own
-    world + message history.
+    Prompt attributes update the stashed strings under a build lock; the next
+    :meth:`forward` snapshots them inside the lock and runs a fresh loop. The
+    wrapper does NOT keep long-lived loop state — every case needs its own world
+    + message history.
     """
 
     def __init__(
@@ -346,39 +346,34 @@ class ApexReActAgent:
         self._model_factory: ModelFactory = model_factory or build_litellm_model_factory(timeout=llm_timeout)
         self._build_lock = threading.Lock()
 
-    # ─── prompt updates (mirrors SWEBenchAgent's lock-guarded snapshot) ──
-
-    def set_prompts(
-        self,
-        *,
-        system_prompt: str | None = None,
-        task_template: str | None = None,
-        resum_summary_prompt: str | None = None,
-    ) -> None:
-        """Stash new prompt strings under the build lock.
-
-        ``None`` means "leave this prompt unchanged." The lock prevents a
-        concurrent :meth:`forward` mid-snapshot from reading a mixed prompt set.
-        """
-        with self._build_lock:
-            if system_prompt is not None and system_prompt != self._current_system_prompt:
-                self._current_system_prompt = system_prompt
-            if task_template is not None and task_template != self._current_task_template:
-                self._current_task_template = task_template
-            if resum_summary_prompt is not None and resum_summary_prompt != self._current_resum_summary_prompt:
-                self._current_resum_summary_prompt = resum_summary_prompt
+    # ─── prompt attributes (mirrors SWEBenchAgent's lock-guarded snapshot) ──
 
     @property
-    def current_system_prompt(self) -> str:
+    def system_prompt(self) -> str:
         return self._current_system_prompt
 
-    @property
-    def current_task_template(self) -> str:
-        return self._current_task_template
+    @system_prompt.setter
+    def system_prompt(self, value: str) -> None:
+        with self._build_lock:
+            self._current_system_prompt = value
 
     @property
-    def current_resum_summary_prompt(self) -> str:
+    def task_template(self) -> str:
+        return self._current_task_template
+
+    @task_template.setter
+    def task_template(self, value: str) -> None:
+        with self._build_lock:
+            self._current_task_template = value
+
+    @property
+    def resum_summary_prompt(self) -> str:
         return self._current_resum_summary_prompt
+
+    @resum_summary_prompt.setter
+    def resum_summary_prompt(self, value: str) -> None:
+        with self._build_lock:
+            self._current_resum_summary_prompt = value
 
     def _snapshot_prompts(self) -> tuple[str, str, str]:
         with self._build_lock:
@@ -402,7 +397,7 @@ class ApexReActAgent:
         world: Any = None
         try:
             # Snapshot the prompts BEFORE the first ``await``. The caller does
-            # ``set_prompts(...); await forward(...)`` with no await in
+            # ``agent.system_prompt = ...; await forward(...)`` with no await in
             # between, and asyncio only yields at an await — so taking the
             # snapshot as forward's first action keeps apply→snapshot atomic.
             # Snapshotting *after* the world-build await (as before) opened a
