@@ -10,17 +10,20 @@ import asyncio
 import json
 from typing import Any
 
-from apex_agents.agent.agent import (
+from apex_agents.agent.agent import ApexReActAgent
+from apex_agents.agent.prompts import (
+    DEFAULT_RESUM_SUMMARY_PROMPT,
+    DEFAULT_SYSTEM_PROMPT,
+    DEFAULT_TASK_TEMPLATE,
+)
+from apex_agents.data.dataset import ApexAgentsRecord, RubricCriterion
+from apex_agents.rilixai_spec import (
     RESUM_SUMMARY_PROMPT_COMPONENT,
     SYSTEM_PROMPT_COMPONENT,
     TASK_TEMPLATE_COMPONENT,
-    ApexReActAgent,
+    _apply_apex_components,
+    _read_apex_components,
 )
-from apex_agents.agent.prompts import (
-    apex_agents_seed_candidate,
-    load_apex_agents_seed_prompts,
-)
-from apex_agents.data.dataset import ApexAgentsRecord, RubricCriterion
 from apex_agents.tests.fake_world import FakeWorld
 
 
@@ -66,15 +69,14 @@ def _tool_call(name: str, args: dict[str, Any], call_id: str = "c1") -> dict[str
 
 
 def _build_agent(*, model: Any, world: FakeWorld, max_steps: int = 20) -> ApexReActAgent:
-    sys_p, task_t, resum_p = load_apex_agents_seed_prompts()
     return ApexReActAgent(
         model_name="scripted/test",
         model_temperature=0.0,
         max_steps=max_steps,
         cost_limit=100.0,
-        default_system_prompt=sys_p,
-        default_task_template=task_t,
-        default_resum_summary_prompt=resum_p,
+        default_system_prompt=DEFAULT_SYSTEM_PROMPT,
+        default_task_template=DEFAULT_TASK_TEMPLATE,
+        default_resum_summary_prompt=DEFAULT_RESUM_SUMMARY_PROMPT,
         world_factory=lambda _record: world,
         model_factory=lambda _name, _temp: model,
     )
@@ -105,7 +107,6 @@ def test_agent_runs_end_to_end_add_tool_read_final_answer() -> None:
         ]
     )
     agent = _build_agent(model=model, world=world)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
     out = asyncio.run(agent.forward(record=_record()))
 
     assert out.status == "completed"
@@ -137,7 +138,6 @@ def test_domain_tool_rejected_until_added_to_toolbelt() -> None:
         ]
     )
     agent = _build_agent(model=model, world=world)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
     out = asyncio.run(agent.forward(record=_record()))
     tool_outputs = [m.output for m in out.messages if m.role == "tool"]
     assert any("not in the active toolbelt" in (o or "") for o in tool_outputs)
@@ -175,19 +175,18 @@ def test_final_answer_rejected_with_open_todos() -> None:
         ]
     )
     agent = _build_agent(model=model, world=world)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
     out = asyncio.run(agent.forward(record=_record()))
     assert out.final_answer == "real answer"
     tool_outputs = [m.output for m in out.messages if m.role == "tool"]
     assert any("final_answer rejected" in (o or "") for o in tool_outputs)
 
 
-def test_apply_candidate_updates_inner_agent_prompts_on_next_forward() -> None:
-    """A rewritten candidate's prompts must reach the next loop snapshot.
+def test_set_prompts_updates_inner_agent_prompts_on_next_forward() -> None:
+    """Rewritten prompts must reach the next loop snapshot.
 
-    Mirrors SWE-bench's test_apply_candidate_updates_inner_agent_templates:
-    after apply_candidate, the system/user content the LLM sees must be
-    the candidate's, not the seed's.
+    Mirrors SWE-bench's prompt-update visibility check:
+    after ``set_prompts``, the system/user content the LLM sees must be the
+    updated values, not the defaults.
     """
     world = FakeWorld({})
 
@@ -205,8 +204,7 @@ def test_apply_candidate_updates_inner_agent_prompts_on_next_forward() -> None:
     model = _finish_immediately()
     agent = _build_agent(model=model, world=world)
 
-    # 1. Seed prompts → first forward.
-    agent.apply_candidate(apex_agents_seed_candidate().components)
+    # 1. Default prompts → first forward.
     asyncio.run(agent.forward(record=_record()))
     first_system = model.seen[0][0]["content"]
     assert "BRAND_NEW_SYSTEM" not in first_system
@@ -215,12 +213,13 @@ def test_apply_candidate_updates_inner_agent_prompts_on_next_forward() -> None:
     custom_system = "BRAND_NEW_SYSTEM_PROMPT_42"
     custom_task = "BRAND_NEW_TASK_FRAMING_99 :: {{task}}"
     custom_resum = "BRAND_NEW_RESUM {conversation}"
-    agent.apply_candidate(
+    _apply_apex_components(
+        agent,
         {
             SYSTEM_PROMPT_COMPONENT: custom_system,
             TASK_TEMPLATE_COMPONENT: custom_task,
             RESUM_SUMMARY_PROMPT_COMPONENT: custom_resum,
-        }
+        },
     )
     assert agent.current_system_prompt == custom_system
     assert agent.current_task_template == custom_task
@@ -237,14 +236,36 @@ def test_apply_candidate_updates_inner_agent_prompts_on_next_forward() -> None:
     assert "Read the brief" in last_user
 
 
-def test_apply_candidate_ignores_unknown_components() -> None:
+def test_set_prompts_ignores_none_values() -> None:
     world = FakeWorld({})
     agent = _build_agent(model=_ScriptedModel([]), world=world)
     initial_sys = agent.current_system_prompt
     initial_task = agent.current_task_template
-    agent.apply_candidate({"policy_prompt": "AGENT", "create_query_hop2_prompt": "WORKFLOW"})
+    agent.set_prompts(system_prompt=None, task_template=None, resum_summary_prompt=None)
     assert agent.current_system_prompt == initial_sys
     assert agent.current_task_template == initial_task
+
+
+def test_rilixai_spec_component_mapping_reads_and_applies_agent_prompts() -> None:
+    agent = _build_agent(model=_ScriptedModel([]), world=FakeWorld({}))
+    components = _read_apex_components(agent)
+    assert set(components) == {
+        SYSTEM_PROMPT_COMPONENT,
+        TASK_TEMPLATE_COMPONENT,
+        RESUM_SUMMARY_PROMPT_COMPONENT,
+    }
+
+    _apply_apex_components(
+        agent,
+        {
+            SYSTEM_PROMPT_COMPONENT: "NEW SYSTEM",
+            TASK_TEMPLATE_COMPONENT: "NEW TASK {{task}}",
+            RESUM_SUMMARY_PROMPT_COMPONENT: "NEW RESUM {conversation}",
+        },
+    )
+    assert agent.current_system_prompt == "NEW SYSTEM"
+    assert agent.current_task_template == "NEW TASK {{task}}"
+    assert agent.current_resum_summary_prompt == "NEW RESUM {conversation}"
 
 
 def test_task_template_substitutes_task_variable() -> None:
@@ -253,7 +274,6 @@ def test_task_template_substitutes_task_variable() -> None:
         [{"content": "done", "tool_calls": [_tool_call("final_answer", {"answer": "x"})], "cost": 0.0}]
     )
     agent = _build_agent(model=model, world=world)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
     asyncio.run(agent.forward(record=_record()))
     user_msg = model.seen[0][1]["content"]
     # Seed task_template is "{{task}}" → user message == raw task prompt.
@@ -278,20 +298,18 @@ def test_resum_triggers_and_keeps_recent_messages() -> None:
         )
     script.append({"content": "finish", "tool_calls": [_tool_call("final_answer", {"answer": "done"})], "cost": 0.0})
     model = _ScriptedModel(script)
-    sys_p, task_t, resum_p = load_apex_agents_seed_prompts()
     agent = ApexReActAgent(
         model_name="scripted/test",
         model_temperature=0.0,
         max_steps=30,
         cost_limit=100.0,
         max_context_tokens=2_000,  # tiny so ReSum trigger fires quickly
-        default_system_prompt=sys_p,
-        default_task_template=task_t,
-        default_resum_summary_prompt=resum_p,
+        default_system_prompt=DEFAULT_SYSTEM_PROMPT,
+        default_task_template=DEFAULT_TASK_TEMPLATE,
+        default_resum_summary_prompt=DEFAULT_RESUM_SUMMARY_PROMPT,
         world_factory=lambda _r: world,
         model_factory=lambda _n, _t: model,
     )
-    agent.apply_candidate(apex_agents_seed_candidate().components)
     out = asyncio.run(agent.forward(record=_record()))
 
     assert out.resum_count >= 1, "ReSum never fired despite a tiny context budget"
@@ -311,7 +329,6 @@ def test_model_failure_surfaces_as_error_status() -> None:
             raise RuntimeError("simulated outage")
 
     agent = _build_agent(model=_BrokenModel(), world=world)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
     out = asyncio.run(agent.forward(record=_record()))
     assert out.status == "RuntimeError"
     assert out.final_answer == ""
@@ -338,19 +355,17 @@ def test_world_factory_runs_off_the_event_loop() -> None:
         asyncio.run(_noop())  # would raise if not offloaded
         return FakeWorld({})
 
-    sys_p, task_t, resum_p = load_apex_agents_seed_prompts()
     model = _ScriptedModel(
         [{"content": "done", "tool_calls": [_tool_call("final_answer", {"answer": "ok"})], "cost": 0.0}]
     )
     agent = ApexReActAgent(
         model_name="scripted/test",
-        default_system_prompt=sys_p,
-        default_task_template=task_t,
-        default_resum_summary_prompt=resum_p,
+        default_system_prompt=DEFAULT_SYSTEM_PROMPT,
+        default_task_template=DEFAULT_TASK_TEMPLATE,
+        default_resum_summary_prompt=DEFAULT_RESUM_SUMMARY_PROMPT,
         world_factory=_factory,
         model_factory=lambda _n, _t: model,
     )
-    agent.apply_candidate(apex_agents_seed_candidate().components)
     out = asyncio.run(agent.forward(record=_record()))
     assert constructed_thread_ids, "world factory was never invoked"
     assert out.final_answer == "ok"
@@ -447,7 +462,6 @@ def test_todo_status_synonym_closes_the_final_answer_gate() -> None:
         ]
     )
     agent = _build_agent(model=model, world=world, max_steps=10)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
     out = asyncio.run(agent.forward(record=_record()))
     assert out.status == "completed"
     assert out.final_answer == "EV is $42"
@@ -477,7 +491,6 @@ def test_final_answer_livelock_guard_terminates_with_answer() -> None:
     ]
     model = _ScriptedModel(script)
     agent = _build_agent(model=model, world=world, max_steps=40)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
     out = asyncio.run(agent.forward(record=_record()))
     assert out.final_answer == "forced answer"
     assert out.extra.get("forced_final_answer") is True
@@ -557,7 +570,6 @@ def test_timeout_exception_fails_case_fast_not_hang() -> None:
             raise TimeoutError("litellm request timed out")
 
     agent = _build_agent(model=_TimeoutModel(), world=world)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
     out = asyncio.run(agent.forward(record=_record()))
     assert out.status == "TimeoutError"
     assert "timed out" in str(out.extra.get("error", ""))

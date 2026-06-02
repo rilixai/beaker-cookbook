@@ -19,13 +19,20 @@ from rilixai.adapters import BaseCaseRunner, CallableApplier, CaseRunResult
 from rilixai.metrics import BaseMetricsCalculator, FieldConfig
 from rilixai.prompt_optimization.models import Case
 
-from .agent.prompts import hotpotqa_pydantic_agent_seed_candidate
+from .agent.prompts import DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT, DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT
 from .agent.types import HotpotQAAgentOutput
 from .config import HotpotQAConfig
 from .data.dataset import HotpotQARecord, load_hotpotqa_paper_split
 from .data.eval import exact_match_score, f1_score
 from .feedback import HotpotQAFeedback
 from .metrics import build_agent_run_metrics
+
+
+# ─── Optimizable prompt components ──────────────────────────────────────
+
+
+POLICY_PROMPT_COMPONENT = "policy_prompt"
+SUMMARIZE_PROMPT_COMPONENT = "summarize_prompt"
 
 
 # ─── Scoring ────────────────────────────────────────────────────────────
@@ -133,11 +140,13 @@ class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
             top_k=sandbox_cfg.retrieve_k,
             max_iters=sandbox_cfg.max_iters,
             temperature=sandbox_cfg.task_temperature,
+            policy_prompt=DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
+            summarize_prompt=DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
         )
         super().__init__(
             applier=CallableApplier(
-                apply=self.agent.apply_candidate,
-                read=lambda: dict(hotpotqa_pydantic_agent_seed_candidate().components),
+                apply=lambda components: _apply_hotpotqa_components(self.agent, components),
+                read=lambda: _read_hotpotqa_components(self.agent),
             )
         )
 
@@ -197,3 +206,19 @@ def _bare_openai_model(pydantic_spec: str) -> str:
     """
     _, separator, model = pydantic_spec.partition(":")
     return model if separator else pydantic_spec
+
+
+def _read_hotpotqa_components(agent: Any) -> dict[str, str]:
+    """Read the seed/current prompts from the live agent instance."""
+    return {
+        POLICY_PROMPT_COMPONENT: agent.current_policy_prompt,
+        SUMMARIZE_PROMPT_COMPONENT: agent.current_summarize_prompt,
+    }
+
+
+def _apply_hotpotqa_components(agent: Any, components: Mapping[str, str]) -> None:
+    """Map rilixai component names onto the production agent's prompt API."""
+    agent.set_prompts(
+        policy_prompt=components.get(POLICY_PROMPT_COMPONENT),
+        summarize_prompt=components.get(SUMMARIZE_PROMPT_COMPONENT),
+    )

@@ -19,23 +19,10 @@ from typing import Any
 
 from rilixai.adapters import per_component_feedback
 
-from .agent.types import (
-    POLICY_COMPONENT,
-    SUMMARIZE_COMPONENT,
-    AgentToolCall,
-    HotpotQAAgentOutput,
-)
+from .agent.types import AgentToolCall, HotpotQAAgentOutput
 from .data.dataset import HotpotQARecord
 from .data.eval import exact_match_score
 from .data.gold import ideal_summary_from_supporting_facts
-
-
-# Legacy aliases — keep so external consumers importing
-# ``AGENT_POLICY_COMPONENT`` / ``AGENT_SUMMARIZE_COMPONENT`` from
-# this module don't break.
-# The canonical names live in ``agent.types`` so they can't drift.
-AGENT_POLICY_COMPONENT = POLICY_COMPONENT
-AGENT_SUMMARIZE_COMPONENT = SUMMARIZE_COMPONENT
 
 
 class HotpotQAFeedback:
@@ -47,11 +34,11 @@ class HotpotQAFeedback:
     sync, and adding a third component is just a third decorated method.
     """
 
-    @per_component_feedback(POLICY_COMPONENT)
+    @per_component_feedback("policy_prompt")
     def policy(self, case: Any, output: HotpotQAAgentOutput) -> str:
         return _policy_prompt_feedback(record=case.input, output=output)
 
-    @per_component_feedback(SUMMARIZE_COMPONENT)
+    @per_component_feedback("summarize_prompt")
     def summarize(self, case: Any, output: HotpotQAAgentOutput) -> str:
         return _summarize_feedback(record=case.input, output=output)
 
@@ -248,7 +235,5 @@ def _render_missed_evidence(missing_full_text: list[str]) -> str:
 
 
 __all__ = [
-    "AGENT_POLICY_COMPONENT",
-    "AGENT_SUMMARIZE_COMPONENT",
     "HotpotQAFeedback",
 ]

@@ -1,8 +1,4 @@
-"""Shared dataclasses for the APEX-Agents agent benchmark.
-
-Framework-neutral so the rilixai trajectory translation + feedback
-functions don't need to import litellm just to type-check.
-"""
+"""Shared dataclasses for the APEX-Agents agent benchmark."""
 
 from __future__ import annotations
 
@@ -12,7 +8,7 @@ from typing import Any
 
 @dataclass
 class AgentToolCall:
-    """One step of the ReAct toolbelt loop, normalized for rilixai.
+    """One step of the ReAct toolbelt loop.
 
     * ``role`` — the message role (``"system"``, ``"user"``,
       ``"assistant"``, or ``"tool"``).

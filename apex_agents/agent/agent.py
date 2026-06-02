@@ -22,10 +22,10 @@ matches. The loop structure mirrors Archipelago's reference:
   replaced with the summary and the last ``KEEP_RECENT_MESSAGES`` are
   kept verbatim (faithful to Archipelago resum.py constants).
 
-The two/three optimizable components are stashed under a
-:class:`threading.Lock`; the next :meth:`forward` snapshots them inside
-the lock and builds fresh agent state (mirrors ``SWEBenchAgent``
-exactly — per-case agent build, lock-guarded snapshot). The model
+The prompt strings are stashed under a :class:`threading.Lock`; the next
+:meth:`forward` snapshots them inside the lock and builds fresh agent state
+(mirrors ``SWEBenchAgent`` exactly — per-case agent build, lock-guarded
+snapshot). The model
 factory is injectable so tests pass a scripted deterministic model and
 no real API call fires.
 """
@@ -40,22 +40,13 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from .prompts import (
-    RESUM_SUMMARY_PROMPT_COMPONENT,
-    SYSTEM_PROMPT_COMPONENT,
-    TASK_TEMPLATE_COMPONENT,
-)
 from .types import AgentToolCall, ApexAgentsAgentOutput
 
 
 logger = logging.getLogger(__name__)
 
 
-# Component names the agent reads off the rilixai PromptCandidate.
 __all__ = [
-    "RESUM_SUMMARY_PROMPT_COMPONENT",
-    "SYSTEM_PROMPT_COMPONENT",
-    "TASK_TEMPLATE_COMPONENT",
     "ApexReActAgent",
     "ModelFactory",
     "WorldFactory",
@@ -320,10 +311,10 @@ def _domain_tool_schema(name: str) -> dict[str, Any]:
 class ApexReActAgent:
     """Faithful async ReAct toolbelt agent for one APEX-Agents task.
 
-    ``apply_candidate`` updates the stashed component strings under a
-    build lock; the next :meth:`forward` snapshots them inside the lock
-    and runs a fresh loop. The wrapper does NOT keep long-lived loop
-    state — every case needs its own world + message history.
+    ``set_prompts`` updates the stashed prompt strings under a build lock; the
+    next :meth:`forward` snapshots them inside the lock and runs a fresh loop.
+    The wrapper does NOT keep long-lived loop state — every case needs its own
+    world + message history.
     """
 
     def __init__(
@@ -355,26 +346,27 @@ class ApexReActAgent:
         self._model_factory: ModelFactory = model_factory or build_litellm_model_factory(timeout=llm_timeout)
         self._build_lock = threading.Lock()
 
-    # ─── candidate application (mirrors SWEBenchAgent) ────────────────
+    # ─── prompt updates (mirrors SWEBenchAgent's lock-guarded snapshot) ──
 
-    def apply_candidate(self, components: Mapping[str, str]) -> None:
-        """Stash new component strings under the build lock.
+    def set_prompts(
+        self,
+        *,
+        system_prompt: str | None = None,
+        task_template: str | None = None,
+        resum_summary_prompt: str | None = None,
+    ) -> None:
+        """Stash new prompt strings under the build lock.
 
-        Only known components are read; unknown keys are ignored (a
-        candidate may carry a richer vocabulary). The lock prevents a
-        concurrent :meth:`forward` mid-snapshot from reading half of
-        one candidate's prompts and half of another's.
+        ``None`` means "leave this prompt unchanged." The lock prevents a
+        concurrent :meth:`forward` mid-snapshot from reading a mixed prompt set.
         """
-        sys_p = components.get(SYSTEM_PROMPT_COMPONENT)
-        task_t = components.get(TASK_TEMPLATE_COMPONENT)
-        resum_p = components.get(RESUM_SUMMARY_PROMPT_COMPONENT)
         with self._build_lock:
-            if sys_p is not None and sys_p != self._current_system_prompt:
-                self._current_system_prompt = sys_p
-            if task_t is not None and task_t != self._current_task_template:
-                self._current_task_template = task_t
-            if resum_p is not None and resum_p != self._current_resum_summary_prompt:
-                self._current_resum_summary_prompt = resum_p
+            if system_prompt is not None and system_prompt != self._current_system_prompt:
+                self._current_system_prompt = system_prompt
+            if task_template is not None and task_template != self._current_task_template:
+                self._current_task_template = task_template
+            if resum_summary_prompt is not None and resum_summary_prompt != self._current_resum_summary_prompt:
+                self._current_resum_summary_prompt = resum_summary_prompt
 
     @property
     def current_system_prompt(self) -> str:
@@ -388,7 +380,7 @@ class ApexReActAgent:
     def current_resum_summary_prompt(self) -> str:
         return self._current_resum_summary_prompt
 
-    def _snapshot_components(self) -> tuple[str, str, str]:
+    def _snapshot_prompts(self) -> tuple[str, str, str]:
         with self._build_lock:
             return (
                 self._current_system_prompt,
@@ -410,14 +402,14 @@ class ApexReActAgent:
         world: Any = None
         try:
             # Snapshot the prompts BEFORE the first ``await``. The caller does
-            # ``apply_candidate(c); await forward(...)`` with no await in
+            # ``set_prompts(...); await forward(...)`` with no await in
             # between, and asyncio only yields at an await — so taking the
             # snapshot as forward's first action keeps apply→snapshot atomic.
             # Snapshotting *after* the world-build await (as before) opened a
-            # window where a concurrent case's ``apply_candidate`` could swap
+            # window where a concurrent prompt update could swap
             # the shared agent's prompts and this case would snapshot the wrong
             # candidate.
-            sys_p, task_t, resum_p = self._snapshot_components()
+            sys_p, task_t, resum_p = self._snapshot_prompts()
             world = await asyncio.to_thread(self._world_factory, record)
             output = await asyncio.to_thread(
                 self._run_loop,

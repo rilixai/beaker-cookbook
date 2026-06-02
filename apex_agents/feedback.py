@@ -21,11 +21,6 @@ from typing import Any
 
 from rilixai.adapters import per_component_feedback
 
-from .agent.prompts import (
-    RESUM_SUMMARY_PROMPT_COMPONENT,
-    SYSTEM_PROMPT_COMPONENT,
-    TASK_TEMPLATE_COMPONENT,
-)
 from .agent.types import AgentToolCall, ApexAgentsAgentOutput
 from .data.dataset import ApexAgentsRecord
 
@@ -38,15 +33,15 @@ class ApexAgentsFeedback:
     ``@spec(feedback=ApexAgentsFeedback)`` — no dict-assembly to keep in sync.
     """
 
-    @per_component_feedback(SYSTEM_PROMPT_COMPONENT)
+    @per_component_feedback("system_prompt")
     def system_prompt(self, case: Any, output: ApexAgentsAgentOutput) -> str:
         return _system_prompt_feedback(record=case.input, output=output)
 
-    @per_component_feedback(TASK_TEMPLATE_COMPONENT)
+    @per_component_feedback("task_template")
     def task_template(self, case: Any, output: ApexAgentsAgentOutput) -> str:
         return _task_template_feedback(record=case.input, output=output)
 
-    @per_component_feedback(RESUM_SUMMARY_PROMPT_COMPONENT)
+    @per_component_feedback("resum_summary_prompt")
     def resum_summary_prompt(self, case: Any, output: ApexAgentsAgentOutput) -> str:
         return _resum_summary_prompt_feedback(record=case.input, output=output)
 
@@ -215,9 +210,6 @@ def task_template_preserves_task_var(task_template: str) -> bool:
 
 
 __all__ = [
-    "RESUM_SUMMARY_PROMPT_COMPONENT",
-    "SYSTEM_PROMPT_COMPONENT",
-    "TASK_TEMPLATE_COMPONENT",
     "ApexAgentsFeedback",
     "task_template_preserves_task_var",
 ]

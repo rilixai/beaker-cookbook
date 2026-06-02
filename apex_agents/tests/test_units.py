@@ -24,7 +24,6 @@ from rilixai.prompt_optimization.evaluation import evaluate_candidate_on_cases
 from rilixai.prompt_optimization.models import Case
 from rilixai.prompt_optimization.spec import build_adapter_from_spec, validate_spec
 
-from apex_agents.agent.prompts import apex_agents_seed_candidate
 from apex_agents.agent.types import (
     AgentToolCall,
     ApexAgentsAgentOutput,
@@ -341,14 +340,13 @@ def _offline_apex_spec(
 
 def test_runner_emits_per_component_feedback_and_scores_with_stub_judge(monkeypatch: Any) -> None:
     from apex_agents.agent.agent import ApexReActAgent
-    from apex_agents.agent.prompts import load_apex_agents_seed_prompts
+    from apex_agents.agent.prompts import DEFAULT_RESUM_SUMMARY_PROMPT, DEFAULT_SYSTEM_PROMPT, DEFAULT_TASK_TEMPLATE
 
-    sys_p, task_t, resum_p = load_apex_agents_seed_prompts()
     agent = ApexReActAgent(
         model_name="scripted/test",
-        default_system_prompt=sys_p,
-        default_task_template=task_t,
-        default_resum_summary_prompt=resum_p,
+        default_system_prompt=DEFAULT_SYSTEM_PROMPT,
+        default_task_template=DEFAULT_TASK_TEMPLATE,
+        default_resum_summary_prompt=DEFAULT_RESUM_SUMMARY_PROMPT,
         world_factory=lambda _r: FakeWorld({}),
         model_factory=lambda _n, _t: _scripted_model(),
     )
@@ -364,7 +362,7 @@ def test_runner_emits_per_component_feedback_and_scores_with_stub_judge(monkeypa
     # optimizer adapter would.
     record = _pipeline_record()
     spec = _offline_apex_spec(monkeypatch, agent=agent, judge=_stub_judge)
-    result = asyncio.run(spec.extraction_runtime(input=record, candidate=apex_agents_seed_candidate()))
+    result = asyncio.run(spec.extraction_runtime(input=record, candidate=spec.seed_candidate))
 
     assert result.rubric_pass_rate == 1.0  # forwarded from the _ApexResult output
     assert judged and judged[0][1] == "The EV is $5M."
@@ -706,7 +704,7 @@ def test_spec_end_to_end_via_adapter_with_fake_world_and_stub_judge(monkeypatch:
     adapter = build_adapter_from_spec(spec)
     report = evaluate_candidate_on_cases(
         adapter=adapter,
-        candidate=apex_agents_seed_candidate(),
+        candidate=spec.seed_candidate,
         cases=cases,
     )
     assert report.field_accuracies["rubric_pass_rate"] == 1.0

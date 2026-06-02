@@ -136,14 +136,35 @@ author one by hand. (`AttributeApplier` reads/writes the same attributes;
 `CallableApplier` / `PydanticAIDepsApplier` take a `read` / `seed_reader`
 callable.)
 
-Both cookbook recipes use `CallableApplier` because their agents already expose
-an `apply_candidate(components)` method:
+Both cookbook recipes use `CallableApplier` because it keeps the rilixai
+component vocabulary in `rilixai_spec.py`, while the agents expose neutral
+prompt setters/readers:
 
 ```python
-super().__init__(applier=CallableApplier(
-    apply=self.agent.apply_candidate,
-    read=lambda: dict(my_seed_candidate().components),
-))
+SYSTEM = "system_prompt"
+SUMMARY = "summarize_prompt"
+
+
+def _apply_components(agent, components):
+    agent.set_prompts(
+        system_prompt=components.get(SYSTEM),
+        summarize_prompt=components.get(SUMMARY),
+    )
+
+
+def _read_components(agent):
+    return {
+        SYSTEM: agent.current_system_prompt,
+        SUMMARY: agent.current_summarize_prompt,
+    }
+
+
+super().__init__(
+    applier=CallableApplier(
+        apply=lambda components: _apply_components(self.agent, components),
+        read=lambda: _read_components(self.agent),
+    )
+)
 ```
 
 ---

@@ -21,7 +21,7 @@ from rilixai.adapters import BaseCaseRunner, CallableApplier, CaseRunResult
 from rilixai.metrics import BaseMetricsCalculator, FieldConfig
 from rilixai.prompt_optimization.models import Case
 
-from .agent.prompts import apex_agents_seed_candidate
+from .agent.prompts import DEFAULT_RESUM_SUMMARY_PROMPT, DEFAULT_SYSTEM_PROMPT, DEFAULT_TASK_TEMPLATE
 from .agent.types import ApexAgentsAgentOutput
 from .config import ApexAgentsConfig
 from .data.dataset import _APEX_AGENTS_GROUND_TRUTH_KEY, ApexAgentsRecord, load_apex_agents_cases
@@ -47,6 +47,14 @@ class _ApexResult:
     rubric_pass_rate: float
     final_answer: str
     agent_output: ApexAgentsAgentOutput
+
+
+# ─── Optimizable prompt components ──────────────────────────────────────
+
+
+SYSTEM_PROMPT_COMPONENT = "system_prompt"
+TASK_TEMPLATE_COMPONENT = "task_template"
+RESUM_SUMMARY_PROMPT_COMPONENT = "resum_summary_prompt"
 
 
 # ─── Scoring (judge runs in the runner; the metric reads the result) ─────
@@ -153,8 +161,8 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
         self.judge = judge
         super().__init__(
             applier=CallableApplier(
-                apply=agent.apply_candidate,
-                read=lambda: dict(apex_agents_seed_candidate().components),
+                apply=lambda components: _apply_apex_components(agent, components),
+                read=lambda: _read_apex_components(agent),
             )
         )
 
@@ -205,9 +213,7 @@ def _build_agent(
     model_factory: Callable[[str, float], Any] | None,
 ) -> Any:
     from .agent.agent import ApexReActAgent
-    from .agent.prompts import load_apex_agents_seed_prompts
 
-    default_sys, default_task, default_resum = load_apex_agents_seed_prompts()
     return ApexReActAgent(
         model_name=cfg.task_model,
         model_temperature=cfg.task_temperature,
@@ -215,10 +221,28 @@ def _build_agent(
         cost_limit=cfg.cost_limit,
         max_toolbelt_size=cfg.max_toolbelt_size,
         max_context_tokens=cfg.max_context_tokens,
-        default_system_prompt=default_sys,
-        default_task_template=default_task,
-        default_resum_summary_prompt=default_resum,
+        default_system_prompt=DEFAULT_SYSTEM_PROMPT,
+        default_task_template=DEFAULT_TASK_TEMPLATE,
+        default_resum_summary_prompt=DEFAULT_RESUM_SUMMARY_PROMPT,
         world_factory=world_factory,  # type: ignore[arg-type]
         model_factory=model_factory,
         llm_timeout=cfg.llm_timeout,
+    )
+
+
+def _read_apex_components(agent: Any) -> dict[str, str]:
+    """Read the seed/current prompts from the live agent instance."""
+    return {
+        SYSTEM_PROMPT_COMPONENT: agent.current_system_prompt,
+        TASK_TEMPLATE_COMPONENT: agent.current_task_template,
+        RESUM_SUMMARY_PROMPT_COMPONENT: agent.current_resum_summary_prompt,
+    }
+
+
+def _apply_apex_components(agent: Any, components: Mapping[str, str]) -> None:
+    """Map rilixai component names onto the production agent's prompt API."""
+    agent.set_prompts(
+        system_prompt=components.get(SYSTEM_PROMPT_COMPONENT),
+        task_template=components.get(TASK_TEMPLATE_COMPONENT),
+        resum_summary_prompt=components.get(RESUM_SUMMARY_PROMPT_COMPONENT),
     )

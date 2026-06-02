@@ -1,19 +1,19 @@
-"""Seed prompts for the APEX-Agents ReAct toolbelt agent.
+"""Default prompts for the APEX-Agents ReAct toolbelt agent.
 
-Three optimizable components:
+Three prompt strings define the reference agent behavior:
 
 * ``system_prompt`` — the agent's system message (think-before-acting
   policy + tool catalogue + workflow + rules).
 * ``task_template`` — the first user message. A Jinja2 ``{{task}}``
   variable is substituted with the raw task prompt. Archipelago passes
-  the raw task prompt verbatim, so the seed is just ``{{task}}``; GEPA
+  the raw task prompt verbatim, so the default is just ``{{task}}``; GEPA
   may rewrite the framing but ``{{task}}`` must survive (the feedback
   module enforces this, mirroring SWE-bench's ``{{task}}`` check).
 * ``resum_summary_prompt`` — the conversation-compaction prompt used
   when the agent's context grows past the ReSum trigger. Keeps a
   literal ``{conversation}`` ``str.format`` placeholder.
 
-The system_prompt + resum_summary_prompt seeds are copied VERBATIM
+The system_prompt + resum_summary_prompt defaults are copied VERBATIM
 from Archipelago's ``react_toolbelt_agent`` reference prompts so our
 faithful agent's behavior matches Mercor's reference harness. Any
 drift would shift the GEPA optimization curve off the paper baseline.
@@ -21,16 +21,9 @@ drift would shift the GEPA optimization curve off the paper baseline.
 
 from __future__ import annotations
 
-from rilixai.prompt_optimization.models import PromptCandidate, seed_candidate_from_components
-
-
-SYSTEM_PROMPT_COMPONENT = "system_prompt"
-TASK_TEMPLATE_COMPONENT = "task_template"
-RESUM_SUMMARY_PROMPT_COMPONENT = "resum_summary_prompt"
-
 
 # ─── VERBATIM Archipelago react_toolbelt_agent system prompt ──────────
-SYSTEM_PROMPT_SEED = """You are an AI assistant that completes tasks by reasoning and using tools.
+DEFAULT_SYSTEM_PROMPT = """You are an AI assistant that completes tasks by reasoning and using tools.
 
 ## Think Before Acting
 
@@ -64,7 +57,7 @@ Don't over-explain. Be concise but show your thinking.
 
 
 # ─── VERBATIM Archipelago SUMMARY_PROMPT (keep {conversation}) ─────────
-RESUM_SUMMARY_PROMPT_SEED = """Summarize this AI agent's work session into a compact reasoning state.
+DEFAULT_RESUM_SUMMARY_PROMPT = """Summarize this AI agent's work session into a compact reasoning state.
 
 {conversation}
 
@@ -89,34 +82,13 @@ What is the agent trying to accomplish?
 Be specific. Include concrete values needed to continue."""
 
 
-# Archipelago passes the raw task prompt as the user message; the seed
+# Archipelago passes the raw task prompt as the user message; the default
 # task_template is just the Jinja2 substitution of the task prompt.
-TASK_TEMPLATE_SEED = "{{task}}"
-
-
-def apex_agents_seed_candidate() -> PromptCandidate:
-    """Return the seed :class:`PromptCandidate` for the APEX-Agents agent."""
-    return seed_candidate_from_components(
-        {
-            SYSTEM_PROMPT_COMPONENT: SYSTEM_PROMPT_SEED,
-            TASK_TEMPLATE_COMPONENT: TASK_TEMPLATE_SEED,
-            RESUM_SUMMARY_PROMPT_COMPONENT: RESUM_SUMMARY_PROMPT_SEED,
-        }
-    )
-
-
-def load_apex_agents_seed_prompts() -> tuple[str, str, str]:
-    """Return ``(system_prompt, task_template, resum_summary_prompt)`` seeds."""
-    return SYSTEM_PROMPT_SEED, TASK_TEMPLATE_SEED, RESUM_SUMMARY_PROMPT_SEED
+DEFAULT_TASK_TEMPLATE = "{{task}}"
 
 
 __all__ = [
-    "RESUM_SUMMARY_PROMPT_COMPONENT",
-    "RESUM_SUMMARY_PROMPT_SEED",
-    "SYSTEM_PROMPT_COMPONENT",
-    "SYSTEM_PROMPT_SEED",
-    "TASK_TEMPLATE_COMPONENT",
-    "TASK_TEMPLATE_SEED",
-    "apex_agents_seed_candidate",
-    "load_apex_agents_seed_prompts",
+    "DEFAULT_RESUM_SUMMARY_PROMPT",
+    "DEFAULT_SYSTEM_PROMPT",
+    "DEFAULT_TASK_TEMPLATE",
 ]

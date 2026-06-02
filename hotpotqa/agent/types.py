@@ -1,9 +1,4 @@
-"""Shared dataclasses for the HotpotQA PydanticAI agent.
-
-Framework-neutral so the rilixai trajectory translation and the
-feedback functions don't need to import ``pydantic_ai`` just to
-type-check.
-"""
+"""Shared dataclasses for the HotpotQA PydanticAI agent."""
 
 from __future__ import annotations
 
@@ -11,16 +6,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..data.dataset import HotpotQAParagraph
-
-
-# Component names the agent attaches to the rilixai PromptCandidate.
-# Defined in this framework-neutral module so the agent runtime
-# (``agent.py``, which imports PydanticAI) and the GEPA-facing
-# feedback functions (``feedback.py``) can both import
-# them without dragging in either layer's heavy deps. Single source
-# of truth — no aliases — so they can't drift.
-POLICY_COMPONENT = "policy_prompt"
-SUMMARIZE_COMPONENT = "summarize_prompt"
 
 
 @dataclass
@@ -60,7 +45,6 @@ class HotpotQAAgentOutput:
     def retrieved_titles(self) -> list[str]:
         """Titles of the retrieved paragraphs, in retrieval order.
 
-        Exposed as a flat list so a ``FieldConfig(extract_from="retrieved_titles")``
-        resolves directly against this output for supporting-title recall scoring.
+        Exposed as a flat list so metric extractors can score supporting-title recall.
         """
         return [p.title for p in self.retrieved_paragraphs]

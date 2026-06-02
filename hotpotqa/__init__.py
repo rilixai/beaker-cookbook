@@ -28,7 +28,6 @@ Layout (each subpackage groups one concern):
 from .agent.prompts import (
     DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
     DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
-    hotpotqa_pydantic_agent_seed_candidate,
 )
 from .agent.types import AgentToolCall, HotpotQAAgentOutput
 from .config import HotpotQAConfig
@@ -65,7 +64,6 @@ __all__ = [
     "exact_match_score",
     "f1_score",
     "f1_score_components",
-    "hotpotqa_pydantic_agent_seed_candidate",
     "load_hotpotqa_paper_split",
     "load_hotpotqa_split",
     "normalize_answer",

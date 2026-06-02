@@ -24,10 +24,9 @@ Layout (each subpackage groups one concern):
 """
 
 from .agent.prompts import (
-    RESUM_SUMMARY_PROMPT_SEED,
-    SYSTEM_PROMPT_SEED,
-    TASK_TEMPLATE_SEED,
-    apex_agents_seed_candidate,
+    DEFAULT_RESUM_SUMMARY_PROMPT,
+    DEFAULT_SYSTEM_PROMPT,
+    DEFAULT_TASK_TEMPLATE,
 )
 from .agent.types import AgentToolCall, ApexAgentsAgentOutput
 from .config import ApexAgentsConfig
@@ -56,9 +55,9 @@ from .rilixai_spec import (
 
 __all__ = [
     "DEFAULT_JUDGE_MODEL",
-    "RESUM_SUMMARY_PROMPT_SEED",
-    "SYSTEM_PROMPT_SEED",
-    "TASK_TEMPLATE_SEED",
+    "DEFAULT_RESUM_SUMMARY_PROMPT",
+    "DEFAULT_SYSTEM_PROMPT",
+    "DEFAULT_TASK_TEMPLATE",
     "RUBRIC_FIELD",
     "AgentToolCall",
     "ApexAgentsAgentOutput",
@@ -69,7 +68,6 @@ __all__ = [
     "ApexAgentsRunner",
     "ApexAgentsSandboxConfig",
     "RubricCriterion",
-    "apex_agents_seed_candidate",
     "build_apex_agents_run_metrics",
     "build_rubric_judge",
     "cases_from_records",
