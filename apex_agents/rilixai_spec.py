@@ -2,8 +2,9 @@
 
 ``rilixai push`` targets this file. :class:`ApexAgentsRunner` is the entire
 sandbox integration — rilixai assembles the metrics calculator, seed
-candidate, and per-component feedback from the ``@spec`` declarations and the
-runner's ``_package_result`` (which runs the rubric judge + emits the trace).
+candidate, and default per-component feedback from the ``@spec`` declarations,
+the runner's applier, and the runner's ``_package_result`` (which runs the
+rubric judge + emits the trace).
 The ``@spec`` decorator builds the :class:`PromptOptimizationSpec` from the
 runner class; rilixai resolves it via ``load_spec_from_target``.
 """
@@ -27,7 +28,6 @@ from .agent.types import ApexAgentsAgentOutput
 from .config import ApexAgentsConfig
 from .data.dataset import _APEX_AGENTS_GROUND_TRUTH_KEY, ApexAgentsRecord, load_apex_agents_cases
 from .data.world_splits import stratified_case_cap, world_held_out_val_split
-from .feedback import ApexAgentsFeedback
 from .metrics import (
     RUBRIC_FIELD,
     build_apex_agents_run_metrics,
@@ -35,6 +35,11 @@ from .metrics import (
     coerce_pass_rate,
     score_rubric,
 )
+
+
+# Optional: uncomment this import and the ``feedback=`` line in ``@spec`` below
+# to replace rilixai's default GenericFeedback with APEX-specific narratives.
+# from .feedback import ApexAgentsFeedback
 
 
 @dataclass
@@ -113,7 +118,9 @@ class ApexAgentsSandboxConfig(BaseModel):
     task_type="apex_agent",
     config_schema=ApexAgentsSandboxConfig,
     field_configs=ApexAgentsMetrics,
-    feedback=ApexAgentsFeedback,
+    # Omit feedback= to use rilixai's GenericFeedback while keeping the custom
+    # rubric metric above. For richer domain-specific narratives, uncomment:
+    # feedback=ApexAgentsFeedback,
     # No explicit seed: rilixai auto-reads it from runner-owned prompt state
     # via the applier's read() at spec-build time.
     # reflection_evidence_mode is kept (rilixai's default is "curated");
@@ -204,8 +211,9 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
             config=self.cfg,
             rubric_pass_rate=output.rubric_pass_rate,
         )
-        # Per-component feedback flows through @spec(feedback=ApexAgentsFeedback);
-        # the feedback methods read the agent output, not the result wrapper.
+        # With feedback omitted in @spec, this invokes rilixai's GenericFeedback.
+        # If the optional ApexAgentsFeedback line above is enabled, the same
+        # hook invokes those per-component methods instead.
         feedback = self._build_feedback(record, output.agent_output, runtime_kwargs)  # type: ignore[arg-type]
         if feedback:
             run_metrics.setdefault("trace_evidence", {})["per_component_feedback"] = feedback

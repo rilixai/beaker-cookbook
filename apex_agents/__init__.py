@@ -18,7 +18,7 @@ Layout (each subpackage groups one concern):
   integration (``@spec`` runner + ``@spec`` metrics calculator).
 * :mod:`apex_agents.metrics` — the LLM rubric judge + the run-metrics
   trajectory builder.
-* :mod:`apex_agents.feedback` — :class:`ApexAgentsFeedback`, the
+* :mod:`apex_agents.feedback` — optional :class:`ApexAgentsFeedback`
   per-component reflection narratives.
 * :mod:`apex_agents.config` — :class:`ApexAgentsConfig` the runner reads.
 """

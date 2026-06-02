@@ -335,7 +335,7 @@ def _offline_apex_spec(
     return build_spec_from_runner_class(ApexAgentsRunner, ctx)
 
 
-def test_runner_emits_per_component_feedback_and_scores_with_stub_judge(monkeypatch: Any) -> None:
+def test_runner_emits_default_feedback_and_scores_with_stub_judge(monkeypatch: Any) -> None:
     judged: list[tuple[str, str]] = []
 
     def _stub_judge(criterion: str, answer: str, task_prompt: str) -> bool:
@@ -352,15 +352,24 @@ def test_runner_emits_per_component_feedback_and_scores_with_stub_judge(monkeypa
         model_factory=lambda _n, _t: _scripted_model(),
         judge=_stub_judge,
     )
-    result = asyncio.run(spec.extraction_runtime(input=record, candidate=spec.seed_candidate))
+    result = asyncio.run(
+        spec.extraction_runtime(
+            input=record,
+            candidate=spec.seed_candidate,
+            case_id=record.task_id,
+            ground_truth=record_to_case(record).ground_truth,
+        )
+    )
 
     assert result.rubric_pass_rate == 1.0  # forwarded from the _ApexResult output
     assert judged and judged[0][1] == "The EV is $5M."
     feedback = result.run_metrics["trace_evidence"]["per_component_feedback"]
     assert set(feedback) == {"system_prompt", "task_template", "resum_summary_prompt"}
-    assert "system_prompt" in feedback["system_prompt"]
-    assert "{{task}}" in feedback["task_template"]
-    assert "{conversation}" in feedback["resum_summary_prompt"]
+    assert len(set(feedback.values())) == 1  # GenericFeedback uses one shared narrative.
+    narrative = feedback["system_prompt"]
+    assert "case_id: ib-1" in narrative
+    assert "The EV is $5M." in narrative
+    assert "expected:" in narrative
     aa = result.run_metrics["apex_agents"]
     assert aa["task_id"] == "ib-1"
     assert aa["world_id"] == "world-a"

@@ -240,10 +240,11 @@ def build_apex_agents_run_metrics(
 ) -> dict[str, Any]:
     """Translate the agent's output into rilixai trajectory metadata.
 
-    Per-component feedback is no longer embedded here — it flows through
-    ``@spec(feedback=ApexAgentsFeedback)`` (the runner merges it into
-    ``trace_evidence.per_component_feedback`` in ``_package_result``). This
-    builder owns only the domain-specific trace evidence.
+    Per-component feedback is no longer embedded here — the runner asks
+    rilixai for either default GenericFeedback or the optional
+    ``@spec(feedback=...)`` class, then merges it into
+    ``trace_evidence.per_component_feedback``. This builder owns only the
+    domain-specific trace evidence.
     """
     policy_reasoning = [
         _truncate(m.content, config.max_preview_chars) for m in output.messages if m.role == "assistant"

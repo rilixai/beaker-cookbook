@@ -380,7 +380,29 @@ pattern so rubric judging can share its benchmark-specific parser.
 
 ---
 
-## 7. Custom feedback narratives — when to bother
+## 7. Custom metrics with default feedback
+
+Metrics and feedback are separate knobs. If you need custom scoring but are
+happy with rilixai's templated feedback, declare `field_configs` and omit
+`feedback=`:
+
+```python
+@spec(
+    name="my-agent",
+    field_configs=MyMetrics,  # BaseMetricsCalculator or list[FieldConfig]
+)
+class MyRunner(BaseCaseRunner[MyRecord, MyOutput]):
+    ...
+```
+
+That path uses your metrics for scoring and attaches `GenericFeedback` to each
+prompt component read by the applier. Add `feedback=MyFeedback` only when you
+want component-specific narratives. The APEX recipe leaves the custom
+`ApexAgentsFeedback` switch commented out to show both paths.
+
+---
+
+## 8. Custom feedback narratives — when to bother
 
 The reflection LM rewrites prompts better when it sees *why* a case scored the
 way it did. By default you get `GenericFeedback`, which builds a narrative from
@@ -408,7 +430,7 @@ domain signal. Add them incrementally — one component at a time. See
 
 ---
 
-## 8. End-to-end: from zero to a queued run
+## 9. End-to-end: from zero to a queued run
 
 1. **Scaffold** (optional): `uv run rilixai init spec --name my-agent
    --from-agent ./my_agent/agent.py` writes a `rilixai_spec.py` skeleton with
