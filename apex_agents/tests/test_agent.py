@@ -23,6 +23,7 @@ from apex_agents.rilixai_spec import (
     RESUM_SUMMARY_PROMPT_COMPONENT,
     SYSTEM_PROMPT_COMPONENT,
     TASK_TEMPLATE_COMPONENT,
+    _ApexPrompts,
 )
 from apex_agents.tests.fake_world import FakeWorld
 
@@ -68,15 +69,23 @@ def _tool_call(name: str, args: dict[str, Any], call_id: str = "c1") -> dict[str
     return {"id": call_id, "name": name, "arguments": args}
 
 
-def _build_agent(*, model: Any, world: FakeWorld, max_steps: int = 20) -> ApexReActAgent:
+def _build_agent(
+    *,
+    model: Any,
+    world: FakeWorld,
+    max_steps: int = 20,
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+    task_template: str = DEFAULT_TASK_TEMPLATE,
+    resum_summary_prompt: str = DEFAULT_RESUM_SUMMARY_PROMPT,
+) -> ApexReActAgent:
     return ApexReActAgent(
         model_name="scripted/test",
         model_temperature=0.0,
         max_steps=max_steps,
         cost_limit=100.0,
-        default_system_prompt=DEFAULT_SYSTEM_PROMPT,
-        default_task_template=DEFAULT_TASK_TEMPLATE,
-        default_resum_summary_prompt=DEFAULT_RESUM_SUMMARY_PROMPT,
+        default_system_prompt=system_prompt,
+        default_task_template=task_template,
+        default_resum_summary_prompt=resum_summary_prompt,
         world_factory=lambda _record: world,
         model_factory=lambda _name, _temp: model,
     )
@@ -181,12 +190,12 @@ def test_final_answer_rejected_with_open_todos() -> None:
     assert any("final_answer rejected" in (o or "") for o in tool_outputs)
 
 
-def test_prompt_attributes_update_inner_agent_prompts_on_next_forward() -> None:
-    """Rewritten prompts must reach the next loop snapshot.
+def test_constructor_prompts_reach_inner_agent_on_next_forward() -> None:
+    """Rewritten prompts must reach the loop when used to construct the agent.
 
     Mirrors SWE-bench's prompt-update visibility check:
-    after updating prompt attributes, the system/user content the LLM sees must be the
-    updated values, not the defaults.
+    the system/user content the LLM sees must be the updated values, not the
+    defaults.
     """
     world = FakeWorld({})
 
@@ -213,16 +222,15 @@ def test_prompt_attributes_update_inner_agent_prompts_on_next_forward() -> None:
     custom_system = "BRAND_NEW_SYSTEM_PROMPT_42"
     custom_task = "BRAND_NEW_TASK_FRAMING_99 :: {{task}}"
     custom_resum = "BRAND_NEW_RESUM {conversation}"
-    agent.system_prompt = custom_system
-    agent.task_template = custom_task
-    agent.resum_summary_prompt = custom_resum
-    assert agent.system_prompt == custom_system
-    assert agent.task_template == custom_task
-    assert agent.resum_summary_prompt == custom_resum
-
     model2 = _finish_immediately()
-    agent._model_factory = lambda _n, _t: model2  # type: ignore[attr-defined]
-    asyncio.run(agent.forward(record=_record()))
+    rewritten_agent = _build_agent(
+        model=model2,
+        world=world,
+        system_prompt=custom_system,
+        task_template=custom_task,
+        resum_summary_prompt=custom_resum,
+    )
+    asyncio.run(rewritten_agent.forward(record=_record()))
     last_system = model2.seen[-1][0]["content"]
     last_user = model2.seen[-1][1]["content"]
     assert custom_system in last_system, f"rewrite not visible in system prompt: {last_system!r}"
@@ -231,10 +239,10 @@ def test_prompt_attributes_update_inner_agent_prompts_on_next_forward() -> None:
     assert "Read the brief" in last_user
 
 
-def test_rilixai_spec_component_mapping_reads_and_applies_agent_prompts() -> None:
-    agent = _build_agent(model=_ScriptedModel([]), world=FakeWorld({}))
+def test_rilixai_spec_component_mapping_reads_and_applies_runner_prompt_state() -> None:
+    prompts = _ApexPrompts()
     applier = AttributeApplier(
-        target=agent,
+        target=prompts,
         mapping={
             SYSTEM_PROMPT_COMPONENT: "system_prompt",
             TASK_TEMPLATE_COMPONENT: "task_template",
@@ -255,9 +263,9 @@ def test_rilixai_spec_component_mapping_reads_and_applies_agent_prompts() -> Non
             RESUM_SUMMARY_PROMPT_COMPONENT: "NEW RESUM {conversation}",
         },
     )
-    assert agent.system_prompt == "NEW SYSTEM"
-    assert agent.task_template == "NEW TASK {{task}}"
-    assert agent.resum_summary_prompt == "NEW RESUM {conversation}"
+    assert prompts.system_prompt == "NEW SYSTEM"
+    assert prompts.task_template == "NEW TASK {{task}}"
+    assert prompts.resum_summary_prompt == "NEW RESUM {conversation}"
 
 
 def test_task_template_substitutes_task_variable() -> None:

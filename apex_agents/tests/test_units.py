@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 from rilixai.prompt_optimization.evaluation import evaluate_candidate_on_cases
-from rilixai.prompt_optimization.models import Case
+from rilixai.prompt_optimization.models import Case, PromptCandidate
 from rilixai.prompt_optimization.spec import build_adapter_from_spec, validate_spec
 
 from apex_agents.agent.types import (
@@ -308,16 +308,15 @@ def _offline_apex_spec(
     monkeypatch: Any,
     *,
     judge: Any,
-    agent: Any = None,
     world_factory: Any = None,
     model_factory: Any = None,
     cases: Any = None,
 ) -> Any:
     """Build an APEX spec offline through the ``@spec`` path.
 
-    Injects the agent / world factory / model factory / judge the runner would
-    otherwise build against the network via ``ctx.metadata``, and bypasses the
-    HF-backed ``cases_by_split`` so the test stays hermetic.
+    Injects the world factory / model factory / judge the runner would otherwise
+    build against the network via ``ctx.metadata``, and bypasses the HF-backed
+    ``cases_by_split`` so the test stays hermetic.
     """
     from rilixai.adapters.spec_builder import build_spec_from_runner_class
     from rilixai.testing import stub_optimization_context
@@ -325,8 +324,6 @@ def _offline_apex_spec(
     rows = list(cases or [])
     monkeypatch.setattr(ApexAgentsRunner, "cases_by_split", lambda self, ctx: {"train": rows, "validation": rows})
     metadata: dict[str, Any] = {"judge": judge}
-    if agent is not None:
-        metadata["agent"] = agent
     if world_factory is not None:
         metadata["world_factory"] = world_factory
     if model_factory is not None:
@@ -339,29 +336,22 @@ def _offline_apex_spec(
 
 
 def test_runner_emits_per_component_feedback_and_scores_with_stub_judge(monkeypatch: Any) -> None:
-    from apex_agents.agent.agent import ApexReActAgent
-    from apex_agents.agent.prompts import DEFAULT_RESUM_SUMMARY_PROMPT, DEFAULT_SYSTEM_PROMPT, DEFAULT_TASK_TEMPLATE
-
-    agent = ApexReActAgent(
-        model_name="scripted/test",
-        default_system_prompt=DEFAULT_SYSTEM_PROMPT,
-        default_task_template=DEFAULT_TASK_TEMPLATE,
-        default_resum_summary_prompt=DEFAULT_RESUM_SUMMARY_PROMPT,
-        world_factory=lambda _r: FakeWorld({}),
-        model_factory=lambda _n, _t: _scripted_model(),
-    )
-
     judged: list[tuple[str, str]] = []
 
     def _stub_judge(criterion: str, answer: str, task_prompt: str) -> bool:
         judged.append((criterion, answer))
         return "EV" in answer
 
-    # Build the spec via the @spec path (injecting the pre-built agent + stub
+    # Build the spec via the @spec path (injecting offline factories + stub
     # judge through ctx.metadata) and drive its extraction_runtime the way the
     # optimizer adapter would.
     record = _pipeline_record()
-    spec = _offline_apex_spec(monkeypatch, agent=agent, judge=_stub_judge)
+    spec = _offline_apex_spec(
+        monkeypatch,
+        world_factory=lambda _r: FakeWorld({}),
+        model_factory=lambda _n, _t: _scripted_model(),
+        judge=_stub_judge,
+    )
     result = asyncio.run(spec.extraction_runtime(input=record, candidate=spec.seed_candidate))
 
     assert result.rubric_pass_rate == 1.0  # forwarded from the _ApexResult output
@@ -375,6 +365,39 @@ def test_runner_emits_per_component_feedback_and_scores_with_stub_judge(monkeypa
     assert aa["task_id"] == "ib-1"
     assert aa["world_id"] == "world-a"
     assert aa["rubric_pass_rate"] == 1.0
+
+
+def test_runner_applies_candidate_prompts_from_runner_state(monkeypatch: Any) -> None:
+    seen: list[list[dict[str, Any]]] = []
+
+    class _M:
+        def complete(self, *, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
+            seen.append([dict(m) for m in messages])
+            return {
+                "content": "done",
+                "tool_calls": [{"id": "c1", "name": "final_answer", "arguments": {"answer": "The EV is $5M."}}],
+                "cost": 0.0,
+            }
+
+    spec = _offline_apex_spec(
+        monkeypatch,
+        world_factory=lambda _r: FakeWorld({}),
+        model_factory=lambda _n, _t: _M(),
+        judge=lambda *_: True,
+    )
+    candidate = PromptCandidate(
+        components={
+            **spec.seed_candidate.components,
+            "system_prompt": "RUNNER_STATE_SYSTEM_PROMPT",
+            "task_template": "RUNNER_STATE_TASK :: {{task}}",
+        }
+    )
+
+    asyncio.run(spec.extraction_runtime(input=_pipeline_record(), candidate=candidate))
+
+    assert seen, "scripted model was not called"
+    assert "RUNNER_STATE_SYSTEM_PROMPT" in seen[0][0]["content"]
+    assert "RUNNER_STATE_TASK" in seen[0][1]["content"]
 
 
 # ─────────────────────────────────────────────────────────────────────

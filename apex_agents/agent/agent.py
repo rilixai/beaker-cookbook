@@ -22,12 +22,10 @@ matches. The loop structure mirrors Archipelago's reference:
   replaced with the summary and the last ``KEEP_RECENT_MESSAGES`` are
   kept verbatim (faithful to Archipelago resum.py constants).
 
-The prompt strings are stashed under a :class:`threading.Lock`; the next
-:meth:`forward` snapshots them inside the lock and builds fresh agent state
-(mirrors ``SWEBenchAgent`` exactly — per-case agent build, lock-guarded
-snapshot). The model
-factory is injectable so tests pass a scripted deterministic model and
-no real API call fires.
+Prompt strings are constructor configuration for the agent instance. Callers
+that want to run a different prompt set construct another agent with those
+strings. The model factory is injectable so tests pass a scripted
+deterministic model and no real API call fires.
 """
 
 from __future__ import annotations
@@ -35,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import threading
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -311,10 +308,8 @@ def _domain_tool_schema(name: str) -> dict[str, Any]:
 class ApexReActAgent:
     """Faithful async ReAct toolbelt agent for one APEX-Agents task.
 
-    Prompt attributes update the stashed strings under a build lock; the next
-    :meth:`forward` snapshots them inside the lock and runs a fresh loop. The
-    wrapper does NOT keep long-lived loop state — every case needs its own world
-    + message history.
+    The wrapper does NOT keep long-lived loop state — every case needs its own
+    world + message history.
     """
 
     def __init__(
@@ -339,49 +334,18 @@ class ApexReActAgent:
         self._cost_limit = cost_limit
         self._max_toolbelt_size = max_toolbelt_size
         self._max_context_tokens = max_context_tokens
-        self._current_system_prompt = default_system_prompt
-        self._current_task_template = default_task_template
-        self._current_resum_summary_prompt = default_resum_summary_prompt
+        self._system_prompt = default_system_prompt
+        self._task_template = default_task_template
+        self._resum_summary_prompt = default_resum_summary_prompt
         self._world_factory = world_factory
         self._model_factory: ModelFactory = model_factory or build_litellm_model_factory(timeout=llm_timeout)
-        self._build_lock = threading.Lock()
-
-    # ─── prompt attributes (mirrors SWEBenchAgent's lock-guarded snapshot) ──
-
-    @property
-    def system_prompt(self) -> str:
-        return self._current_system_prompt
-
-    @system_prompt.setter
-    def system_prompt(self, value: str) -> None:
-        with self._build_lock:
-            self._current_system_prompt = value
-
-    @property
-    def task_template(self) -> str:
-        return self._current_task_template
-
-    @task_template.setter
-    def task_template(self, value: str) -> None:
-        with self._build_lock:
-            self._current_task_template = value
-
-    @property
-    def resum_summary_prompt(self) -> str:
-        return self._current_resum_summary_prompt
-
-    @resum_summary_prompt.setter
-    def resum_summary_prompt(self, value: str) -> None:
-        with self._build_lock:
-            self._current_resum_summary_prompt = value
 
     def _snapshot_prompts(self) -> tuple[str, str, str]:
-        with self._build_lock:
-            return (
-                self._current_system_prompt,
-                self._current_task_template,
-                self._current_resum_summary_prompt,
-            )
+        return (
+            self._system_prompt,
+            self._task_template,
+            self._resum_summary_prompt,
+        )
 
     # ─── main entrypoint ──────────────────────────────────────────────
 
@@ -396,14 +360,8 @@ class ApexReActAgent:
         started = time.monotonic()
         world: Any = None
         try:
-            # Snapshot the prompts BEFORE the first ``await``. The caller does
-            # ``agent.system_prompt = ...; await forward(...)`` with no await in
-            # between, and asyncio only yields at an await — so taking the
-            # snapshot as forward's first action keeps apply→snapshot atomic.
-            # Snapshotting *after* the world-build await (as before) opened a
-            # window where a concurrent prompt update could swap
-            # the shared agent's prompts and this case would snapshot the wrong
-            # candidate.
+            # Snapshot constructor prompts before the first await so this case
+            # uses one internally consistent prompt set.
             sys_p, task_t, resum_p = self._snapshot_prompts()
             world = await asyncio.to_thread(self._world_factory, record)
             output = await asyncio.to_thread(

@@ -31,7 +31,6 @@ transparent: the ``system_prompt`` GEPA rewrites is right there in the
 from __future__ import annotations
 
 import logging
-import threading
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -88,13 +87,10 @@ class HotpotQADeps:
     # itself caring about modes. The agent still applies its own
     # cross-call dedup against ``retrieved_titles_seen``.
     retrieve_k_fn: RetrieveKFn | None = None
-    # Snapshotted summarize prompt for this case. ``forward`` captures
-    # ``self._current_summarize_prompt`` here at the start of the run
-    # so a concurrent prompt update can't swap the prompt mid-call
-    # (matching the existing ``self._agent`` snapshot in ``forward``).
-    # ``_do_summarize`` prefers this when set; direct test callers that build
-    # their own ``HotpotQADeps`` can leave it ``None`` and fall back to instance
-    # state.
+    # Per-case summarize prompt. ``forward`` copies the agent's constructor
+    # prompt into deps so the indirect PydanticAI tool call uses the same value
+    # the case started with. Direct test callers that build their own
+    # ``HotpotQADeps`` can leave it ``None`` and fall back to instance state.
     summarize_prompt_override: str | None = None
 
 
@@ -141,13 +137,8 @@ class HotpotQAPydanticAgent:
         self._openai_client: AsyncOpenAI | None = openai_client
         self._summarize_llm_call: SummarizeLLMCall = summarize_llm_call or self._default_summarize_llm_call
 
-        self._current_policy_prompt = policy_prompt
-        self._current_summarize_prompt = summarize_prompt
-        # Updating ``policy_prompt`` rebuilds the inner Agent when needed
-        # changes (see _build_agent for why); concurrent callers can safely
-        # update/read prompt state through this lock.
-        self._build_lock = threading.Lock()
-
+        self._policy_prompt = policy_prompt
+        self._summarize_prompt = summarize_prompt
         self._agent = self._build_agent()
 
     def _build_agent(self) -> Agent[HotpotQADeps, HotpotQAOutput]:
@@ -156,20 +147,15 @@ class HotpotQAPydanticAgent:
         PydanticAI bakes ``system_prompt`` into the agent at construction
         time. We verified empirically that ``Agent.iter(instructions=...)``
         does NOT replace the constructor-bound ``system_prompt`` — the
-        ``instructions`` argument is silently dropped, only the original
-        ``system_prompt`` reaches the model. So when ``policy_prompt`` updates
-        the policy prompt, the only correct way to surface that
-        change is to rebuild the Agent.
-
-        Tool registration is cheap (a few Python objects) — done on every
-        rebuild but never on every ``forward`` call, since rebuilds
-        happen at most once per prompt update.
+        ``instructions`` argument is silently dropped, only the constructor
+        ``system_prompt`` reaches the model. The production-friendly way to run
+        a different policy prompt is to construct an agent with that prompt.
         """
         agent: Agent[HotpotQADeps, HotpotQAOutput] = Agent(
             self._model,
             output_type=HotpotQAOutput,
             deps_type=HotpotQADeps,
-            system_prompt=self._current_policy_prompt,
+            system_prompt=self._policy_prompt,
             model_settings=ModelSettings(temperature=self.temperature),
         )
 
@@ -194,40 +180,6 @@ class HotpotQAPydanticAgent:
             return await self._do_summarize(ctx.deps, question=question, passages=passages, context=context)
 
         return agent
-
-    @property
-    def policy_prompt(self) -> str:
-        return self._current_policy_prompt
-
-    @policy_prompt.setter
-    def policy_prompt(self, value: str) -> None:
-        """Update the tool-use system prompt used by subsequent cases.
-
-        The policy prompt is baked into the inner ``pydantic_ai.Agent``
-        at construction time (PydanticAI's ``Agent.iter(instructions=)``
-        is dropped silently in our pinned version), so changing this attribute
-        triggers an Agent rebuild.
-
-        The build lock makes repeated calls with the same policy prompt a
-        no-op. A concurrent ``forward`` snapshots ``self._agent`` at the start
-        of the call, so swapping the reference mid-batch can't corrupt an
-        in-flight run.
-        """
-        with self._build_lock:
-            if value != self._current_policy_prompt:
-                self._current_policy_prompt = value
-                self._agent = self._build_agent()
-
-    @property
-    def summarize_prompt(self) -> str:
-        return self._current_summarize_prompt
-
-    @summarize_prompt.setter
-    def summarize_prompt(self, value: str) -> None:
-        """Update the summarize tool's system prompt used by subsequent calls."""
-        with self._build_lock:
-            self._current_summarize_prompt = value
-
     async def forward(
         self,
         *,
@@ -245,16 +197,11 @@ class HotpotQAPydanticAgent:
         """
         from pydantic_ai.usage import UsageLimits
 
-        # Snapshot the Agent reference AND the summarize prompt: if
-        # a prompt attribute is updated on another thread mid-call and rebuilds
-        # ``self._agent`` or rewrites
-        # ``self._current_summarize_prompt``, this in-flight run keeps
-        # a consistent agent + consistent summarize prompt until
-        # completion. The summarize snapshot rides through ``deps`` so
-        # ``_do_summarize`` (invoked indirectly via PydanticAI's tool
-        # dispatch) reads the same value the case started with.
+        # The summarize prompt rides through ``deps`` so ``_do_summarize``
+        # (invoked indirectly via PydanticAI's tool dispatch) reads the same
+        # value the case started with.
         agent = self._agent
-        summarize_prompt_snapshot = self._current_summarize_prompt
+        summarize_prompt_snapshot = self._summarize_prompt
 
         deps = HotpotQADeps(
             paragraphs=list(paragraphs),
@@ -271,8 +218,7 @@ class HotpotQAPydanticAgent:
             # ``Agent.iter(instructions=...)`` is silently dropped in the
             # pinned version (verified empirically); only the
             # constructor-bound ``system_prompt`` reaches the model. The
-            # current policy prompt is therefore baked into ``agent`` by
-            # ``_build_agent``, triggered from the ``policy_prompt`` setter.
+            # policy prompt is therefore baked into ``agent`` by construction.
             async with agent.iter(
                 question,
                 deps=deps,
@@ -349,15 +295,13 @@ class HotpotQAPydanticAgent:
         context: str | None,
     ) -> str:
         user_prompt = _build_summarize_user_prompt(question=question, passages=passages, context=context)
-        # Prefer the per-case snapshot ``forward`` captured at the
-        # start of the run so a concurrent prompt update can't
-        # swap the prompt mid-tool-call. Fall back to instance state
-        # for direct test callers that build ``HotpotQADeps`` by hand
-        # without going through ``forward``.
+        # Prefer the per-case prompt ``forward`` placed on deps. Fall back to
+        # instance state for direct test callers that build ``HotpotQADeps`` by
+        # hand without going through ``forward``.
         summarize_prompt = (
             deps.summarize_prompt_override
             if deps.summarize_prompt_override is not None
-            else self._current_summarize_prompt
+            else self._summarize_prompt
         )
         summary = await self._summarize_llm_call(summarize_prompt, user_prompt)
         deps.tool_invocations.append(

@@ -11,6 +11,7 @@ class; rilixai resolves it via ``load_spec_from_target``.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -33,6 +34,14 @@ from .metrics import build_agent_run_metrics
 
 POLICY_PROMPT_COMPONENT = "policy_prompt"
 SUMMARIZE_PROMPT_COMPONENT = "summarize_prompt"
+
+
+@dataclass
+class _HotpotQAPrompts:
+    """Runner-owned prompt state that rilixai candidates mutate."""
+
+    policy_prompt: str = DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT
+    summarize_prompt: str = DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT
 
 
 # ─── Scoring ────────────────────────────────────────────────────────────
@@ -105,8 +114,8 @@ class HotpotQASandboxConfig(BaseModel):
     config_schema=HotpotQASandboxConfig,
     field_configs=HotpotQAMetrics,
     feedback=HotpotQAFeedback,
-    # No explicit seed: rilixai auto-reads it from the agent's current
-    # prompts via the applier's read() at spec-build time.
+    # No explicit seed: rilixai auto-reads it from runner-owned prompt state
+    # via the applier's read() at spec-build time.
     # reflection_evidence_mode is kept (rilixai's default is "curated");
     # this agent emits rich trace_evidence the reflection LM should use.
     reflection_evidence_mode="curated_plus_trace",
@@ -131,21 +140,10 @@ class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
             pydantic_agent_model=sandbox_cfg.pydantic_agent_model,
             pydantic_agent_temperature=sandbox_cfg.task_temperature,
         )
-        # Defer the pydantic-ai-touching import until the runner is built.
-        from .agent.agent import HotpotQAPydanticAgent
-
-        self.agent = HotpotQAPydanticAgent(
-            model=sandbox_cfg.pydantic_agent_model,
-            summarize_model=_bare_openai_model(sandbox_cfg.pydantic_agent_model),
-            top_k=sandbox_cfg.retrieve_k,
-            max_iters=sandbox_cfg.max_iters,
-            temperature=sandbox_cfg.task_temperature,
-            policy_prompt=DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
-            summarize_prompt=DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
-        )
+        self.prompts = _HotpotQAPrompts()
         super().__init__(
             applier=AttributeApplier(
-                target=self.agent,
+                target=self.prompts,
                 mapping={
                     POLICY_PROMPT_COMPONENT: "policy_prompt",
                     SUMMARIZE_PROMPT_COMPONENT: "summarize_prompt",
@@ -157,11 +155,26 @@ class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
         from .agent.retrieval import build_retrieve_k_fn_for_case
 
         retrieve_k_fn = build_retrieve_k_fn_for_case(record=record, cfg=self.cfg)
-        return await self.agent.forward(
+        agent = self._build_agent()
+        return await agent.forward(
             question=record.question,
             paragraphs=record.paragraphs,
             gold_supporting_titles=record.supporting_titles,
             retrieve_k_fn=retrieve_k_fn,
+        )
+
+    def _build_agent(self) -> Any:
+        # Defer the pydantic-ai-touching import until a case actually runs.
+        from .agent.agent import HotpotQAPydanticAgent
+
+        return HotpotQAPydanticAgent(
+            model=self._sandbox_cfg.pydantic_agent_model,
+            summarize_model=_bare_openai_model(self._sandbox_cfg.pydantic_agent_model),
+            top_k=self._sandbox_cfg.retrieve_k,
+            max_iters=self._sandbox_cfg.max_iters,
+            temperature=self._sandbox_cfg.task_temperature,
+            policy_prompt=self.prompts.policy_prompt,
+            summarize_prompt=self.prompts.summarize_prompt,
         )
 
     def _package_result(
@@ -209,4 +222,3 @@ def _bare_openai_model(pydantic_spec: str) -> str:
     """
     _, separator, model = pydantic_spec.partition(":")
     return model if separator else pydantic_spec
-

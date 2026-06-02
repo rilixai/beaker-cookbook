@@ -12,12 +12,19 @@ the class. The two cookbook recipes — `hotpotqa/rilixai_spec.py` and
 `apex_agents/rilixai_spec.py` — are working references for everything below.
 
 ```python
+from dataclasses import dataclass
+
 from rilixai import spec
 from rilixai.adapters import BaseCaseRunner, AttributeApplier
 from rilixai.metrics import FieldConfig
 from rilixai.prompt_optimization import Case
 
 from .agent import MyAgent, MyRecord, MyOutput
+
+
+@dataclass
+class Prompts:
+    system_prompt: str = "You are a helpful assistant."
 
 
 @spec(
@@ -27,11 +34,12 @@ from .agent import MyAgent, MyRecord, MyOutput
 )
 class MyAgentRunner(BaseCaseRunner[MyRecord, MyOutput]):
     def __init__(self, ctx):
-        self.agent = MyAgent()
-        super().__init__(applier=AttributeApplier(target=self.agent, mapping={"system": "system_prompt"}))
+        self.prompts = Prompts()
+        super().__init__(applier=AttributeApplier(target=self.prompts, mapping={"system": "system_prompt"}))
 
     async def run_case(self, record):
-        return await self.agent.run(record)
+        agent = MyAgent(system_prompt=self.prompts.system_prompt)
+        return await agent.run(record)
 
     def cases_by_split(self, ctx):
         return {"train": [...], "validation": [...]}  # list[Case]
@@ -48,8 +56,8 @@ Exactly two things:
    `Case.input`; the output is what gets scored.
 2. **A way to receive the candidate's prompt components** — a `dict[str, str]`
    rilixai hands you each evaluation pass. You expose that through a
-   `ComponentApplier` (§3): an attribute setter, deps injection, or a custom
-   callable.
+   `ComponentApplier` (§3): runner-owned prompt state, deps injection, or a
+   custom callable.
 
 That's the entire surface. rilixai never inspects your agent internals, your
 tool definitions, your dataset format, or your scoring math. It only touches
@@ -130,36 +138,48 @@ The pattern is uniform enough that "switch frameworks" usually means "change two
 strings in your `AttributeApplier(mapping=...)` call."
 
 Every applier is symmetric: `apply(components)` pushes prompts in, and `read()`
-returns the agent's current prompts back out — rilixai calls `read()` once at
-spec-build time to capture your **seed candidate** automatically, so you don't
-author one by hand. (`AttributeApplier` reads/writes the same attributes;
+returns the current prompts back out — rilixai calls `read()` once at spec-build
+time to capture your **seed candidate** automatically, so you don't author one
+by hand. (`AttributeApplier` reads/writes the same attributes;
 `CallableApplier` / `PydanticAIDepsApplier` take a `read` / `seed_reader`
 callable.)
 
-Both cookbook recipes use `AttributeApplier` directly. The agent exposes normal
-prompt attributes, and `rilixai_spec.py` is the single place that declares the
-rilixai component names and maps them onto those attributes:
+Both cookbook recipes use `AttributeApplier` against runner-owned prompt state.
+The production agent stays ordinary: it receives prompt strings through its
+constructor, while `rilixai_spec.py` declares the rilixai component names and
+passes the current prompt state into the agent when running a case:
 
 ```python
 SYSTEM = "system_prompt"
 SUMMARY = "summarize_prompt"
 
 
+@dataclass
+class Prompts:
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    summarize_prompt: str = DEFAULT_SUMMARIZE_PROMPT
+
+
+self.prompts = Prompts()
+
 super().__init__(
     applier=AttributeApplier(
-        target=self.agent,
+        target=self.prompts,
         mapping={
             SYSTEM: "system_prompt",
             SUMMARY: "summarize_prompt",
         },
     )
 )
-```
 
-If changing a prompt needs side effects, make the attribute a property on your
-agent. For example, the HotpotQA recipe uses a `policy_prompt` setter to rebuild
-its inner PydanticAI `Agent` because that framework bakes `system_prompt` into
-the agent at construction time.
+
+async def run_case(self, record):
+    agent = MyAgent(
+        system_prompt=self.prompts.system_prompt,
+        summarize_prompt=self.prompts.summarize_prompt,
+    )
+    return await agent.forward(record)
+```
 
 ---
 

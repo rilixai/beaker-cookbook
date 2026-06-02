@@ -57,6 +57,15 @@ TASK_TEMPLATE_COMPONENT = "task_template"
 RESUM_SUMMARY_PROMPT_COMPONENT = "resum_summary_prompt"
 
 
+@dataclass
+class _ApexPrompts:
+    """Runner-owned prompt state that rilixai candidates mutate."""
+
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    task_template: str = DEFAULT_TASK_TEMPLATE
+    resum_summary_prompt: str = DEFAULT_RESUM_SUMMARY_PROMPT
+
+
 # ─── Scoring (judge runs in the runner; the metric reads the result) ─────
 
 
@@ -123,8 +132,8 @@ def _apex_config_from(sandbox_cfg: ApexAgentsSandboxConfig) -> ApexAgentsConfig:
     config_schema=ApexAgentsSandboxConfig,
     field_configs=ApexAgentsMetrics,
     feedback=ApexAgentsFeedback,
-    # No explicit seed: rilixai auto-reads it from the agent's current
-    # prompts via the applier's read() at spec-build time.
+    # No explicit seed: rilixai auto-reads it from runner-owned prompt state
+    # via the applier's read() at spec-build time.
     # reflection_evidence_mode is kept (rilixai's default is "curated");
     # this agent emits rich trace_evidence the reflection LM should use.
     reflection_evidence_mode="curated_plus_trace",
@@ -139,29 +148,42 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
         self._sandbox_cfg = sandbox_cfg
         cfg = _apex_config_from(sandbox_cfg)
         # Offline-test injection seam: a stub context may carry pre-built deps in
-        # ``metadata`` (agent / world_factory / model_factory / judge) so the
-        # runner constructs without network — the HF world download + the live
-        # rubric judge. A production sandbox context carries none of these, so the
-        # real factory + judge are built lazily here.
+        # ``metadata`` (world_factory / model_factory / judge) so the runner
+        # constructs without network — the HF world download + the live rubric
+        # judge. A production sandbox context carries none of these, so the real
+        # factory + judge are built lazily here.
         injected: Mapping[str, Any] = getattr(ctx, "metadata", None) or {}
-        agent = injected.get("agent")
-        if agent is None:
-            world_factory = injected.get("world_factory")
-            if world_factory is None:
-                from .agent.world.world import build_world_factory
+        world_factory = injected.get("world_factory")
+        if world_factory is None:
+            from .agent.world.world import build_world_factory
 
-                world_factory = build_world_factory()
-            agent = _build_agent(cfg, world_factory=world_factory, model_factory=injected.get("model_factory"))
+            world_factory = build_world_factory()
         judge = injected.get("judge") or build_rubric_judge(model=cfg.judge_model, timeout=cfg.llm_timeout)
-        self._setup(cfg, agent, judge)
+        self._setup(
+            cfg,
+            world_factory=world_factory,
+            model_factory=injected.get("model_factory"),
+            judge=judge,
+            prompts=_ApexPrompts(),
+        )
 
-    def _setup(self, cfg: ApexAgentsConfig, agent: Any, judge: Callable[[str, str, str], bool]) -> None:
+    def _setup(
+        self,
+        cfg: ApexAgentsConfig,
+        *,
+        world_factory: Callable[[Any], Any],
+        model_factory: Callable[[str, float], Any] | None,
+        judge: Callable[[str, str, str], bool],
+        prompts: _ApexPrompts,
+    ) -> None:
         self.cfg = cfg
-        self.agent = agent
+        self._world_factory = world_factory
+        self._model_factory = model_factory
         self.judge = judge
+        self.prompts = prompts
         super().__init__(
             applier=AttributeApplier(
-                target=agent,
+                target=self.prompts,
                 mapping={
                     SYSTEM_PROMPT_COMPONENT: "system_prompt",
                     TASK_TEMPLATE_COMPONENT: "task_template",
@@ -171,7 +193,13 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
         )
 
     async def run_case(self, record: ApexAgentsRecord) -> _ApexResult:
-        output = await self.agent.forward(record=record)
+        agent = _build_agent(
+            self.cfg,
+            prompts=self.prompts,
+            world_factory=self._world_factory,
+            model_factory=self._model_factory,
+        )
+        output = await agent.forward(record=record)
         rubric_payload = [{"verifier_id": c.verifier_id, "criteria": c.criteria} for c in record.rubric]
         rubric_pass_rate = await asyncio.to_thread(
             score_rubric,
@@ -213,6 +241,7 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
 def _build_agent(
     cfg: ApexAgentsConfig,
     *,
+    prompts: _ApexPrompts,
     world_factory: Callable[[Any], Any] | None,
     model_factory: Callable[[str, float], Any] | None,
 ) -> Any:
@@ -225,9 +254,9 @@ def _build_agent(
         cost_limit=cfg.cost_limit,
         max_toolbelt_size=cfg.max_toolbelt_size,
         max_context_tokens=cfg.max_context_tokens,
-        default_system_prompt=DEFAULT_SYSTEM_PROMPT,
-        default_task_template=DEFAULT_TASK_TEMPLATE,
-        default_resum_summary_prompt=DEFAULT_RESUM_SUMMARY_PROMPT,
+        default_system_prompt=prompts.system_prompt,
+        default_task_template=prompts.task_template,
+        default_resum_summary_prompt=prompts.resum_summary_prompt,
         world_factory=world_factory,  # type: ignore[arg-type]
         model_factory=model_factory,
         llm_timeout=cfg.llm_timeout,

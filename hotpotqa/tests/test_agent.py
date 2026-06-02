@@ -20,6 +20,7 @@ from hotpotqa.data.dataset import HotpotQAParagraph, HotpotQARecord
 from hotpotqa.rilixai_spec import (
     POLICY_PROMPT_COMPONENT,
     SUMMARIZE_PROMPT_COMPONENT,
+    _HotpotQAPrompts,
 )
 
 
@@ -117,7 +118,12 @@ def _make_scripted_summarize() -> tuple[object, list[tuple[str, str]]]:
     return _scripted, call_log
 
 
-def _build_agent(*, summarize_llm_call: object | None = None) -> tuple[HotpotQAPydanticAgent, list[tuple[str, str]]]:
+def _build_agent(
+    *,
+    policy_prompt: str | None = None,
+    summarize_prompt: str | None = None,
+    summarize_llm_call: object | None = None,
+) -> tuple[HotpotQAPydanticAgent, list[tuple[str, str]]]:
     scripted, call_log = _make_scripted_summarize()
     if summarize_llm_call is None:
         summarize_llm_call = scripted
@@ -125,6 +131,8 @@ def _build_agent(*, summarize_llm_call: object | None = None) -> tuple[HotpotQAP
         model=_scripted_outer_model(),
         top_k=2,
         max_iters=10,
+        policy_prompt=policy_prompt or "You are a careful QA agent.",
+        summarize_prompt=summarize_prompt or "Summarize the passages for the question.",
         summarize_llm_call=summarize_llm_call,
     )
     return agent, call_log
@@ -154,19 +162,8 @@ def test_agent_runs_end_to_end_with_two_tools_and_structured_output() -> None:
     assert contexted, "expected at least one summarize call with a context arg"
 
 
-def test_forward_snapshots_summarize_prompt_against_concurrent_attribute_updates() -> None:
-    """Regression: ``forward`` must snapshot ``_current_summarize_prompt``
-    at the start of the run — mirroring how it snapshots ``_agent`` — so
-    a concurrent prompt attribute update on another thread can't swap the
-    summarize prompt in mid-``forward``. Without this, the in-flight
-    case's ``summarize`` tool call could pick up a NEW prompt that
-    doesn't match the snapshotted agent.
-
-    Drive ``_do_summarize`` directly with a ``HotpotQADeps`` carrying a
-    snapshotted ``summarize_prompt_override`` and mutate the instance
-    state between deps construction and the call. The tool call must
-    still see the snapshot, not the live state.
-    """
+def test_do_summarize_prefers_deps_prompt_override() -> None:
+    """A per-case deps prompt should win over the agent's constructor prompt."""
     from hotpotqa.agent.agent import HotpotQADeps
 
     captured_prompts: list[str] = []
@@ -175,32 +172,17 @@ def test_forward_snapshots_summarize_prompt_against_concurrent_attribute_updates
         captured_prompts.append(system_prompt)
         return "ok"
 
-    agent = HotpotQAPydanticAgent(
-        model=_scripted_outer_model(),
-        top_k=2,
-        max_iters=10,
-        summarize_llm_call=_capture,
-    )
-    agent.summarize_prompt = "SNAPSHOTTED PROMPT"
+    agent, _ = _build_agent(summarize_prompt="AGENT CONSTRUCTOR PROMPT", summarize_llm_call=_capture)
 
     deps = HotpotQADeps(
         paragraphs=[],
         retrieve_k=2,
         gold_supporting_titles=[],
-        # ``forward`` would capture this exactly here in production;
-        # we set it by hand to simulate the snapshot.
-        summarize_prompt_override="SNAPSHOTTED PROMPT",
+        summarize_prompt_override="CASE PROMPT",
     )
 
-    # Simulate a concurrent attribute update mutating instance state
-    # AFTER the snapshot but BEFORE the in-flight tool call.
-    agent.summarize_prompt = "MUTATED PROMPT"
-    assert agent._current_summarize_prompt == "MUTATED PROMPT"
-
     asyncio.run(agent._do_summarize(deps, question="q?", passages=["p"], context=None))
-
-    # The summarize call must have seen the snapshot, not the mutation.
-    assert captured_prompts == ["SNAPSHOTTED PROMPT"]
+    assert captured_prompts == ["CASE PROMPT"]
 
 
 def test_do_summarize_falls_back_to_instance_state_when_no_override() -> None:
@@ -217,13 +199,7 @@ def test_do_summarize_falls_back_to_instance_state_when_no_override() -> None:
         captured_prompts.append(system_prompt)
         return "ok"
 
-    agent = HotpotQAPydanticAgent(
-        model=_scripted_outer_model(),
-        top_k=2,
-        max_iters=10,
-        summarize_llm_call=_capture,
-    )
-    agent.summarize_prompt = "INSTANCE-STATE PROMPT"
+    agent, _ = _build_agent(summarize_prompt="INSTANCE-STATE PROMPT", summarize_llm_call=_capture)
 
     deps = HotpotQADeps(
         paragraphs=[],
@@ -235,20 +211,17 @@ def test_do_summarize_falls_back_to_instance_state_when_no_override() -> None:
     assert captured_prompts == ["INSTANCE-STATE PROMPT"]
 
 
-def test_policy_prompt_attribute_update_reaches_llm_end_to_end() -> None:
-    """The strongest possible regression: the rewritten ``policy_prompt`` must
-    *observably reach the LLM* — not just land on an instance attribute.
+def test_constructor_policy_prompt_reaches_llm_end_to_end() -> None:
+    """The rewritten ``policy_prompt`` must observably reach the LLM.
 
     Regression context: PydanticAI silently drops ``Agent.iter(instructions=...)``
     in our pinned version; only the constructor-bound ``system_prompt``
-    reaches the model. An earlier implementation updated
-    ``self._current_policy_prompt`` on prompt update and then passed
-    it via ``iter(instructions=...)``. Result: GEPA's rewrites never made
-    it to the LLM, and ``policy_prompt`` optimization was a silent no-op.
+    reaches the model. The runner therefore constructs an agent with the
+    candidate policy prompt instead of trying to mutate an existing agent.
 
     This test drives a ``FunctionModel`` that captures every
-    ``SystemPromptPart`` it receives. After updating ``policy_prompt``, the
-    rewrite must appear in the captured stream. We deliberately use a
+    ``SystemPromptPart`` it receives. When the agent is constructed with the
+    rewrite, that text must appear in the captured stream. We deliberately use a
     ``FunctionModel`` (which sees the same messages the LLM would) so
     the test is robust to PydanticAI version changes that might rename
     internal attributes like ``_system_prompts``.
@@ -264,16 +237,15 @@ def test_policy_prompt_attribute_update_reaches_llm_end_to_end() -> None:
         return ModelResponse(parts=[ToolCallPart(tool_name="final_result", args={"answer": "X"})])
 
     record = _record()
-    agent = HotpotQAPydanticAgent(
+    seed_agent = HotpotQAPydanticAgent(
         model=FunctionModel(model_fn),
         top_k=1,
         max_iters=2,
         summarize_llm_call=lambda _s, _u: asyncio.sleep(0, result=""),
     )
 
-    # 1. Forward with the default prompts — model should see the seed system prompt.
     asyncio.run(
-        agent.forward(
+        seed_agent.forward(
             question=record.question,
             paragraphs=record.paragraphs,
             gold_supporting_titles=record.supporting_titles,
@@ -283,17 +255,21 @@ def test_policy_prompt_attribute_update_reaches_llm_end_to_end() -> None:
     seed_system = captured_system[-1]
     captured_system.clear()
 
-    # 2. Update with a fresh policy prompt — model must now see *this*
-    #    string in the system role, not the old one.
-    agent.policy_prompt = "BRAND_NEW_POLICY_FROM_GEPA_REWRITE"
+    rewritten_agent = HotpotQAPydanticAgent(
+        model=FunctionModel(model_fn),
+        top_k=1,
+        max_iters=2,
+        policy_prompt="BRAND_NEW_POLICY_FROM_GEPA_REWRITE",
+        summarize_llm_call=lambda _s, _u: asyncio.sleep(0, result=""),
+    )
     asyncio.run(
-        agent.forward(
+        rewritten_agent.forward(
             question=record.question,
             paragraphs=record.paragraphs,
             gold_supporting_titles=record.supporting_titles,
         )
     )
-    assert captured_system, "no system prompts captured after policy_prompt update"
+    assert captured_system, "no system prompts captured from rewritten agent"
     new_system = captured_system[-1]
     assert "BRAND_NEW_POLICY_FROM_GEPA_REWRITE" in new_system, (
         f"rewritten policy_prompt was NOT visible to the LLM. "
@@ -302,12 +278,6 @@ def test_policy_prompt_attribute_update_reaches_llm_end_to_end() -> None:
     assert "BRAND_NEW_POLICY_FROM_GEPA_REWRITE" not in seed_system, (
         f"Rewrite leaked into the seed-time system prompt: {seed_system!r}"
     )
-
-    # 3. Idempotency: a second assignment with the same policy_prompt must not
-    #    trigger a rebuild (would waste cycles in the optimize hot path).
-    inner_before = agent._agent  # noqa: SLF001 — implementation detail check
-    agent.policy_prompt = "BRAND_NEW_POLICY_FROM_GEPA_REWRITE"
-    assert agent._agent is inner_before, "policy_prompt must not rebuild when unchanged"  # noqa: SLF001
 
 
 def test_summarize_feedback_reads_pydantic_ai_tool_arg_names() -> None:
@@ -475,11 +445,11 @@ def test_agent_runtime_dispatches_retrieval_by_cfg_mode() -> None:
     assert all(p.title in {"Eiffel Tower", "Paris", "Berlin"} for p in deps_legacy.retrieved)
 
 
-def test_rilixai_spec_component_mapping_reads_and_applies_agent_prompts() -> None:
-    """The integration maps rilixai component names onto the neutral agent API."""
-    agent, _ = _build_agent()
+def test_rilixai_spec_component_mapping_reads_and_applies_runner_prompt_state() -> None:
+    """The integration maps rilixai component names onto runner-owned prompt state."""
+    prompts = _HotpotQAPrompts()
     applier = AttributeApplier(
-        target=agent,
+        target=prompts,
         mapping={
             POLICY_PROMPT_COMPONENT: "policy_prompt",
             SUMMARIZE_PROMPT_COMPONENT: "summarize_prompt",
@@ -494,5 +464,5 @@ def test_rilixai_spec_component_mapping_reads_and_applies_agent_prompts() -> Non
             SUMMARIZE_PROMPT_COMPONENT: "NEW SUMMARY",
         },
     )
-    assert agent.policy_prompt == "NEW POLICY"
-    assert agent.summarize_prompt == "NEW SUMMARY"
+    assert prompts.policy_prompt == "NEW POLICY"
+    assert prompts.summarize_prompt == "NEW SUMMARY"
