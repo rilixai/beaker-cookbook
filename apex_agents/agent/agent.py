@@ -340,13 +340,6 @@ class ApexReActAgent:
         self._world_factory = world_factory
         self._model_factory: ModelFactory = model_factory or build_litellm_model_factory(timeout=llm_timeout)
 
-    def _snapshot_prompts(self) -> tuple[str, str, str]:
-        return (
-            self._system_prompt,
-            self._task_template,
-            self._resum_summary_prompt,
-        )
-
     # ─── main entrypoint ──────────────────────────────────────────────
 
     async def forward(self, *, record: Any) -> ApexAgentsAgentOutput:
@@ -360,17 +353,14 @@ class ApexReActAgent:
         started = time.monotonic()
         world: Any = None
         try:
-            # Snapshot constructor prompts before the first await so this case
-            # uses one internally consistent prompt set.
-            sys_p, task_t, resum_p = self._snapshot_prompts()
             world = await asyncio.to_thread(self._world_factory, record)
             output = await asyncio.to_thread(
                 self._run_loop,
                 record=record,
                 world=world,
-                system_prompt=sys_p,
-                task_template=task_t,
-                resum_summary_prompt=resum_p,
+                system_prompt=self._system_prompt,
+                task_template=self._task_template,
+                resum_summary_prompt=self._resum_summary_prompt,
             )
         except Exception as exc:  # pragma: no cover - defensive top-level guard
             logger.exception("APEX-Agents agent failed for task %s", getattr(record, "task_id", "?"))

@@ -162,35 +162,8 @@ def test_agent_runs_end_to_end_with_two_tools_and_structured_output() -> None:
     assert contexted, "expected at least one summarize call with a context arg"
 
 
-def test_do_summarize_prefers_deps_prompt_override() -> None:
-    """A per-case deps prompt should win over the agent's constructor prompt."""
-    from hotpotqa.agent.agent import HotpotQADeps
-
-    captured_prompts: list[str] = []
-
-    async def _capture(system_prompt: str, _user_prompt: str) -> str:
-        captured_prompts.append(system_prompt)
-        return "ok"
-
-    agent, _ = _build_agent(summarize_prompt="AGENT CONSTRUCTOR PROMPT", summarize_llm_call=_capture)
-
-    deps = HotpotQADeps(
-        paragraphs=[],
-        retrieve_k=2,
-        gold_supporting_titles=[],
-        summarize_prompt_override="CASE PROMPT",
-    )
-
-    asyncio.run(agent._do_summarize(deps, question="q?", passages=["p"], context=None))
-    assert captured_prompts == ["CASE PROMPT"]
-
-
-def test_do_summarize_falls_back_to_instance_state_when_no_override() -> None:
-    """Direct test callers that build ``HotpotQADeps`` by hand (without
-    going through ``forward``) leave ``summarize_prompt_override`` at
-    ``None``. ``_do_summarize`` must fall back to instance state in
-    that case so legacy callers stay functional.
-    """
+def test_do_summarize_uses_constructor_prompt() -> None:
+    """The summarize tool uses the prompt supplied when the agent is built."""
     from hotpotqa.agent.agent import HotpotQADeps
 
     captured_prompts: list[str] = []

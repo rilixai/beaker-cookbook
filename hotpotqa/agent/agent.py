@@ -87,11 +87,6 @@ class HotpotQADeps:
     # itself caring about modes. The agent still applies its own
     # cross-call dedup against ``retrieved_titles_seen``.
     retrieve_k_fn: RetrieveKFn | None = None
-    # Per-case summarize prompt. ``forward`` copies the agent's constructor
-    # prompt into deps so the indirect PydanticAI tool call uses the same value
-    # the case started with. Direct test callers that build their own
-    # ``HotpotQADeps`` can leave it ``None`` and fall back to instance state.
-    summarize_prompt_override: str | None = None
 
 
 class HotpotQAPydanticAgent:
@@ -180,6 +175,7 @@ class HotpotQAPydanticAgent:
             return await self._do_summarize(ctx.deps, question=question, passages=passages, context=context)
 
         return agent
+
     async def forward(
         self,
         *,
@@ -197,18 +193,13 @@ class HotpotQAPydanticAgent:
         """
         from pydantic_ai.usage import UsageLimits
 
-        # The summarize prompt rides through ``deps`` so ``_do_summarize``
-        # (invoked indirectly via PydanticAI's tool dispatch) reads the same
-        # value the case started with.
         agent = self._agent
-        summarize_prompt_snapshot = self._summarize_prompt
 
         deps = HotpotQADeps(
             paragraphs=list(paragraphs),
             retrieve_k=self.top_k,
             gold_supporting_titles=list(gold_supporting_titles or []),
             retrieve_k_fn=retrieve_k_fn,
-            summarize_prompt_override=summarize_prompt_snapshot,
         )
 
         answer = ""
@@ -295,15 +286,7 @@ class HotpotQAPydanticAgent:
         context: str | None,
     ) -> str:
         user_prompt = _build_summarize_user_prompt(question=question, passages=passages, context=context)
-        # Prefer the per-case prompt ``forward`` placed on deps. Fall back to
-        # instance state for direct test callers that build ``HotpotQADeps`` by
-        # hand without going through ``forward``.
-        summarize_prompt = (
-            deps.summarize_prompt_override
-            if deps.summarize_prompt_override is not None
-            else self._summarize_prompt
-        )
-        summary = await self._summarize_llm_call(summarize_prompt, user_prompt)
+        summary = await self._summarize_llm_call(self._summarize_prompt, user_prompt)
         deps.tool_invocations.append(
             {
                 "tool": "summarize",
