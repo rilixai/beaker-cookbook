@@ -314,12 +314,12 @@ from rilixai.metrics import BaseMetricsCalculator, FieldConfig
 
 class HotpotQAMetrics(BaseMetricsCalculator):
     fields = [
-        FieldConfig(name="answer", comparators="hotpot_exact_match", weight=1.0),
+        FieldConfig(name="answer", comparators="exact_match", weight=1.0),
         FieldConfig(name="answer_f1", extract_from="answer", comparators="hotpot_f1", weight=0.0),
         FieldConfig(name="titles_recall", extract_from="retrieved_titles",
                     compare_to="supporting_titles", comparators="set_recall", weight=0.0),
     ]
-    comparators = {"hotpot_exact_match": _em, "hotpot_f1": _f1}  # your callables
+    comparators = {"hotpot_f1": _hotpot_f1}  # only where shipped scorers diverge
 ```
 
 A comparator is just `(predicted, expected) -> float in [0, 1]`. For LLM-judge

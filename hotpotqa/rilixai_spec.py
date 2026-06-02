@@ -24,7 +24,7 @@ from .agent.prompts import DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT, DEFAULT_PYDANTI
 from .agent.types import HotpotQAAgentOutput
 from .config import HotpotQAConfig
 from .data.dataset import HotpotQARecord, load_hotpotqa_paper_split
-from .data.eval import exact_match_score, f1_score
+from .data.eval import f1_score
 from .feedback import HotpotQAFeedback
 from .metrics import build_agent_run_metrics
 
@@ -37,10 +37,6 @@ SUMMARIZE_PROMPT_COMPONENT = "summarize_prompt"
 
 
 # ─── Scoring ────────────────────────────────────────────────────────────
-
-
-def _hotpot_exact_match(predicted: Any, expected: Any) -> float:
-    return 1.0 if exact_match_score(predicted, expected) else 0.0
 
 
 def _hotpot_f1(predicted: Any, expected: Any) -> float:
@@ -57,7 +53,7 @@ class HotpotQAMetrics(BaseMetricsCalculator):
     """
 
     fields = [
-        FieldConfig(name="answer", comparators="hotpot_exact_match", weight=1.0),
+        FieldConfig(name="answer", comparators="exact_match", weight=1.0),
         FieldConfig(name="answer_f1", extract_from="answer", comparators="hotpot_f1", weight=0.0),
         FieldConfig(
             name="titles_recall",
@@ -68,7 +64,6 @@ class HotpotQAMetrics(BaseMetricsCalculator):
         ),
     ]
     comparators = {
-        "hotpot_exact_match": _hotpot_exact_match,
         "hotpot_f1": _hotpot_f1,
     }
 
