@@ -313,12 +313,17 @@ domain-specific scorers:
 from rilixai.metrics import BaseMetricsCalculator, FieldConfig
 
 class HotpotQAMetrics(BaseMetricsCalculator):
+    # Use shipped comparator names directly when they fit:
+    # exact_match, f1_score, set_recall, set_f1, numeric_close, llm_judge.
+    # Register custom names in `comparators` only for domain-specific scoring.
     fields = [
         FieldConfig(name="answer", comparators="exact_match", weight=1.0),
         FieldConfig(name="answer_f1", extract_from="answer", comparators="hotpot_f1", weight=0.0),
         FieldConfig(name="titles_recall", extract_from="retrieved_titles",
                     compare_to="supporting_titles", comparators="set_recall", weight=0.0),
     ]
+    # HotpotQA keeps a custom F1 because the official benchmark treats
+    # yes/no/noanswer mismatches differently from rilixai's generic f1_score.
     comparators = {"hotpot_f1": _hotpot_f1}  # only where shipped scorers diverge
 ```
 

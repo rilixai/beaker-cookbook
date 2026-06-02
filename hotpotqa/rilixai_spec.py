@@ -52,6 +52,12 @@ class HotpotQAMetrics(BaseMetricsCalculator):
     so they can carry the paper's distinct weights.
     """
 
+    # FieldConfig can reference rilixai's shipped comparators directly:
+    # exact_match, f1_score, set_recall, set_f1, numeric_close, llm_judge.
+    # Register custom comparator names in ``comparators`` below when a domain
+    # scorer differs from the shipped catalog. HotpotQA uses shipped
+    # ``exact_match``/``set_recall`` and a custom ``hotpot_f1`` because the
+    # official benchmark F1 handles yes/no/noanswer mismatches specially.
     fields = [
         FieldConfig(name="answer", comparators="exact_match", weight=1.0),
         FieldConfig(name="answer_f1", extract_from="answer", comparators="hotpot_f1", weight=0.0),
