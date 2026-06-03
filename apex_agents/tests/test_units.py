@@ -713,7 +713,6 @@ def test_spec_passes_validation_and_carries_spec_metadata(monkeypatch: Any) -> N
     }
     assert spec.name == "apex-agents"
     assert spec.task_type == "apex_agent"
-    assert spec.max_concurrency == 4
     assert spec.reflection_evidence_mode == "curated_plus_trace"
     # The default field weights flow through to the profile.
     profile = spec.evaluation_profile_resolver()

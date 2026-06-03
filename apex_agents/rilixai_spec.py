@@ -105,7 +105,6 @@ class ApexAgentsSandboxConfig(BaseModel):
     max_steps: int = 60
     cost_limit: float = 3.0
     seed: int = 0
-    max_concurrency: int = 4
 
 
 # ─── The integration: one @spec runner class ────────────────────────────
@@ -126,8 +125,6 @@ class ApexAgentsSandboxConfig(BaseModel):
     # reflection_evidence_mode is kept (rilixai's default is "curated");
     # this agent emits rich trace_evidence the reflection LM should use.
     reflection_evidence_mode="curated_plus_trace",
-    # rilixai's default max_concurrency is 8; 4 is the cost-bounded demo value.
-    max_concurrency=4,
 )
 class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
     """The entire APEX-Agents integration: one runner the rilixai sandbox drives."""

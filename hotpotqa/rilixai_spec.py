@@ -93,7 +93,6 @@ class HotpotQASandboxConfig(BaseModel):
     val_size: int = 100
     pydantic_agent_model: str = "openai:gpt-4.1-mini"
     task_temperature: float = 0.0
-    max_concurrency: int = 4
 
 
 # ─── The integration: one @spec runner class ────────────────────────────
@@ -112,8 +111,6 @@ class HotpotQASandboxConfig(BaseModel):
     # reflection_evidence_mode is kept (rilixai's default is "curated");
     # this agent emits rich trace_evidence the reflection LM should use.
     reflection_evidence_mode="curated_plus_trace",
-    # rilixai's default max_concurrency is 8; 4 is the cost-bounded demo value.
-    max_concurrency=4,
 )
 class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
     """The entire HotpotQA integration: one runner the rilixai sandbox drives.
