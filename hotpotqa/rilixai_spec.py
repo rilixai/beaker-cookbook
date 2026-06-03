@@ -11,6 +11,7 @@ class; rilixai resolves it via ``load_spec_from_target``.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Literal
 
@@ -34,6 +35,14 @@ from .metrics import build_agent_run_metrics
 
 POLICY_PROMPT_COMPONENT = "policy_prompt"
 SUMMARIZE_PROMPT_COMPONENT = "summarize_prompt"
+
+
+@dataclass
+class _ReportableHotpotQAOutput(HotpotQAAgentOutput):
+    """Hotpot output with a compact JSON-safe view for rilixai artifacts."""
+
+    def model_dump(self, **_: Any) -> dict[str, Any]:
+        return _prediction_for_rilixai(self)
 
 
 # ─── Scoring ────────────────────────────────────────────────────────────
@@ -171,7 +180,7 @@ class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
         record: HotpotQARecord,
         output: HotpotQAAgentOutput,
         runtime_kwargs: Mapping[str, Any],
-    ) -> CaseRunResult[dict[str, Any]]:
+    ) -> CaseRunResult[HotpotQAAgentOutput]:
         # Domain-specific trace evidence (per-hop retrieval reasoning,
         # documents-remaining, missing/spurious titles) is richer than the base
         # hook set, so build it here. Per-component feedback flows through
@@ -185,7 +194,7 @@ class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
         feedback = self._build_feedback(record, output, runtime_kwargs)
         if feedback:
             run_metrics.setdefault("trace_evidence", {})["per_component_feedback"] = feedback
-        return CaseRunResult(output=_prediction_for_rilixai(output), run_metrics=run_metrics)
+        return CaseRunResult(output=_reportable_output(output), run_metrics=run_metrics)
 
     def cases_by_split(self, ctx: Any) -> dict[str, list[Case]]:
         hf_config = "fullwiki" if self._sandbox_cfg.retrieval_mode == "fullwiki" else "distractor"
@@ -219,3 +228,11 @@ def _prediction_for_rilixai(output: HotpotQAAgentOutput) -> dict[str, Any]:
         "answer": output.answer,
         "retrieved_titles": output.retrieved_titles,
     }
+
+
+def _reportable_output(output: HotpotQAAgentOutput) -> HotpotQAAgentOutput:
+    return _ReportableHotpotQAOutput(
+        answer=output.answer,
+        retrieved_paragraphs=output.retrieved_paragraphs,
+        tool_calls=output.tool_calls,
+    )

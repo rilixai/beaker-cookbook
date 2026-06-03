@@ -402,5 +402,8 @@ def test_sandbox_runner_package_result_embeds_trace_and_feedback() -> None:
     assert "trace_evidence" in rm
     assert set(rm["trace_evidence"]["per_component_feedback"]) == {"policy_prompt", "summarize_prompt"}
     assert rm["tool_counts"] == {"hotpotqa_retrieve_k": 1}
-    assert result.output == {"answer": "Ada", "retrieved_titles": ["T"]}
-    json.dumps(result.model_dump())
+    assert result.output.answer == "Ada"
+    dumped = result.model_dump()
+    assert dumped["retrieved_titles"] == ["T"]
+    assert "retrieved_paragraphs" not in dumped
+    json.dumps(dumped)
