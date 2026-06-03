@@ -445,10 +445,11 @@ domain signal. Add them incrementally — one component at a time. See
    builds the spec, applies the seed prompts, runs one case, and prints scores
    before you spend hosted optimization budget.
 5. **Push + run.** Set `RILIXAI_API_KEY` / `RILIXAI_API_BASE_URL`, then
-   `uv run rilixai push --member <member>` to build + promote the image and
-   `uv run rilixai trigger` to queue a run (see each recipe's README for the
-   exact commands). `OPENAI_API_KEY` and any other provider keys are bound as
-   project-level secrets on rilixai's side, injected into each sandbox.
+   `uv run rilixai push --member <member> --version v$(git rev-parse --short HEAD)`
+   to build + promote the image and `uv run rilixai trigger` to queue a run
+   (see each recipe's README for the exact commands). `OPENAI_API_KEY` and any
+   other provider keys are bound as project-level secrets on rilixai's side,
+   injected into each sandbox.
 
 `ctx.config` inside the sandbox is validated against the Pydantic schema you
 pass to `@spec(config_schema=...)`, so a typo'd trigger key fails fast with a

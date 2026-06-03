@@ -146,14 +146,19 @@ jobs:
         # ``rilixai push --member <m>`` reads that member's
         # ``[tool.rilixai.spec]`` for the target/name, auto-discovers its
         # runtime deps, builds the image, and promotes the pushed version to
-        # ``<name>@production``. CI is build-only — it never triggers an
-        # optimization run; those are initiated explicitly by humans (or
-        # downstream services) against ``<name>@production``.
+        # ``<name>@production``. The immutable version label defaults to the
+        # current short SHA unless workflow_dispatch provides an override. CI
+        # is build-only — it never triggers an optimization run; those are
+        # initiated explicitly by humans (or downstream services) against
+        # ``<name>@production``.
         run: |
-          VERSION_OVERRIDE_FLAG=""
           if [ -n "${VERSION_OVERRIDE}" ]; then
             VERSION_OVERRIDE_FLAG="--version ${VERSION_OVERRIDE}"
             echo "Using workflow_dispatch override: --version ${VERSION_OVERRIDE}"
+          else
+            SHORT_SHA="${GITHUB_SHA::7}"
+            VERSION_OVERRIDE_FLAG="--version v${SHORT_SHA}"
+            echo "Using default short-SHA version: v${SHORT_SHA}"
           fi
           PROMOTE_FLAG=""
           if [ "${SKIP_PROMOTE}" = "true" ]; then

@@ -52,7 +52,8 @@ export RILIXAI_API_KEY=sk-...
 export RILIXAI_API_BASE_URL=https://<id>.execute-api.<region>.amazonaws.com/prod/
 
 # Build the image + promote it to hotpotqa-agent@production (run from repo root)
-uv run rilixai push --member hotpotqa
+SPEC_VERSION=v$(git rev-parse --short HEAD)
+uv run rilixai push --member hotpotqa --version "$SPEC_VERSION"
 
 # Queue a run (reads name/task_type from [tool.rilixai.spec]); tune knobs via --config
 cd hotpotqa
@@ -69,9 +70,10 @@ in `rilixai_spec.py`. `OPENAI_API_KEY` is bound as a project-level secret on
 rilixai's side, injected into each sandbox. Roll back with
 `uv run rilixai spec promote hotpotqa-agent --version <older-sha>`.
 
-CI (`.github/workflows/push-spec.yml`) runs `rilixai push --member hotpotqa`
-on every merge to `main` that touches `hotpotqa/`: it ships the image and
-flips `@production` without spending LLM tokens on a smoke run.
+CI (`.github/workflows/push-spec.yml`) runs
+`rilixai push --member hotpotqa --version v<short-sha>` on every merge to
+`main` that touches `hotpotqa/`: it ships the image and flips `@production`
+without spending LLM tokens on a smoke run.
 
 ## Tests
 

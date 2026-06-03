@@ -288,11 +288,10 @@ def test_sandbox_spec_factory_is_registered() -> None:
     assert reg.entrypoint == "hotpotqa.rilixai_spec:HotpotQARunner"
     assert reg.metadata.get("task_type") == "hotpotqa_pydantic_agent"
     # Intentionally no version assertion: ``@spec`` doesn't pin a version.
-    # ``rilixai push`` supplies ``v<short_sha>`` at push time and promotes to
-    # ``@production``. ``reg.version`` will be whatever rilixai's
-    # ``DEFAULT_SPEC_VERSION`` constant is (currently ``"v1"``), but that value
-    # never reaches the spec_versions table for normal push flows because the
-    # CLI ``--version`` flag overrides it.
+    # Hosted pushes pass ``--version`` (CI uses ``v<short_sha>``) and promote
+    # that immutable build to ``@production``. ``reg.version`` remains the
+    # decorator default (currently ``"v1"``) unless a caller pushes without
+    # ``--version``.
 
 
 def test_sandbox_runner_builds_valid_spec(monkeypatch: pytest.MonkeyPatch) -> None:

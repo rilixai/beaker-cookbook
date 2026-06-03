@@ -49,7 +49,8 @@ export RILIXAI_API_KEY=sk-...
 export RILIXAI_API_BASE_URL=https://<id>.execute-api.<region>.amazonaws.com/prod/
 
 # Build the image + promote it to apex-agents@production (run from repo root)
-uv run rilixai push --member apex_agents
+SPEC_VERSION=v$(git rev-parse --short HEAD)
+uv run rilixai push --member apex_agents --version "$SPEC_VERSION"
 
 # Queue a run; --val-worlds holds out whole worlds so GEPA selects for
 # cross-world transfer, not in-world fit
@@ -67,9 +68,10 @@ The run config keys are the fields of `ApexAgentsSandboxConfig` in
 each sandbox. Roll back with
 `uv run rilixai spec promote apex-agents --version <older-sha>`.
 
-CI (`.github/workflows/push-spec.yml`) runs `rilixai push --member apex_agents`
-on every merge to `main` that touches `apex_agents/`: it ships the image and
-flips `@production` without spending LLM tokens on a smoke run.
+CI (`.github/workflows/push-spec.yml`) runs
+`rilixai push --member apex_agents --version v<short-sha>` on every merge to
+`main` that touches `apex_agents/`: it ships the image and flips `@production`
+without spending LLM tokens on a smoke run.
 
 ## Tests
 

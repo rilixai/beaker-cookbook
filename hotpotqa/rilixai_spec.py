@@ -115,8 +115,8 @@ class HotpotQASandboxConfig(BaseModel):
 class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
     """The entire HotpotQA integration: one runner the rilixai sandbox drives.
 
-    No ``version=`` on ``@spec`` — ``rilixai push`` supplies the push-time
-    version (defaulting to ``v<short_sha>``) and promotes it to
+    No ``version=`` on ``@spec`` — hosted pushes pass ``--version`` (CI uses
+    ``v<short_sha>``) and promote that immutable build to
     ``hotpotqa-agent@production``, which trigger calls reference.
     """
 
