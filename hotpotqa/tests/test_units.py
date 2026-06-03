@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from rilixai.prompt_optimization.models import Case
 
@@ -384,7 +386,7 @@ def test_sandbox_runner_package_result_embeds_trace_and_feedback() -> None:
     )
     output = HotpotQAAgentOutput(
         answer="Ada",
-        retrieved_paragraphs=[],
+        retrieved_paragraphs=[record.paragraphs[0]],
         tool_calls=[
             AgentToolCall(
                 step_index=0,
@@ -400,3 +402,5 @@ def test_sandbox_runner_package_result_embeds_trace_and_feedback() -> None:
     assert "trace_evidence" in rm
     assert set(rm["trace_evidence"]["per_component_feedback"]) == {"policy_prompt", "summarize_prompt"}
     assert rm["tool_counts"] == {"hotpotqa_retrieve_k": 1}
+    assert result.output == {"answer": "Ada", "retrieved_titles": ["T"]}
+    json.dumps(result.model_dump())

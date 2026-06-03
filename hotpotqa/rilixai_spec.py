@@ -171,7 +171,7 @@ class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
         record: HotpotQARecord,
         output: HotpotQAAgentOutput,
         runtime_kwargs: Mapping[str, Any],
-    ) -> CaseRunResult[HotpotQAAgentOutput]:
+    ) -> CaseRunResult[dict[str, Any]]:
         # Domain-specific trace evidence (per-hop retrieval reasoning,
         # documents-remaining, missing/spurious titles) is richer than the base
         # hook set, so build it here. Per-component feedback flows through
@@ -185,7 +185,7 @@ class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
         feedback = self._build_feedback(record, output, runtime_kwargs)
         if feedback:
             run_metrics.setdefault("trace_evidence", {})["per_component_feedback"] = feedback
-        return CaseRunResult(output=output, run_metrics=run_metrics)
+        return CaseRunResult(output=_prediction_for_rilixai(output), run_metrics=run_metrics)
 
     def cases_by_split(self, ctx: Any) -> dict[str, list[Case]]:
         hf_config = "fullwiki" if self._sandbox_cfg.retrieval_mode == "fullwiki" else "distractor"
@@ -211,3 +211,11 @@ def _bare_openai_model(pydantic_spec: str) -> str:
     """
     _, separator, model = pydantic_spec.partition(":")
     return model if separator else pydantic_spec
+
+
+def _prediction_for_rilixai(output: HotpotQAAgentOutput) -> dict[str, Any]:
+    """Expose only JSON-safe prediction fields rilixai scores and reports."""
+    return {
+        "answer": output.answer,
+        "retrieved_titles": output.retrieved_titles,
+    }
