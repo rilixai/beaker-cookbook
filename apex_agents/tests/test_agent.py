@@ -239,7 +239,7 @@ def test_constructor_prompts_reach_inner_agent_on_next_forward() -> None:
     assert "Read the brief" in last_user
 
 
-def test_rilixai_spec_component_mapping_reads_and_applies_runner_prompt_state() -> None:
+def test_rilixai_spec_components_read_and_apply_runner_prompt_state() -> None:
     prompts = SimpleNamespace(
         system_prompt="seed system",
         task_template="seed task {{task}}",
@@ -247,11 +247,7 @@ def test_rilixai_spec_component_mapping_reads_and_applies_runner_prompt_state() 
     )
     applier = AttributeApplier(
         target=prompts,
-        mapping={
-            SYSTEM_PROMPT_COMPONENT: "system_prompt",
-            TASK_TEMPLATE_COMPONENT: "task_template",
-            RESUM_SUMMARY_PROMPT_COMPONENT: "resum_summary_prompt",
-        },
+        components=(SYSTEM_PROMPT_COMPONENT, TASK_TEMPLATE_COMPONENT, RESUM_SUMMARY_PROMPT_COMPONENT),
     )
     components = applier.read()
     assert set(components) == {

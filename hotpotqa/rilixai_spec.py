@@ -104,6 +104,13 @@ class HotpotQASandboxConfig(BaseModel):
     task_temperature: float = 0.0
 
 
+def _sandbox_config(ctx: Any) -> HotpotQASandboxConfig:
+    raw = getattr(ctx, "config", None)
+    if isinstance(raw, HotpotQASandboxConfig):
+        return raw
+    return HotpotQASandboxConfig.model_validate({} if raw is None else raw)
+
+
 # ─── The integration: one @spec runner class ────────────────────────────
 
 
@@ -130,7 +137,7 @@ class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
     """
 
     def __init__(self, ctx: Any) -> None:
-        sandbox_cfg = ctx.config if isinstance(ctx.config, HotpotQASandboxConfig) else HotpotQASandboxConfig()
+        sandbox_cfg = _sandbox_config(ctx)
         self._sandbox_cfg = sandbox_cfg
         self.cfg = HotpotQAConfig(
             retrieval_mode=sandbox_cfg.retrieval_mode,
@@ -146,10 +153,7 @@ class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
         super().__init__(
             applier=AttributeApplier(
                 target=self.prompts,
-                mapping={
-                    POLICY_PROMPT_COMPONENT: "policy_prompt",
-                    SUMMARIZE_PROMPT_COMPONENT: "summarize_prompt",
-                },
+                components=(POLICY_PROMPT_COMPONENT, SUMMARIZE_PROMPT_COMPONENT),
             )
         )
 

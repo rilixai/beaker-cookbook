@@ -107,6 +107,13 @@ class ApexAgentsSandboxConfig(BaseModel):
     seed: int = 0
 
 
+def _sandbox_config(ctx: Any) -> ApexAgentsSandboxConfig:
+    raw = getattr(ctx, "config", None)
+    if isinstance(raw, ApexAgentsSandboxConfig):
+        return raw
+    return ApexAgentsSandboxConfig.model_validate({} if raw is None else raw)
+
+
 # ─── The integration: one @spec runner class ────────────────────────────
 
 
@@ -130,7 +137,7 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
     """The entire APEX-Agents integration: one runner the rilixai sandbox drives."""
 
     def __init__(self, ctx: Any) -> None:
-        sandbox_cfg = ctx.config if isinstance(ctx.config, ApexAgentsSandboxConfig) else ApexAgentsSandboxConfig()
+        sandbox_cfg = _sandbox_config(ctx)
         self._sandbox_cfg = sandbox_cfg
         self.cfg = ApexAgentsConfig(
             task_model=sandbox_cfg.task_model,
@@ -159,11 +166,7 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
         super().__init__(
             applier=AttributeApplier(
                 target=self.prompts,
-                mapping={
-                    SYSTEM_PROMPT_COMPONENT: "system_prompt",
-                    TASK_TEMPLATE_COMPONENT: "task_template",
-                    RESUM_SUMMARY_PROMPT_COMPONENT: "resum_summary_prompt",
-                },
+                components=(SYSTEM_PROMPT_COMPONENT, TASK_TEMPLATE_COMPONENT, RESUM_SUMMARY_PROMPT_COMPONENT),
             )
         )
 

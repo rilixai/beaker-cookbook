@@ -6,7 +6,7 @@ distractor paragraphs or the fullwiki bm25s index, depending on
 chat-completions call). The agent terminates by populating a Pydantic
 ``HotpotQAOutput`` — PydanticAI's built-in ``final_result`` mechanism.
 
-The rilixai component mapping lives in :mod:`hotpotqa.rilixai_spec`; this
+The rilixai component wiring lives in :mod:`hotpotqa.rilixai_spec`; this
 package stays focused on the agent itself.
 """
 

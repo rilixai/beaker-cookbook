@@ -418,15 +418,12 @@ def test_agent_runtime_dispatches_retrieval_by_cfg_mode() -> None:
     assert all(p.title in {"Eiffel Tower", "Paris", "Berlin"} for p in deps_legacy.retrieved)
 
 
-def test_rilixai_spec_component_mapping_reads_and_applies_runner_prompt_state() -> None:
-    """The integration maps rilixai component names onto runner-owned prompt state."""
+def test_rilixai_spec_components_read_and_apply_runner_prompt_state() -> None:
+    """The integration reads and applies runner-owned prompt components."""
     prompts = SimpleNamespace(policy_prompt="seed policy", summarize_prompt="seed summary")
     applier = AttributeApplier(
         target=prompts,
-        mapping={
-            POLICY_PROMPT_COMPONENT: "policy_prompt",
-            SUMMARIZE_PROMPT_COMPONENT: "summarize_prompt",
-        },
+        components=(POLICY_PROMPT_COMPONENT, SUMMARIZE_PROMPT_COMPONENT),
     )
     components = applier.read()
     assert set(components) == {POLICY_PROMPT_COMPONENT, SUMMARIZE_PROMPT_COMPONENT}

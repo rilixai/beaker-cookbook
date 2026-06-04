@@ -8,7 +8,7 @@ reference harness shape:
   * domain tools over the :class:`WorldFiles` surface
     (``list_files``, ``read_file``, ``read_pdf``,
     ``read_spreadsheet``, ``read_docx``, ``search_files``)
-The rilixai component mapping lives in :mod:`apex_agents.rilixai_spec`; this
+The rilixai component wiring lives in :mod:`apex_agents.rilixai_spec`; this
 package stays focused on the agent itself.
 """
 

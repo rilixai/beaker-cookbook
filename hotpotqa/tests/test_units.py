@@ -339,6 +339,31 @@ def test_sandbox_runner_builds_valid_spec(monkeypatch: pytest.MonkeyPatch) -> No
     assert set(built.cases_by_split) == {"train", "validation"}
 
 
+def test_sandbox_runner_validates_dict_config_directly() -> None:
+    """Direct runner construction should honor mapping-style ctx.config too."""
+    from rilixai.testing import stub_optimization_context
+
+    from hotpotqa.rilixai_spec import HotpotQARunner
+
+    ctx = stub_optimization_context(
+        config={
+            "retrieval_mode": "fullwiki",
+            "retrieve_k": 3,
+            "max_iters": 4,
+            "pydantic_agent_model": "openai:gpt-4.1-mini",
+            "task_temperature": 0.2,
+        }
+    )
+    runner = HotpotQARunner(ctx)
+
+    assert runner._sandbox_cfg.retrieval_mode == "fullwiki"
+    assert runner._sandbox_cfg.retrieve_k == 3
+    assert runner._sandbox_cfg.max_iters == 4
+    assert runner.cfg.retrieval_mode == "fullwiki"
+    assert runner.cfg.retrieve_k == 3
+    assert runner.cfg.pydantic_agent_temperature == pytest.approx(0.2)
+
+
 def test_sandbox_metrics_emits_paper_weighted_scores() -> None:
     """HotpotQAMetrics emits EM (weight 1.0) + F1 + title recall (diagnostics)."""
     metrics = HotpotQAMetrics()

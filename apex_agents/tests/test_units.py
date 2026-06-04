@@ -409,6 +409,38 @@ def test_runner_applies_candidate_prompts_from_runner_state(monkeypatch: Any) ->
     assert "RUNNER_STATE_TASK" in seen[0][1]["content"]
 
 
+def test_runner_validates_dict_config_directly() -> None:
+    """Direct runner construction should honor mapping-style ctx.config too."""
+    from rilixai.testing import stub_optimization_context
+
+    ctx = stub_optimization_context(
+        config={
+            "domain": "Investment Banking",
+            "train_size": 3,
+            "val_size": 4,
+            "task_model": "test-task-model",
+            "task_temperature": 0.2,
+            "judge_model": "test-judge-model",
+            "max_steps": 5,
+            "cost_limit": 1.5,
+        },
+        metadata={
+            "judge": lambda *_: True,
+            "world_factory": lambda _record: FakeWorld({}),
+        },
+    )
+    runner = ApexAgentsRunner(ctx)
+
+    assert runner._sandbox_cfg.domain == "Investment Banking"
+    assert runner._sandbox_cfg.train_size == 3
+    assert runner._sandbox_cfg.val_size == 4
+    assert runner.cfg.task_model == "test-task-model"
+    assert runner.cfg.task_temperature == pytest.approx(0.2)
+    assert runner.cfg.judge_model == "test-judge-model"
+    assert runner.cfg.max_steps == 5
+    assert runner.cfg.cost_limit == pytest.approx(1.5)
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Section 3: metrics + LLM judge
 # ─────────────────────────────────────────────────────────────────────
