@@ -174,6 +174,7 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
         from .agent.agent import ApexReActAgent
 
         cfg = self.cfg
+        prompts = self.current_components()
         agent = ApexReActAgent(
             model_name=cfg.task_model,
             model_temperature=cfg.task_temperature,
@@ -181,9 +182,9 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
             cost_limit=cfg.cost_limit,
             max_toolbelt_size=cfg.max_toolbelt_size,
             max_context_tokens=cfg.max_context_tokens,
-            default_system_prompt=self.prompts.system_prompt,
-            default_task_template=self.prompts.task_template,
-            default_resum_summary_prompt=self.prompts.resum_summary_prompt,
+            default_system_prompt=prompts[SYSTEM_PROMPT_COMPONENT],
+            default_task_template=prompts[TASK_TEMPLATE_COMPONENT],
+            default_resum_summary_prompt=prompts[RESUM_SUMMARY_PROMPT_COMPONENT],
             world_factory=self._world_factory,  # type: ignore[arg-type]
             model_factory=self._model_factory,
             llm_timeout=cfg.llm_timeout,

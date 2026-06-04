@@ -163,14 +163,15 @@ class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
 
         retrieve_k_fn = build_retrieve_k_fn_for_case(record=record, cfg=self.cfg)
         sandbox_cfg = self._sandbox_cfg
+        prompts = self.current_components()
         agent = HotpotQAPydanticAgent(
             model=sandbox_cfg.pydantic_agent_model,
             summarize_model=_bare_openai_model(sandbox_cfg.pydantic_agent_model),
             top_k=sandbox_cfg.retrieve_k,
             max_iters=sandbox_cfg.max_iters,
             temperature=sandbox_cfg.task_temperature,
-            policy_prompt=self.prompts.policy_prompt,
-            summarize_prompt=self.prompts.summarize_prompt,
+            policy_prompt=prompts[POLICY_PROMPT_COMPONENT],
+            summarize_prompt=prompts[SUMMARIZE_PROMPT_COMPONENT],
         )
         return await agent.forward(
             question=record.question,
