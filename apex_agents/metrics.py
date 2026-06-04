@@ -228,7 +228,7 @@ def score_rubric(
     return met / len(criteria)
 
 
-# ─── Trajectory metadata builder (called by the runner's _package_result) ─
+# ─── Result context builder (called by the runner's result_context hook) ─
 
 
 def build_apex_agents_run_metrics(
@@ -240,11 +240,10 @@ def build_apex_agents_run_metrics(
 ) -> dict[str, Any]:
     """Translate the agent's output into rilixai trajectory metadata.
 
-    Per-component feedback is no longer embedded here — the runner asks
-    rilixai for either default GenericFeedback or the optional
-    ``@spec(feedback=...)`` class, then merges it into
-    ``trace_evidence.per_component_feedback``. This builder owns only the
-    domain-specific trace evidence.
+    Per-component feedback is no longer embedded here — rilixai adds either
+    default GenericFeedback or the optional ``@spec(feedback=...)`` class, then
+    merges it into ``trace_evidence.per_component_feedback``. This builder owns
+    only the domain-specific trace evidence.
     """
     policy_reasoning = [
         _truncate(m.content, config.max_preview_chars) for m in output.messages if m.role == "assistant"

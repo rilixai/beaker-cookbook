@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
-from rilixai.prompt_optimization.models import Case
+from rilixai.adapters import BaseCaseRunner
+from rilixai.prompt_optimization.models import Case, PromptCandidate
 
 from hotpotqa.data.dataset import (
     HotpotQAParagraph,
@@ -386,17 +388,20 @@ def test_sandbox_metrics_emits_paper_weighted_scores() -> None:
     assert out.field_accuracies["titles_recall"] == pytest.approx(0.5)
 
 
-def test_sandbox_runner_package_result_embeds_trace_and_feedback() -> None:
-    """The runner's _package_result emits the paper trace + per-component feedback."""
+def test_sandbox_runner_call_embeds_trace_and_feedback() -> None:
+    """The runner call emits result context + automatic per-component feedback."""
     from hotpotqa.agent.types import AgentToolCall, HotpotQAAgentOutput
     from hotpotqa.config import HotpotQAConfig
     from hotpotqa.feedback import HotpotQAFeedback
     from hotpotqa.rilixai_spec import HotpotQARunner
 
-    # Build a runner without invoking __init__ (which constructs an LLM client);
-    # we only exercise the pure _package_result path. Attach the feedback the
-    # sandbox bridge would normally wire via @spec(feedback=...).
+    # Build a runner without invoking __init__ (which constructs an LLM client),
+    # then stub run_case so the public runner call exercises packaging.
     runner = HotpotQARunner.__new__(HotpotQARunner)
+    BaseCaseRunner.__init__(
+        runner,
+        prompts={"policy_prompt": "seed policy", "summarize_prompt": "seed summary"},
+    )
     runner.cfg = HotpotQAConfig(retrieval_mode="distractor", retrieve_k=1)
     runner.attach_feedback(HotpotQAFeedback())
 
@@ -422,7 +427,19 @@ def test_sandbox_runner_package_result_embeds_trace_and_feedback() -> None:
             )
         ],
     )
-    result = runner._package_result(record, output, {})
+
+    async def _stub_run_case(_record: HotpotQARecord) -> HotpotQAAgentOutput:
+        return output
+
+    runner.run_case = _stub_run_case  # type: ignore[method-assign]
+    result = asyncio.run(
+        runner(
+            candidate=PromptCandidate(components={"policy_prompt": "new policy", "summarize_prompt": "new summary"}),
+            input=record,
+            case_id=record.case_id,
+            ground_truth={"answer": record.answer},
+        )
+    )
     rm = result.run_metrics
     assert "trace_evidence" in rm
     assert set(rm["trace_evidence"]["per_component_feedback"]) == {"policy_prompt", "summarize_prompt"}

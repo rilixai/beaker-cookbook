@@ -17,7 +17,7 @@ reflection LM reads when rewriting it:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 from rilixai.adapters import per_component_feedback
 
@@ -34,16 +34,22 @@ class ApexAgentsFeedback:
     """
 
     @per_component_feedback("system_prompt")
-    def system_prompt(self, case: Any, output: ApexAgentsAgentOutput) -> str:
-        return _system_prompt_feedback(record=case.input, output=output)
+    def system_prompt(self, case: Any, output: Any) -> str:
+        return _system_prompt_feedback(record=case.input, output=_agent_output(output))
 
     @per_component_feedback("task_template")
-    def task_template(self, case: Any, output: ApexAgentsAgentOutput) -> str:
-        return _task_template_feedback(record=case.input, output=output)
+    def task_template(self, case: Any, output: Any) -> str:
+        return _task_template_feedback(record=case.input, output=_agent_output(output))
 
     @per_component_feedback("resum_summary_prompt")
-    def resum_summary_prompt(self, case: Any, output: ApexAgentsAgentOutput) -> str:
-        return _resum_summary_prompt_feedback(record=case.input, output=output)
+    def resum_summary_prompt(self, case: Any, output: Any) -> str:
+        return _resum_summary_prompt_feedback(record=case.input, output=_agent_output(output))
+
+
+def _agent_output(output: Any) -> ApexAgentsAgentOutput:
+    if hasattr(output, "agent_output"):
+        return cast(ApexAgentsAgentOutput, output.agent_output)
+    return cast(ApexAgentsAgentOutput, output)
 
 
 # Tools that actually read the workspace. If NONE of these were called

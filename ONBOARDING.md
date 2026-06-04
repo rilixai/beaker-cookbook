@@ -65,7 +65,7 @@ key as a component to optimize independently.
 Prefer naming each component after the prompt a developer would recognize in
 your agent: `"system_prompt"`, `"policy_prompt"`, `"summarize_prompt"`,
 `"task_template"`. Whatever you name a key is what the reflection LM sees,
-what `self.prompt("<name>")` reads, and what your feedback (§9) keys off.
+what `self.prompt("<name>")` reads, and what your feedback (§10) keys off.
 
 ### Output format expectations
 
@@ -392,7 +392,42 @@ pattern so rubric judging can share its benchmark-specific parser.
 
 ---
 
-## 8. Custom metrics with default feedback
+## 8. Result context for reflection
+
+If the optimizer should know more about a run than the final output fields
+show, add `result_context(record, output)`. This is where tool traces,
+retrieval diagnostics, judge rationale, token usage, or other run facts go:
+
+```python
+class MyRunner(BaseCaseRunner[MyRecord, MyOutput]):
+    async def run_case(self, record):
+        return await agent.forward(record)
+
+    def result_context(self, record, output):
+        return {
+            "trace_evidence": {
+                "tool_calls_detail": output.tool_calls,
+                "retrieved_titles": output.retrieved_titles,
+            }
+        }
+```
+
+rilixai automatically packages this context, adds default or custom feedback
+under `trace_evidence["per_component_feedback"]`, and exposes it to the
+reflection LM. You do not need to construct `CaseRunResult`, call feedback, or
+manually merge dictionaries.
+
+Most agents can skip this hook. Add it when the model's path matters, not just
+the final answer.
+
+If your production output is bulky or not JSON-safe, override `result_output`
+to return a compact object with the same scoreable fields. HotpotQA uses this
+only to omit retrieved paragraph bodies from artifacts while keeping
+`answer` and `retrieved_titles` scoreable.
+
+---
+
+## 9. Custom metrics with default feedback
 
 Metrics and feedback are separate knobs. If you need custom scoring but are
 happy with rilixai's templated feedback, declare `field_configs` and omit
@@ -414,7 +449,7 @@ component-specific narratives. The APEX recipe leaves the custom
 
 ---
 
-## 9. Custom feedback narratives — when to bother
+## 10. Custom feedback narratives — when to bother
 
 The reflection LM rewrites prompts better when it sees *why* a case scored the
 way it did. By default you get `GenericFeedback`, which builds a narrative from
@@ -442,7 +477,7 @@ domain signal. Add them incrementally — one component at a time. See
 
 ---
 
-## 10. End-to-end: from zero to a queued run
+## 11. End-to-end: from zero to a queued run
 
 1. **Scaffold** (optional): `uv run rilixai init spec --name my-agent
    --from-agent ./my_agent/agent.py` writes a `rilixai_spec.py` skeleton with

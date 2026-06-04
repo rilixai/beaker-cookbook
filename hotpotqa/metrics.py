@@ -1,7 +1,7 @@
 """Trajectory metadata builder for the HotpotQA agent.
 
 Translates an agent's tool-call trace into the ``run_metrics`` dict the
-optimizer reads. The runner's ``_package_result`` (in
+optimizer reads. The runner's ``result_context`` hook (in
 :mod:`hotpotqa.rilixai_spec`) is the only caller; the paper-faithful answer
 scoring lives next to the ``@spec`` runner as :class:`HotpotQAMetrics`.
 """
@@ -26,8 +26,8 @@ def build_agent_run_metrics(
 
     Owns only the domain-specific trace evidence (per-hop retrieval reasoning,
     documents-remaining, missing/spurious titles). Per-component feedback flows
-    separately through ``@spec(feedback=HotpotQAFeedback)``; the runner merges
-    it into ``trace_evidence.per_component_feedback`` in ``_package_result``.
+    separately through ``@spec(feedback=HotpotQAFeedback)`` and rilixai merges
+    it into ``trace_evidence.per_component_feedback`` automatically.
     """
     gold_titles_lower = {t.strip().lower() for t in record.supporting_titles}
     retrieved_titles_lower = {p.title.strip().lower() for p in output.retrieved_paragraphs}

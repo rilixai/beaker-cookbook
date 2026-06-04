@@ -3,8 +3,8 @@
 ``rilixai push`` targets this file. :class:`ApexAgentsRunner` is the entire
 sandbox integration — rilixai assembles the metrics calculator, seed
 candidate, and default per-component feedback from the ``@spec`` declarations,
-the runner's applier, and the runner's ``_package_result`` (which runs the
-rubric judge + emits the trace).
+the runner's prompts, and the runner's ``result_context`` hook (which emits
+the trace).
 The ``@spec`` decorator builds the :class:`PromptOptimizationSpec` from the
 runner class; rilixai resolves it via ``load_spec_from_target``.
 """
@@ -18,7 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel
 from rilixai import spec
-from rilixai.adapters import BaseCaseRunner, CaseRunResult
+from rilixai.adapters import BaseCaseRunner
 from rilixai.metrics import BaseMetricsCalculator, FieldConfig
 from rilixai.prompt_optimization.models import Case
 
@@ -186,25 +186,20 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
         )
         return _ApexResult(rubric_pass_rate=rubric_pass_rate, final_answer=output.final_answer, agent_output=output)
 
-    def _package_result(
+    def result_context(
         self,
         record: ApexAgentsRecord,
         output: _ApexResult,
-        runtime_kwargs: Mapping[str, Any],
-    ) -> CaseRunResult[_ApexResult]:
-        run_metrics = build_apex_agents_run_metrics(
+    ) -> dict[str, Any]:
+        # With feedback omitted in @spec, rilixai adds GenericFeedback
+        # automatically. If the optional ApexAgentsFeedback line above is
+        # enabled, that same automatic packaging path invokes it instead.
+        return build_apex_agents_run_metrics(
             record=record,
             output=output.agent_output,
             config=self.cfg,
             rubric_pass_rate=output.rubric_pass_rate,
         )
-        # With feedback omitted in @spec, this invokes rilixai's GenericFeedback.
-        # If the optional ApexAgentsFeedback line above is enabled, the same
-        # hook invokes those per-component methods instead.
-        feedback = self._build_feedback(record, output.agent_output, runtime_kwargs)  # type: ignore[arg-type]
-        if feedback:
-            run_metrics.setdefault("trace_evidence", {})["per_component_feedback"] = feedback
-        return CaseRunResult(output=output, run_metrics=run_metrics)
 
     def cases_by_split(self, ctx: Any) -> dict[str, list[Case]]:
         sc = self._sandbox_cfg

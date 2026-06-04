@@ -3,20 +3,19 @@
 ``rilixai push`` targets this file. :class:`HotpotQARunner` is the entire
 sandbox integration — rilixai assembles the metrics calculator, seed
 candidate, and per-component feedback from the declarations on ``@spec`` and
-the runner's own ``_package_result`` (which emits the paper-style trace). The
+the runner's ``result_context`` hook (which emits the paper-style trace). The
 ``@spec`` decorator builds the :class:`PromptOptimizationSpec` from the runner
 class; rilixai resolves it via ``load_spec_from_target``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel
 from rilixai import spec
-from rilixai.adapters import BaseCaseRunner, CaseRunResult
+from rilixai.adapters import BaseCaseRunner
 from rilixai.metrics import BaseMetricsCalculator, FieldConfig
 from rilixai.prompt_optimization.models import Case
 
@@ -167,26 +166,24 @@ class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
             retrieve_k_fn=retrieve_k_fn,
         )
 
-    def _package_result(
+    def result_context(
         self,
         record: HotpotQARecord,
         output: HotpotQAAgentOutput,
-        runtime_kwargs: Mapping[str, Any],
-    ) -> CaseRunResult[HotpotQAAgentOutput]:
-        # Domain-specific trace evidence (per-hop retrieval reasoning,
+    ) -> dict[str, Any]:
+        # Domain-specific result context (per-hop retrieval reasoning,
         # documents-remaining, missing/spurious titles) is richer than the base
-        # hook set, so build it here. Per-component feedback flows through
-        # ``@spec(feedback=HotpotQAFeedback)`` — merge it into the trace.
-        run_metrics = build_agent_run_metrics(
+        # hook set. Per-component feedback flows automatically from
+        # ``@spec(feedback=HotpotQAFeedback)`` into trace_evidence.
+        return build_agent_run_metrics(
             record=record,
             output=output,
             agent_kind="pydantic",
             config=self.cfg,
         )
-        feedback = self._build_feedback(record, output, runtime_kwargs)
-        if feedback:
-            run_metrics.setdefault("trace_evidence", {})["per_component_feedback"] = feedback
-        return CaseRunResult(output=_reportable_output(output), run_metrics=run_metrics)
+
+    def result_output(self, output: HotpotQAAgentOutput) -> HotpotQAAgentOutput:
+        return _reportable_output(output)
 
     def cases_by_split(self, ctx: Any) -> dict[str, list[Case]]:
         hf_config = "fullwiki" if self._sandbox_cfg.retrieval_mode == "fullwiki" else "distractor"
