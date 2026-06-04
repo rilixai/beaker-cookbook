@@ -14,12 +14,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any
 
 from pydantic import BaseModel
 from rilixai import spec
-from rilixai.adapters import AttributeApplier, BaseCaseRunner, CaseRunResult
+from rilixai.adapters import BaseCaseRunner, CaseRunResult
 from rilixai.metrics import BaseMetricsCalculator, FieldConfig
 from rilixai.prompt_optimization.models import Case
 
@@ -53,14 +52,6 @@ class _ApexResult:
     rubric_pass_rate: float
     final_answer: str
     agent_output: ApexAgentsAgentOutput
-
-
-# ─── Optimizable prompt components ──────────────────────────────────────
-
-
-SYSTEM_PROMPT_COMPONENT = "system_prompt"
-TASK_TEMPLATE_COMPONENT = "task_template"
-RESUM_SUMMARY_PROMPT_COMPONENT = "resum_summary_prompt"
 
 
 # ─── Scoring (judge runs in the runner; the metric reads the result) ─────
@@ -127,8 +118,8 @@ def _sandbox_config(ctx: Any) -> ApexAgentsSandboxConfig:
     # Omit feedback= to use rilixai's GenericFeedback while keeping the custom
     # rubric metric above. For richer domain-specific narratives, uncomment:
     # feedback=ApexAgentsFeedback,
-    # No explicit seed: rilixai auto-reads it from runner-owned prompt state
-    # via the applier's read() at spec-build time.
+    # No explicit seed: rilixai auto-reads it from the prompts declared in
+    # BaseCaseRunner.__init__ below.
     # reflection_evidence_mode is kept (rilixai's default is "curated");
     # this agent emits rich trace_evidence the reflection LM should use.
     reflection_evidence_mode="curated_plus_trace",
@@ -158,23 +149,18 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
             model=self.cfg.judge_model,
             timeout=self.cfg.llm_timeout,
         )
-        self.prompts = SimpleNamespace(
-            system_prompt=DEFAULT_SYSTEM_PROMPT,
-            task_template=DEFAULT_TASK_TEMPLATE,
-            resum_summary_prompt=DEFAULT_RESUM_SUMMARY_PROMPT,
-        )
         super().__init__(
-            applier=AttributeApplier(
-                target=self.prompts,
-                components=(SYSTEM_PROMPT_COMPONENT, TASK_TEMPLATE_COMPONENT, RESUM_SUMMARY_PROMPT_COMPONENT),
-            )
+            prompts={
+                "system_prompt": DEFAULT_SYSTEM_PROMPT,
+                "task_template": DEFAULT_TASK_TEMPLATE,
+                "resum_summary_prompt": DEFAULT_RESUM_SUMMARY_PROMPT,
+            }
         )
 
     async def run_case(self, record: ApexAgentsRecord) -> _ApexResult:
         from .agent.agent import ApexReActAgent
 
         cfg = self.cfg
-        prompts = self.current_components()
         agent = ApexReActAgent(
             model_name=cfg.task_model,
             model_temperature=cfg.task_temperature,
@@ -182,9 +168,9 @@ class ApexAgentsRunner(BaseCaseRunner[ApexAgentsRecord, _ApexResult]):
             cost_limit=cfg.cost_limit,
             max_toolbelt_size=cfg.max_toolbelt_size,
             max_context_tokens=cfg.max_context_tokens,
-            default_system_prompt=prompts[SYSTEM_PROMPT_COMPONENT],
-            default_task_template=prompts[TASK_TEMPLATE_COMPONENT],
-            default_resum_summary_prompt=prompts[RESUM_SUMMARY_PROMPT_COMPONENT],
+            default_system_prompt=self.prompt("system_prompt"),
+            default_task_template=self.prompt("task_template"),
+            default_resum_summary_prompt=self.prompt("resum_summary_prompt"),
             world_factory=self._world_factory,  # type: ignore[arg-type]
             model_factory=self._model_factory,
             llm_timeout=cfg.llm_timeout,

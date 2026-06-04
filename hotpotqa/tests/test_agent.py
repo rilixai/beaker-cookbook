@@ -10,18 +10,12 @@ that scripts each turn.
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
-from rilixai.adapters import AttributeApplier
 
 from hotpotqa.agent.agent import HotpotQAPydanticAgent
 from hotpotqa.data.dataset import HotpotQAParagraph, HotpotQARecord
-from hotpotqa.rilixai_spec import (
-    POLICY_PROMPT_COMPONENT,
-    SUMMARIZE_PROMPT_COMPONENT,
-)
 
 
 def _record() -> HotpotQARecord:
@@ -416,23 +410,3 @@ def test_agent_runtime_dispatches_retrieval_by_cfg_mode() -> None:
     obs_legacy = agent._do_retrieve(deps_legacy, "Eiffel Tower")
     assert "GlobalCorpusHit" not in obs_legacy
     assert all(p.title in {"Eiffel Tower", "Paris", "Berlin"} for p in deps_legacy.retrieved)
-
-
-def test_rilixai_spec_components_read_and_apply_runner_prompt_state() -> None:
-    """The integration reads and applies runner-owned prompt components."""
-    prompts = SimpleNamespace(policy_prompt="seed policy", summarize_prompt="seed summary")
-    applier = AttributeApplier(
-        target=prompts,
-        components=(POLICY_PROMPT_COMPONENT, SUMMARIZE_PROMPT_COMPONENT),
-    )
-    components = applier.read()
-    assert set(components) == {POLICY_PROMPT_COMPONENT, SUMMARIZE_PROMPT_COMPONENT}
-
-    applier.apply(
-        {
-            POLICY_PROMPT_COMPONENT: "NEW POLICY",
-            SUMMARIZE_PROMPT_COMPONENT: "NEW SUMMARY",
-        },
-    )
-    assert prompts.policy_prompt == "NEW POLICY"
-    assert prompts.summarize_prompt == "NEW SUMMARY"

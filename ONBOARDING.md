@@ -12,14 +12,12 @@ the class. The two cookbook recipes — `hotpotqa/rilixai_spec.py` and
 `apex_agents/rilixai_spec.py` — are working references for everything below.
 
 ```python
-from types import SimpleNamespace
-
 from rilixai import spec
-from rilixai.adapters import BaseCaseRunner, AttributeApplier
+from rilixai.adapters import BaseCaseRunner
 from rilixai.metrics import FieldConfig
 from rilixai.prompt_optimization import Case
 
-from .agent import MyAgent, MyRecord, MyOutput
+from .agent import DEFAULT_SYSTEM_PROMPT, MyAgent, MyRecord, MyOutput
 
 
 @spec(
@@ -29,11 +27,10 @@ from .agent import MyAgent, MyRecord, MyOutput
 )
 class MyAgentRunner(BaseCaseRunner[MyRecord, MyOutput]):
     def __init__(self, ctx):
-        self.prompts = SimpleNamespace(system_prompt="You are a helpful assistant.")
-        super().__init__(applier=AttributeApplier(target=self.prompts, mapping={"system": "system_prompt"}))
+        super().__init__(prompts={"system_prompt": DEFAULT_SYSTEM_PROMPT})
 
     async def run_case(self, record):
-        agent = MyAgent(system_prompt=self.prompts.system_prompt)
+        agent = MyAgent(system_prompt=self.prompt("system_prompt"))
         return await agent.run(record)
 
     def cases_by_split(self, ctx):
@@ -49,14 +46,13 @@ Exactly two things:
 1. **An async callable that takes one record and returns one output** — your
    `run_case(record)` method. The record is whatever you put in
    `Case.input`; the output is what gets scored.
-2. **A way to receive the candidate's prompt components** — a `dict[str, str]`
-   rilixai hands you each evaluation pass. You expose that through a
-   `ComponentApplier` (§3): runner-owned prompt state, deps injection, or a
-   custom callable.
+2. **The prompts rilixai may optimize** — a `dict[str, str]` of prompt name →
+   default prompt string. During a run, use `self.prompt("<name>")` wherever
+   your production agent needs that prompt string.
 
 That's the entire surface. rilixai never inspects your agent internals, your
 tool definitions, your dataset format, or your scoring math. It only touches
-the components dict and your `run_case` callable.
+the prompt-component dict and your `run_case` callable.
 
 ---
 
@@ -64,9 +60,12 @@ the components dict and your `run_case` callable.
 
 `components` is a `dict[str, str]` — keys are whatever **you** name them, values
 are the prompt strings the optimizer rewrites. The reflection layer treats each
-key as a component to optimize independently. Whatever you name a key
-(`"policy_prompt"`, `"system"`, `"summarize"`) is what the reflection LM sees
-and what your feedback (§6) keys off.
+key as a component to optimize independently.
+
+Prefer naming each component after the prompt a developer would recognize in
+your agent: `"system_prompt"`, `"policy_prompt"`, `"summarize_prompt"`,
+`"task_template"`. Whatever you name a key is what the reflection LM sees,
+what `self.prompt("<name>")` reads, and what your feedback (§9) keys off.
 
 ### Output format expectations
 
@@ -82,7 +81,7 @@ Your `run_case(record)` must return one of:
 | Raw `str` | n/a | ❌ — wrap it (see below) |
 | Raw scalar (int, float, bool) | n/a | ❌ — wrap it |
 
-`FieldConfig.extract_from` (§5) resolves through dotted access — attributes
+`FieldConfig.extract_from` (§6) resolves through dotted access — attributes
 first, items second. If your agent currently returns a bare string, wrap it:
 
 ```python
@@ -105,7 +104,7 @@ and makes the output self-documenting.
 
 **Free-text outputs that can't be compared by string equality** (open-ended
 generation, summaries, multi-paragraph answers) are scored with an LLM-judge
-comparator — register one as a custom comparator on your metrics class (§5).
+comparator — register one as a custom comparator on your metrics class (§6).
 The wrapper above still applies: name the field; the judge does the comparison.
 apex_agents does exactly this — see `apex_agents/metrics.py`
 (`score_rubric` / `build_rubric_judge`) and `ApexAgentsMetrics` in
@@ -113,71 +112,84 @@ apex_agents does exactly this — see `apex_agents/metrics.py`
 
 ---
 
-## 3. Picking a `ComponentApplier` — framework cheatsheet
+## 3. Declaring prompts — the default path
 
-Almost everything maps to `AttributeApplier` with a different attribute name.
-Only PydanticAI's deps pattern needs its own applier.
-
-| Agent framework | Applier | Concrete wiring |
-|---|---|---|
-| PydanticAI (prompts via deps) | `PydanticAIDepsApplier` | `PydanticAIDepsApplier(deps_factory=lambda c: MyDeps(**c), holder=holder, seed_reader=lambda: {...})` |
-| PydanticAI (prompts via attrs) | `AttributeApplier` | `AttributeApplier(target=agent, mapping={"system": "system_prompt"})` |
-| Raw OpenAI Chat Completions | `AttributeApplier` | Hold the system string on a small wrapper class; `AttributeApplier(target=wrapper, mapping={"system": "system_prompt"})` |
-| Anthropic Python SDK | `AttributeApplier` | Same pattern as OpenAI Chat — wrap your `system=` string on a holder. |
-| OpenAI Agents SDK | `AttributeApplier` | `AttributeApplier(target=agent, mapping={"system": "instructions"})` |
-| Claude Agent SDK | `AttributeApplier` | `AttributeApplier(target=agent, mapping={"system": "instructions"})` |
-| LangChain Runnable | `AttributeApplier` | Hold the prompt template on a wrapper; map into its `template` attribute. |
-| Anything else | `CallableApplier(apply=..., read=...)` | One- or two-callable escape hatch. |
-
-The pattern is uniform enough that "switch frameworks" usually means "change two
-strings in your `AttributeApplier(mapping=...)` call."
-
-Every applier is symmetric: `apply(components)` pushes prompts in, and `read()`
-returns the current prompts back out — rilixai calls `read()` once at spec-build
-time to capture your **seed candidate** automatically, so you don't author one
-by hand. (`AttributeApplier` reads/writes the same attributes;
-`CallableApplier` / `PydanticAIDepsApplier` take a `read` / `seed_reader`
-callable.)
-
-Both cookbook recipes use `AttributeApplier` against runner-owned prompt state.
-The production agent stays ordinary: it receives prompt strings through its
-constructor, while `rilixai_spec.py` declares the rilixai component names and
-passes the current prompt state into the agent when running a case:
+Most integrations do not need an applier. Put the prompt defaults in the runner
+constructor and read the active candidate prompt by name inside `run_case`:
 
 ```python
-from types import SimpleNamespace
+class MyRunner(BaseCaseRunner[MyRecord, MyOutput]):
+    def __init__(self, ctx):
+        super().__init__(
+            prompts={
+                "system_prompt": DEFAULT_SYSTEM_PROMPT,
+                "summarize_prompt": DEFAULT_SUMMARIZE_PROMPT,
+            }
+        )
 
-SYSTEM = "system_prompt"
-SUMMARY = "summarize_prompt"
-
-
-self.prompts = SimpleNamespace(
-    system_prompt=DEFAULT_SYSTEM_PROMPT,
-    summarize_prompt=DEFAULT_SUMMARIZE_PROMPT,
-)
-
-super().__init__(
-    applier=AttributeApplier(
-        target=self.prompts,
-        mapping={
-            SYSTEM: "system_prompt",
-            SUMMARY: "summarize_prompt",
-        },
-    )
-)
-
-
-async def run_case(self, record):
-    agent = MyAgent(
-        system_prompt=self.prompts.system_prompt,
-        summarize_prompt=self.prompts.summarize_prompt,
-    )
-    return await agent.forward(record)
+    async def run_case(self, record):
+        agent = MyAgent(
+            system_prompt=self.prompt("system_prompt"),
+            summarize_prompt=self.prompt("summarize_prompt"),
+        )
+        return await agent.forward(record)
 ```
+
+That is the common shape:
+
+- `prompts={...}` declares the seed candidate and the component names.
+- `self.prompt("system_prompt")` returns the active value for this case.
+- Concurrent case execution is safe because the active candidate prompts are
+  stored per invocation, not on shared mutable runner state.
+
+Hardcoding the prompt names at the call site is fine. It makes the integration
+obvious: "this is where the optimized `system_prompt` enters my agent." Use
+constants only if the same name is repeated enough that the indirection pays
+for itself.
+
+## 4. When to use appliers
+
+Appliers are extra support for production agents that cannot simply receive
+prompt strings through a constructor or `run(...)` call. They are escape
+hatches for existing framework objects, not the default onboarding path.
+
+Use an applier when:
+
+- You already have a persistent agent object and the framework stores prompts
+  on mutable attributes, such as `agent.instructions`.
+- The prompt lives at a nested path, such as `chain.prompt.template`.
+- Applying a candidate requires custom side effects, such as rebuilding a
+  cached chain, recreating deps, or calling your agent's existing setter.
+- Your production code already exposes a prompt-setting API and you want to
+  keep the runner thin.
+
+The applier options are:
+
+| Need | Support | Example |
+|---|---|---|
+| Mutate prompt attributes | `AttributeApplier` | `AttributeApplier(target=agent, components=("system_prompt",))` |
+| Public component name differs from storage path | `AttributeApplier(mapping=...)` | `AttributeApplier(target=agent, mapping={"system_prompt": "instructions"})` |
+| Nested prompt path | `AttributeApplier(mapping=...)` | `AttributeApplier(target=chain, mapping={"summary_prompt": "prompt.template"})` |
+| Immutable or recreated deps object | `PydanticAIDepsApplier` | `PydanticAIDepsApplier(deps_factory=lambda c: MyDeps(**c), holder=holder, seed_reader=lambda: {...})` |
+| Arbitrary apply/read behavior | `CallableApplier` | `CallableApplier(apply=set_prompts, read=current_prompts)` |
+
+Every applier is symmetric: `apply(components)` pushes prompts in, and `read()`
+returns the current prompts back out. rilixai calls `read()` once at spec-build
+time to capture your seed candidate automatically. If the prompt defaults are
+easy to spell as a dict, prefer `super().__init__(prompts={...})`; if prompt
+storage is already owned by a production object, use an applier.
+
+Two other prompt-support paths are available:
+
+- If your prompt defaults are generated or loaded from a place the runner should
+  not read, pass an explicit seed with `@spec(seed={...})`.
+- `rilixai init spec --from-agent ./agent.py` can inspect source code to
+  pre-fill a scaffold, but runtime prompt discovery is intentionally explicit:
+  your runner declares the component names it wants rilixai to optimize.
 
 ---
 
-## 4. Loading your data
+## 5. Loading your data
 
 rilixai does **not** ship a data loader — formats vary too much (HuggingFace,
 JSONL, Postgres, pandas, an internal eval harness) for a base class to be
@@ -238,8 +250,8 @@ def cases_by_split(self, ctx):
     return {"train": cases, "validation": cases}
 ```
 
-`ctx.config` (§7) carries the run's knobs (split sizes, model, etc.), so size
-your splits from it: `cases[: ctx.config.train_size]`.
+`ctx.config` carries the run's knobs (split sizes, model, etc.), so size your
+splits from it: `cases[: ctx.config.train_size]`.
 
 For hosted production runs where your app snapshots eval data before queuing a
 run, attach the snapshot as an input artifact and materialize it inside the
@@ -274,7 +286,7 @@ recording optimized prompts.
 
 ---
 
-## 5. Scoring: the `FieldConfig` cookbook
+## 6. Scoring: the `FieldConfig` cookbook
 
 Declare what to score by listing `FieldConfig`s — either inline on `@spec(...)`
 or on a `BaseMetricsCalculator` subclass. The `name` doubles as the default
@@ -331,7 +343,7 @@ A comparator is just `(predicted, expected) -> float in [0, 1]`.
 
 ---
 
-## 6. LLM-as-judge scoring
+## 7. LLM-as-judge scoring
 
 Use rilixai's shipped `llm_judge` comparator when the output is too open-ended
 for exact string or token matching. Declare it like any other comparator, then
@@ -380,7 +392,7 @@ pattern so rubric judging can share its benchmark-specific parser.
 
 ---
 
-## 7. Custom metrics with default feedback
+## 8. Custom metrics with default feedback
 
 Metrics and feedback are separate knobs. If you need custom scoring but are
 happy with rilixai's templated feedback, declare `field_configs` and omit
@@ -396,13 +408,13 @@ class MyRunner(BaseCaseRunner[MyRecord, MyOutput]):
 ```
 
 That path uses your metrics for scoring and attaches `GenericFeedback` to each
-prompt component read by the applier. Add `feedback=MyFeedback` only when you
-want component-specific narratives. The APEX recipe leaves the custom
+declared prompt component. Add `feedback=MyFeedback` only when you want
+component-specific narratives. The APEX recipe leaves the custom
 `ApexAgentsFeedback` switch commented out to show both paths.
 
 ---
 
-## 8. Custom feedback narratives — when to bother
+## 9. Custom feedback narratives — when to bother
 
 The reflection LM rewrites prompts better when it sees *why* a case scored the
 way it did. By default you get `GenericFeedback`, which builds a narrative from
@@ -418,8 +430,8 @@ When the generic template isn't enough, add a feedback class and wire it via
 from rilixai.adapters import per_component_feedback
 
 class MyFeedback:
-    @per_component_feedback("system")
-    def system(self, case, output) -> str:
+    @per_component_feedback("system_prompt")
+    def system_prompt(self, case, output) -> str:
         return f"On case {case.case_id} the agent answered {output.answer!r}; " \
                f"expected {case.ground_truth['answer']!r}. ..."
 ```
@@ -430,12 +442,12 @@ domain signal. Add them incrementally — one component at a time. See
 
 ---
 
-## 9. End-to-end: from zero to a queued run
+## 10. End-to-end: from zero to a queued run
 
 1. **Scaffold** (optional): `uv run rilixai init spec --name my-agent
    --from-agent ./my_agent/agent.py` writes a `rilixai_spec.py` skeleton with
-   the applier + component names pre-detected from your agent file. Or copy a
-   cookbook recipe.
+   prompt component names pre-detected from your agent file, plus an applier
+   if the inspected agent needs one. Or copy a cookbook recipe.
 2. **Fill in** `agent.py` (your production agent), the `FieldConfig`s, and
    `run_case` / `cases_by_split` in `rilixai_spec.py`.
 3. **Verify** the registration test passes:

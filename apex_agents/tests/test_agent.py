@@ -8,10 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from types import SimpleNamespace
 from typing import Any
-
-from rilixai.adapters import AttributeApplier
 
 from apex_agents.agent.agent import ApexReActAgent
 from apex_agents.agent.prompts import (
@@ -20,11 +17,6 @@ from apex_agents.agent.prompts import (
     DEFAULT_TASK_TEMPLATE,
 )
 from apex_agents.data.dataset import ApexAgentsRecord, RubricCriterion
-from apex_agents.rilixai_spec import (
-    RESUM_SUMMARY_PROMPT_COMPONENT,
-    SYSTEM_PROMPT_COMPONENT,
-    TASK_TEMPLATE_COMPONENT,
-)
 from apex_agents.tests.fake_world import FakeWorld
 
 
@@ -237,35 +229,6 @@ def test_constructor_prompts_reach_inner_agent_on_next_forward() -> None:
     # The {{task}} substitution still happened with the rewritten template.
     assert "BRAND_NEW_TASK_FRAMING_99" in last_user
     assert "Read the brief" in last_user
-
-
-def test_rilixai_spec_components_read_and_apply_runner_prompt_state() -> None:
-    prompts = SimpleNamespace(
-        system_prompt="seed system",
-        task_template="seed task {{task}}",
-        resum_summary_prompt="seed resum {conversation}",
-    )
-    applier = AttributeApplier(
-        target=prompts,
-        components=(SYSTEM_PROMPT_COMPONENT, TASK_TEMPLATE_COMPONENT, RESUM_SUMMARY_PROMPT_COMPONENT),
-    )
-    components = applier.read()
-    assert set(components) == {
-        SYSTEM_PROMPT_COMPONENT,
-        TASK_TEMPLATE_COMPONENT,
-        RESUM_SUMMARY_PROMPT_COMPONENT,
-    }
-
-    applier.apply(
-        {
-            SYSTEM_PROMPT_COMPONENT: "NEW SYSTEM",
-            TASK_TEMPLATE_COMPONENT: "NEW TASK {{task}}",
-            RESUM_SUMMARY_PROMPT_COMPONENT: "NEW RESUM {conversation}",
-        },
-    )
-    assert prompts.system_prompt == "NEW SYSTEM"
-    assert prompts.task_template == "NEW TASK {{task}}"
-    assert prompts.resum_summary_prompt == "NEW RESUM {conversation}"
 
 
 def test_task_template_substitutes_task_variable() -> None:

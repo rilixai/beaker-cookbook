@@ -12,12 +12,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any, Literal
 
 from pydantic import BaseModel
 from rilixai import spec
-from rilixai.adapters import AttributeApplier, BaseCaseRunner, CaseRunResult
+from rilixai.adapters import BaseCaseRunner, CaseRunResult
 from rilixai.metrics import BaseMetricsCalculator, FieldConfig
 from rilixai.prompt_optimization.models import Case
 
@@ -28,13 +27,6 @@ from .data.dataset import HotpotQARecord, load_hotpotqa_paper_split
 from .data.eval import f1_score
 from .feedback import HotpotQAFeedback
 from .metrics import build_agent_run_metrics
-
-
-# ─── Optimizable prompt components ──────────────────────────────────────
-
-
-POLICY_PROMPT_COMPONENT = "policy_prompt"
-SUMMARIZE_PROMPT_COMPONENT = "summarize_prompt"
 
 
 @dataclass
@@ -122,8 +114,8 @@ def _sandbox_config(ctx: Any) -> HotpotQASandboxConfig:
     config_schema=HotpotQASandboxConfig,
     field_configs=HotpotQAMetrics,
     feedback=HotpotQAFeedback,
-    # No explicit seed: rilixai auto-reads it from runner-owned prompt state
-    # via the applier's read() at spec-build time.
+    # No explicit seed: rilixai auto-reads it from the prompts declared in
+    # BaseCaseRunner.__init__ below.
     # reflection_evidence_mode is kept (rilixai's default is "curated");
     # this agent emits rich trace_evidence the reflection LM should use.
     reflection_evidence_mode="curated_plus_trace",
@@ -146,15 +138,11 @@ class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
             pydantic_agent_model=sandbox_cfg.pydantic_agent_model,
             pydantic_agent_temperature=sandbox_cfg.task_temperature,
         )
-        self.prompts = SimpleNamespace(
-            policy_prompt=DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
-            summarize_prompt=DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
-        )
         super().__init__(
-            applier=AttributeApplier(
-                target=self.prompts,
-                components=(POLICY_PROMPT_COMPONENT, SUMMARIZE_PROMPT_COMPONENT),
-            )
+            prompts={
+                "policy_prompt": DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
+                "summarize_prompt": DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
+            }
         )
 
     async def run_case(self, record: HotpotQARecord) -> HotpotQAAgentOutput:
@@ -163,15 +151,14 @@ class HotpotQARunner(BaseCaseRunner[HotpotQARecord, HotpotQAAgentOutput]):
 
         retrieve_k_fn = build_retrieve_k_fn_for_case(record=record, cfg=self.cfg)
         sandbox_cfg = self._sandbox_cfg
-        prompts = self.current_components()
         agent = HotpotQAPydanticAgent(
             model=sandbox_cfg.pydantic_agent_model,
             summarize_model=_bare_openai_model(sandbox_cfg.pydantic_agent_model),
             top_k=sandbox_cfg.retrieve_k,
             max_iters=sandbox_cfg.max_iters,
             temperature=sandbox_cfg.task_temperature,
-            policy_prompt=prompts[POLICY_PROMPT_COMPONENT],
-            summarize_prompt=prompts[SUMMARIZE_PROMPT_COMPONENT],
+            policy_prompt=self.prompt("policy_prompt"),
+            summarize_prompt=self.prompt("summarize_prompt"),
         )
         return await agent.forward(
             question=record.question,
