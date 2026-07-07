@@ -24,20 +24,21 @@ injected :class:`FakeWorld` factory + stub judge and bypass this CLI entirely.
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from rilixai import OptimizationTargets, optimization_targets_from_prompts, validate_spec
+from rilixai import OptimizationTargets
+
+from cookbook_common.cli_support import load_targets_from_json, validate_and_log, write_eval_report
+from cookbook_common.local_eval import run_local_evaluation
 
 from .agent.prompts import apex_agents_seed_targets
 from .config import ApexAgentsConfig
 from .data.dataset import DEFAULT_DOMAIN, load_apex_agents_cases
 from .data.world_splits import fixed_val_split, stratified_case_cap
-from .optimization.local_eval import run_local_evaluation
 from .optimization.metrics import RUBRIC_FIELD
 from .optimization.spec import build_apex_agents_spec
 
@@ -228,37 +229,7 @@ def _select_eval_cases(args: argparse.Namespace) -> list[Any]:
 
 
 def _load_targets(path: Path | None) -> OptimizationTargets:
-    if path is None:
-        return apex_agents_seed_targets()
-    raw = json.loads(path.read_text())
-    # Accept the ``OptimizationTargets`` wire shape (``{"prompts": {...}}``), the
-    # legacy ``PromptCandidate`` shape (``{"components": {...}}``) written by the
-    # pre-migration optimizer, or a bare ``{name: text}`` mapping.
-    if isinstance(raw, dict) and "prompts" in raw:
-        prompts = raw["prompts"]
-    elif isinstance(raw, dict) and "components" in raw:
-        prompts = raw["components"]
-    else:
-        prompts = raw
-    if not isinstance(prompts, dict):
-        raise ValueError(f"Candidate JSON at {path} must be an object of prompt name → text.")
-    parsed = {str(k): str(v) for k, v in prompts.items()}
-    # Guard against a mis-shaped/typo'd file being read as a bare name→text map:
-    # ``apply_candidate`` silently ignores unknown component names, so without
-    # this a candidate whose keys match nothing would evaluate the *seed*
-    # prompts and report that score as the candidate's.
-    known = set(apex_agents_seed_targets().to_dict())
-    if not (parsed.keys() & known):
-        raise ValueError(
-            f"Candidate JSON at {path} has no recognized prompt components "
-            f"(expected any of {sorted(known)}, got {sorted(parsed)})."
-        )
-    return optimization_targets_from_prompts(parsed)
-
-
-def _write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, default=str))
+    return load_targets_from_json(path, seed_targets=apex_agents_seed_targets())
 
 
 def _build_spec_for_args(args: argparse.Namespace) -> Any:
@@ -283,14 +254,7 @@ def _run_validate(args: argparse.Namespace) -> int:
     # touches the network; validate_spec only inspects structure.
     args.no_network = True
     spec = _build_spec_for_args(args)
-    validate_spec(spec)
-    logger.info(
-        "Spec %r validated: %d seed prompt(s) %s.",
-        spec.name,
-        len(spec.seed_targets.prompts),
-        sorted(spec.seed_targets.prompts),
-    )
-    return 0
+    return validate_and_log(spec, logger=logger)
 
 
 def _run_evaluate(args: argparse.Namespace) -> int:
@@ -307,17 +271,7 @@ def _run_evaluate(args: argparse.Namespace) -> int:
         cases=cases,
         max_concurrency=args.max_concurrency,
     )
-    summary = {
-        "split": args.split,
-        "num_cases": report.num_cases,
-        "num_errored": report.num_errored,
-        "objective": report.objective,
-        "field_accuracies": report.field_accuracies,
-        "field_sample_counts": report.field_sample_counts,
-    }
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    _write_json(args.output_dir / "eval_summary.json", summary)
-    _write_json(args.output_dir / "eval_outputs.json", report.per_case)
+    write_eval_report(report, output_dir=args.output_dir, split=args.split)
     logger.info(
         "Split=%s | %s=%.4f over %d cases",
         args.split,

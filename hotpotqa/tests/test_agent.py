@@ -21,7 +21,7 @@ from hotpotqa.agent.agent import (
     HotpotQAPydanticAgent,
 )
 from hotpotqa.agent.prompts import hotpotqa_pydantic_agent_seed_targets
-from hotpotqa.config import HotpotQAConfig
+from hotpotqa.config import HotpotQAConfig, bare_openai_model, to_pydantic_ai_model
 from hotpotqa.data.dataset import HotpotQAParagraph, HotpotQARecord
 from hotpotqa.optimization.runtime import build_hotpotqa_run_case
 
@@ -550,3 +550,22 @@ def test_runtime_requires_explicit_pydantic_agent_or_model() -> None:
                 max_iters=2,
             ),
         )
+
+
+def test_model_name_normalization_is_centralized_in_config() -> None:
+    """Slash- and colon-form model specs both canonicalize to the PydanticAI
+    colon form on the config (the single normalization layer), and the bare
+    OpenAI name is derived from either separator."""
+    # Helpers convert both directions regardless of the incoming separator.
+    assert to_pydantic_ai_model("openai/gpt-4.1-mini") == "openai:gpt-4.1-mini"
+    assert to_pydantic_ai_model("openai:gpt-4.1-mini") == "openai:gpt-4.1-mini"
+    assert bare_openai_model("openai:gpt-4.1-mini") == "gpt-4.1-mini"
+    assert bare_openai_model("openai/gpt-4.1-mini") == "gpt-4.1-mini"
+    assert bare_openai_model("gpt-4.1-mini") == "gpt-4.1-mini"
+
+    # A slash-form spec reaching the config (sandbox config / direct build) is
+    # rewritten to the valid PydanticAI colon form rather than passed through.
+    cfg = HotpotQAConfig(
+        retrieval_mode="distractor", retrieve_k=1, max_iters=2, pydantic_agent_model="openai/gpt-4.1-mini"
+    )
+    assert cfg.pydantic_agent_model == "openai:gpt-4.1-mini"

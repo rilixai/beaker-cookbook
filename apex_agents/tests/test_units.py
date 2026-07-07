@@ -41,8 +41,6 @@ from apex_agents.data.dataset import (
 from apex_agents.data.world_splits import (
     fixed_val_split,
     stratified_case_cap,
-    world_held_out_val_split,
-    world_level_folds,
 )
 from apex_agents.optimization.feedback import (
     SYSTEM_PROMPT_COMPONENT,
@@ -621,52 +619,8 @@ def test_parse_verdict_is_robust_to_verbose_reasoning_judges() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Section 4: k-fold splitters + val splits
+# Section 4: val split + case cap
 # ─────────────────────────────────────────────────────────────────────
-
-
-def _worlds(n: int) -> list[str]:
-    return [f"world-{i:02d}" for i in range(n)]
-
-
-def test_world_level_folds_shape_partition_and_determinism() -> None:
-    worlds = _worlds(10)
-    # 10 worlds / k=5 → 5 folds of 2 test / 8 train; disjoint; every world appears once.
-    folds = world_level_folds(worlds, k=5, seed=0)
-    assert len(folds) == 5
-    seen: list[str] = []
-    for train, test in folds:
-        assert len(test) == 2
-        assert len(train) == 8
-        assert not (set(train) & set(test))
-        seen.extend(test)
-    assert sorted(seen) == sorted(worlds)
-    assert len(seen) == len(set(seen))
-
-    # Same seed → identical; different seed → at least some fold differs;
-    # input order does not matter; dedup of inputs.
-    assert world_level_folds(worlds, k=5, seed=7) == world_level_folds(worlds, k=5, seed=7)
-    assert [t for _, t in world_level_folds(worlds, k=5, seed=0)] != [
-        t for _, t in world_level_folds(worlds, k=5, seed=1)
-    ]
-    assert world_level_folds(worlds, k=5, seed=3) == world_level_folds(list(reversed(worlds)), k=5, seed=3)
-    dedup_folds = world_level_folds(["w1", "w1", "w2", "w3", "w4"], k=2, seed=0)
-    deduped_seen: list[str] = []
-    for _, test in dedup_folds:
-        deduped_seen.extend(test)
-    assert sorted(deduped_seen) == ["w1", "w2", "w3", "w4"]
-
-
-def test_world_level_folds_uneven_balances_and_rejects_bad_args() -> None:
-    # 11 worlds / k=5 → sizes differ by ≤ 1, total 11.
-    sizes = sorted(len(t) for _, t in world_level_folds(_worlds(11), k=5, seed=0))
-    assert max(sizes) - min(sizes) <= 1
-    assert sum(sizes) == 11
-
-    with pytest.raises(ValueError, match="k >= 2"):
-        world_level_folds(_worlds(10), k=1)
-    with pytest.raises(ValueError, match="at least k"):
-        world_level_folds(_worlds(3), k=5)
 
 
 class _C:
@@ -681,31 +635,6 @@ def _cases(n_worlds: int, per_world: int = 3) -> list[_C]:
     return [_C(f"world-{w:02d}", i) for w in range(n_worlds) for i in range(per_world)]
 
 
-def test_inner_val_holds_out_whole_worlds_disjoint_and_deterministic() -> None:
-    """Fix 1: cross-world generalization — val split must hold out WHOLE worlds."""
-    train = _cases(9, per_world=4)  # 9 worlds, 36 cases
-    it, val = world_held_out_val_split(train, n_val_worlds=2, seed=0)
-    it_worlds = {c.group_key for c in it}
-    val_worlds = {c.group_key for c in val}
-    assert it_worlds.isdisjoint(val_worlds)
-    assert len(val_worlds) == 2
-    assert it_worlds | val_worlds == {f"world-{w:02d}" for w in range(9)}
-    assert len(it) + len(val) == len(train)
-    it2, val2 = world_held_out_val_split(train, n_val_worlds=2, seed=0)
-    assert {c.case_id for c in val2} == {c.case_id for c in val}
-    assert {c.group_key for c in world_held_out_val_split(train, n_val_worlds=2, seed=7)[1]} != val_worlds
-
-
-def test_inner_val_clamps_and_degrades_safely() -> None:
-    it, val = world_held_out_val_split(_cases(3), n_val_worlds=10, seed=0)
-    assert {c.group_key for c in it} and {c.group_key for c in val}
-    assert {c.group_key for c in it}.isdisjoint({c.group_key for c in val})
-    one = _cases(1, per_world=5)
-    it1, val1 = world_held_out_val_split(one, n_val_worlds=2, seed=0)
-    assert len(it1) == len(val1) == 5
-    assert world_held_out_val_split([], n_val_worlds=2, seed=0) == ([], [])
-
-
 def test_fixed_val_split_constant_and_disjoint() -> None:
     cases = _cases(9, per_world=10)
     tp, val, vw = fixed_val_split(cases, n_val_worlds=2, val_size=20, seed=0)
@@ -718,12 +647,13 @@ def test_fixed_val_split_constant_and_disjoint() -> None:
     assert len({c.group_key for c in val}) == 2
 
 
-def test_stratified_cap_keeps_worlds_wide_vs_frontslice() -> None:
+def test_stratified_cap_keeps_worlds_wide() -> None:
     pool = _cases(9, per_world=10)
     strat = stratified_case_cap(pool, 9, mode="stratified", seed=0)
-    front = stratified_case_cap(pool, 9, mode="frontslice", seed=0)
     assert len(strat) == 9 and len({c.group_key for c in strat}) == 9
-    assert len(front) == 9 and len({c.group_key for c in front}) == 1
+    # An invalid mode is rejected (``frontslice`` was removed with the k-fold path).
+    with pytest.raises(ValueError, match="must be 'stratified'"):
+        stratified_case_cap(pool, 9, mode="frontslice", seed=0)
     assert stratified_case_cap(pool, None) == pool
     assert [c.case_id for c in stratified_case_cap(pool, 18, seed=0)] == [
         c.case_id for c in stratified_case_cap(pool, 18, seed=0)

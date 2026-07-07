@@ -30,19 +30,20 @@ hits HF / an LLM.
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
-from rilixai import Case, OptimizationTargets, optimization_targets_from_prompts, validate_spec
+from rilixai import Case, OptimizationTargets
+
+from cookbook_common.cli_support import load_targets_from_json, validate_and_log, write_eval_report
+from cookbook_common.local_eval import run_local_evaluation
 
 from .agent.prompts import hotpotqa_pydantic_agent_seed_targets
 from .config import HotpotQAConfig
 from .data.dataset import load_hotpotqa_paper_split
-from .optimization.local_eval import run_local_evaluation
 from .optimization.metrics import ANSWER_FIELD
 from .optimization.spec import build_hotpotqa_spec
 
@@ -174,45 +175,14 @@ def _load_eval_cases(args: argparse.Namespace) -> list[Case]:
 
 
 def _load_targets(path: Path | None) -> OptimizationTargets:
-    if path is None:
-        return hotpotqa_pydantic_agent_seed_targets()
-    raw = json.loads(path.read_text())
-    # Accept the ``OptimizationTargets`` wire shape (``{"prompts": {...}}``), the
-    # legacy ``PromptCandidate`` shape (``{"components": {...}}``) written by the
-    # pre-migration optimizer, or a bare ``{name: text}`` mapping.
-    if isinstance(raw, dict) and "prompts" in raw:
-        prompts = raw["prompts"]
-    elif isinstance(raw, dict) and "components" in raw:
-        prompts = raw["components"]
-    else:
-        prompts = raw
-    if not isinstance(prompts, dict):
-        raise ValueError(f"Candidate JSON at {path} must be an object of prompt name → text.")
-    parsed = {str(k): str(v) for k, v in prompts.items()}
-    # Guard against a mis-shaped/typo'd file being read as a bare name→text map:
-    # ``apply_candidate`` silently ignores unknown component names, so without
-    # this a candidate whose keys match nothing would evaluate the *seed*
-    # prompts and report that score as the candidate's.
-    known = set(hotpotqa_pydantic_agent_seed_targets().to_dict())
-    if not (parsed.keys() & known):
-        raise ValueError(
-            f"Candidate JSON at {path} has no recognized prompt components "
-            f"(expected any of {sorted(known)}, got {sorted(parsed)})."
-        )
-    return optimization_targets_from_prompts(parsed)
-
-
-def _write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, default=str))
+    return load_targets_from_json(path, seed_targets=hotpotqa_pydantic_agent_seed_targets())
 
 
 def _build_spec_for_args(args: argparse.Namespace) -> Any:
-    pydantic_agent_model = args.pydantic_agent_model
-    if pydantic_agent_model is None:
-        # Translate the slash spec (``openai/gpt-4.1-mini``) to PydanticAI's
-        # spec (``openai:gpt-4.1-mini``) so callers can share ``--task-model``.
-        pydantic_agent_model = args.task_model.replace("/", ":", 1)
+    # Fall back to the shared ``--task-model`` when no explicit agent spec is
+    # given. The slash→colon rewrite is handled centrally by ``HotpotQAConfig``
+    # (see ``to_pydantic_ai_model``), so no per-call normalization is needed here.
+    pydantic_agent_model = args.pydantic_agent_model or args.task_model
     config = HotpotQAConfig(
         retrieval_mode=args.retrieval,
         retrieve_k=args.retrieve_k,
@@ -225,14 +195,7 @@ def _build_spec_for_args(args: argparse.Namespace) -> Any:
 
 def _run_validate(args: argparse.Namespace) -> int:
     spec = _build_spec_for_args(args)
-    validate_spec(spec)
-    logger.info(
-        "Spec %r validated: %d seed prompt(s) %s.",
-        spec.name,
-        len(spec.seed_targets.prompts),
-        sorted(spec.seed_targets.prompts),
-    )
-    return 0
+    return validate_and_log(spec, logger=logger)
 
 
 def _run_evaluate(args: argparse.Namespace) -> int:
@@ -251,17 +214,7 @@ def _run_evaluate(args: argparse.Namespace) -> int:
         max_concurrency=args.max_concurrency,
     )
     logger.info("evaluate complete in %s (%d cases)", _fmt_hms(time.monotonic() - eval_started), report.num_cases)
-    summary = {
-        "split": args.split,
-        "num_cases": report.num_cases,
-        "num_errored": report.num_errored,
-        "objective": report.objective,
-        "field_accuracies": report.field_accuracies,
-        "field_sample_counts": report.field_sample_counts,
-    }
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    _write_json(args.output_dir / "eval_summary.json", summary)
-    _write_json(args.output_dir / "eval_outputs.json", report.per_case)
+    write_eval_report(report, output_dir=args.output_dir, split=args.split)
     logger.info(
         "Split=%s | %s=%.4f over %d cases",
         args.split,
