@@ -365,6 +365,33 @@ def test_load_targets_accepts_prompts_components_and_flat_shapes(tmp_path: Path)
         assert _load_targets(p).to_dict() == expected
 
 
+def test_heldout_subset_summary_excludes_reserved_validation_worlds() -> None:
+    """`evaluate --split all` must also report the clean cross-world subset.
+
+    The all-cases number is validation-inclusive; the held-out summary averages
+    ``rubric_pass_rate`` over only the cases whose world falls outside the
+    reserved validation pool, and over only the cases that were actually scored
+    (empty-rubric cases omit the field — see the #5 fix).
+    """
+    from apex_agents.cli import _heldout_subset_summary
+
+    per_case = [
+        {"group_key": "w-val-a", "field_scores": {RUBRIC_FIELD: 1.0}},
+        {"group_key": "w-val-b", "field_scores": {RUBRIC_FIELD: 1.0}},
+        {"group_key": "w-clean1", "field_scores": {RUBRIC_FIELD: 0.5}},
+        {"group_key": "w-clean2", "field_scores": {RUBRIC_FIELD: 0.1}},
+        {"group_key": "w-clean2", "field_scores": {}},  # unscoreable: held but not averaged
+    ]
+    out = _heldout_subset_summary(per_case, {"w-val-a", "w-val-b"})
+    assert out["excluded_world_ids"] == ["w-val-a", "w-val-b"]
+    assert out["num_heldout_cases"] == 3
+    assert out["num_heldout_scored"] == 2
+    assert abs(out[f"{RUBRIC_FIELD}_heldout"] - (0.5 + 0.1) / 2) < 1e-9
+
+    empty = _heldout_subset_summary(per_case[:2], {"w-val-a", "w-val-b"})
+    assert empty["num_heldout_cases"] == 0 and empty[f"{RUBRIC_FIELD}_heldout"] is None
+
+
 def test_run_case_scored_by_scorer_yields_objective() -> None:
     """The scorer reads ``rubric_pass_rate`` off the run_case result output."""
     scorer = ApexAgentsScorer()

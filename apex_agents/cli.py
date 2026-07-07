@@ -32,7 +32,7 @@ from typing import Any
 
 from rilixai import OptimizationTargets
 
-from cookbook_common.cli_support import load_targets_from_json, validate_and_log, write_eval_report
+from cookbook_common.cli_support import eval_summary, load_targets_from_json, validate_and_log, write_json
 from cookbook_common.local_eval import run_local_evaluation
 
 from .agent.prompts import apex_agents_seed_targets
@@ -210,22 +210,59 @@ def _load_all_cases(args: argparse.Namespace) -> list[Any]:
     )
 
 
-def _select_eval_cases(args: argparse.Namespace) -> list[Any]:
-    """Build the list of cases the `evaluate` command scores."""
+def _select_eval_cases(args: argparse.Namespace) -> tuple[list[Any], set[str]]:
+    """Build the cases the `evaluate` command scores + the excluded worlds.
+
+    The second element is the fixed cross-world validation world ids (non-empty
+    only for ``--split all``) so ``_run_evaluate`` can report a clean cross-world
+    subset alongside the (validation-inclusive) all-cases number.
+    """
     all_cases = _load_all_cases(args)
+    # The fixed, seed-derived validation worlds. A hosted GEPA run selects
+    # candidates against this pool, so the all-cases score is inflated w.r.t.
+    # it; carve it out to get a clean cross-world number (see #7).
+    _, val_cases, val_world_ids = fixed_val_split(
+        all_cases,
+        n_val_worlds=args.val_worlds,
+        val_size=(args.val_size if args.val_size and args.val_size > 0 else None),
+        seed=args.seed,
+    )
+    excluded_world_ids: set[str] = set()
     if args.split == "validation":
-        _, val_cases, _ = fixed_val_split(
-            all_cases,
-            n_val_worlds=args.val_worlds,
-            val_size=(args.val_size if args.val_size and args.val_size > 0 else None),
-            seed=args.seed,
-        )
         cases = list(val_cases)
     else:  # "all"
         cases = list(all_cases)
+        excluded_world_ids = {str(w) for w in val_world_ids}
     if args.test_size is not None:
         cases = stratified_case_cap(cases, args.test_size, seed=args.seed)
-    return cases
+    return cases, excluded_world_ids
+
+
+def _heldout_subset_summary(per_case: list[dict[str, Any]], excluded_world_ids: set[str]) -> dict[str, Any]:
+    """Clean cross-world subset of a full-dataset eval (pure, testable).
+
+    Restricts to cases whose world (``group_key``) is NOT in
+    ``excluded_world_ids`` — i.e. worlds outside the reserved cross-world
+    validation pool a hosted GEPA run selects candidates against — and averages
+    ``rubric_pass_rate`` over only the held-out cases that were actually scored
+    (empty-rubric cases omit the field, matching the report's own aggregate).
+    """
+    held = [r for r in per_case if r.get("group_key") and str(r["group_key"]) not in excluded_world_ids]
+    scores = [
+        float(fs[RUBRIC_FIELD]) for r in held if isinstance((fs := r.get("field_scores")), dict) and RUBRIC_FIELD in fs
+    ]
+    return {
+        "excluded_world_ids": sorted(excluded_world_ids),
+        "num_heldout_cases": len(held),
+        "num_heldout_scored": len(scores),
+        f"{RUBRIC_FIELD}_heldout": (sum(scores) / len(scores)) if scores else None,
+        "note": (
+            f"{RUBRIC_FIELD} is over ALL cases incl. the reserved cross-world validation "
+            f"pool a hosted GEPA run selects against (validation-inclusive, NOT a clean "
+            f"generalization measure). {RUBRIC_FIELD}_heldout is the subset whose worlds "
+            f"fall outside that pool."
+        ),
+    }
 
 
 def _load_targets(path: Path | None) -> OptimizationTargets:
@@ -258,7 +295,7 @@ def _run_validate(args: argparse.Namespace) -> int:
 
 
 def _run_evaluate(args: argparse.Namespace) -> int:
-    cases = _select_eval_cases(args)
+    cases, excluded_world_ids = _select_eval_cases(args)
     if not cases:
         logger.error("evaluate command got no cases for --split %s.", args.split)
         return 2
@@ -271,7 +308,15 @@ def _run_evaluate(args: argparse.Namespace) -> int:
         cases=cases,
         max_concurrency=args.max_concurrency,
     )
-    write_eval_report(report, output_dir=args.output_dir, split=args.split)
+    summary = eval_summary(report, split=args.split)
+    # On a full-dataset eval the score is validation-inclusive (inflated,
+    # not a clean generalization measure). Also report the CLEAN cross-world
+    # subset — cases outside the reserved validation worlds. Free: same run.
+    if args.split == "all":
+        summary.update(_heldout_subset_summary(report.per_case, excluded_world_ids))
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    write_json(args.output_dir / "eval_summary.json", summary)
+    write_json(args.output_dir / "eval_outputs.json", report.per_case)
     logger.info(
         "Split=%s | %s=%.4f over %d cases",
         args.split,
@@ -279,6 +324,16 @@ def _run_evaluate(args: argparse.Namespace) -> int:
         report.field_accuracies.get(RUBRIC_FIELD, report.objective),
         report.num_cases,
     )
+    heldout = summary.get(f"{RUBRIC_FIELD}_heldout")
+    if args.split == "all" and heldout is not None:
+        logger.info(
+            "Clean cross-world held-out: %s=%.4f over %d scored cases (worlds outside "
+            "the reserved validation pool); the all-cases number above is "
+            "validation-inclusive / not a clean generalization measure.",
+            RUBRIC_FIELD,
+            heldout,
+            summary["num_heldout_scored"],
+        )
     return 0
 
 
