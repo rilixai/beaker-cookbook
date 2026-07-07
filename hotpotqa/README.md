@@ -30,30 +30,25 @@ export OPENAI_API_KEY=sk-...    # agent + summarize (gpt-4.1-mini default)
 
 ## Run locally
 
-```bash
-# Optimize on a paper-aligned slice (use a smaller --max-metric-calls for smoke)
-uv run python -m hotpotqa.cli optimize \
-    --train-size 150 --max-metric-calls 6871 \
-    --reflection-model openai/gpt-4.1 \
-    --output-dir hotpotqa_results/optimize-150
+This recipe depends on the lightweight `rilixai` SDK only. The local CLI
+covers the two SDK-only paths — `validate` (offline structural check) and
+`evaluate` (score one candidate via the SDK `run_case` + scorer loop). The
+full GEPA optimize loop runs server-side via `rilixai run` (see the Modal
+section below); the optimizer engine lives in the optional `rilixai-runtime`
+package, not in this recipe.
 
-# Evaluate (omit --candidate-json to score the seed prompts)
+```bash
+# Validate the spec structure offline (no network, no dataset download)
+uv run python -m hotpotqa.cli validate
+
+# Evaluate one candidate (omit --candidate-json to score the seed prompts)
 uv run python -m hotpotqa.cli evaluate \
-    --candidate-json hotpotqa_results/optimize-150/best_candidate.json \
-    --output-dir hotpotqa_results/after-150
+    --split test --candidate-json path/to/candidate.json \
+    --output-dir hotpotqa_results/seed
 ```
 
-Defaults are paper-aligned (`--max-metric-calls 6871` matches the artifact's
-HotpotQA budget; `--reflection-model openai/gpt-4.1` matches the paper's
-stronger reflection LM). Evaluate with no flags scores the seed candidate on
-the 300-case fullwiki test slice. See `--help` for all flags.
-
-A train-size sweep is also available:
-
-```bash
-uv run python -m hotpotqa.scripts.run_train_size_sweep \
-    --output-root hotpotqa_sweep --skip-existing
-```
+Evaluate with no flags scores the seed candidate on the 300-case fullwiki
+test slice. See `--help` for all flags.
 
 ## Run on Modal (rilixai sandbox)
 

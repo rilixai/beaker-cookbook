@@ -24,7 +24,7 @@ from .agent import (
 from .prompts import (
     DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
     DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
-    hotpotqa_pydantic_agent_seed_candidate,
+    hotpotqa_pydantic_agent_seed_targets,
 )
 from .types import AgentToolCall, HotpotQAAgentOutput
 
@@ -39,5 +39,5 @@ __all__ = [
     "PYDANTIC_AGENT_POLICY_COMPONENT",
     "PYDANTIC_AGENT_SUMMARIZE_COMPONENT",
     "SummarizeLLMCall",
-    "hotpotqa_pydantic_agent_seed_candidate",
+    "hotpotqa_pydantic_agent_seed_targets",
 ]

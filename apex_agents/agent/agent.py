@@ -51,7 +51,7 @@ from .types import AgentToolCall, ApexAgentsAgentOutput
 logger = logging.getLogger(__name__)
 
 
-# Component names the agent reads off the rilixai PromptCandidate.
+# Component names the agent reads off the rilixai OptimizationTargets bundle.
 __all__ = [
     "RESUM_SUMMARY_PROMPT_COMPONENT",
     "SYSTEM_PROMPT_COMPONENT",

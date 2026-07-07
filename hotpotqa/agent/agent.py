@@ -11,7 +11,7 @@ structured output type, two optimizable prompts.
     summarization. The agent decides whether to call it (and whether
     to pass a previous summary as ``context``).
 
-* **Optimizable components** (2 — matches the rilixai PromptCandidate dict)
+* **Optimizable components** (2 — matches the rilixai OptimizationTargets dict)
   * ``policy_prompt`` → the agent's ``system_prompt`` (tool-use
     policy).
   * ``summarize_prompt`` → injected as the ``system`` message in the

@@ -1,52 +1,45 @@
-"""Async ``ExtractionRuntime`` adapter — the GEPA-facing surface.
+"""Async rilixai ``run_case`` adapter — the optimizer-facing surface.
 
-Wraps :class:`~hotpotqa.agent.agent.HotpotQAPydanticAgent` as an async
-runtime the rilixai adapter can drive. Translates the agent's
-variable-length tool-call trajectory into the trajectory-dict schema
-the optimizer's adapter expects, and populates
-``trace_evidence.per_component_feedback`` with paper-style
-per-component diagnostics (``policy_prompt`` + ``summarize_prompt``)
-the reflection LM reads when rewriting each component.
+Wraps :class:`~hotpotqa.agent.agent.HotpotQAPydanticAgent` as the async
+:data:`rilixai.RunCase` the optimizer drives. Each call runs one
+:class:`~rilixai.Case` end-to-end: apply the
+:class:`~rilixai.OptimizationTargets` prompt bundle to the agent, run the
+agent, and translate its variable-length tool-call trajectory into a
+:class:`~rilixai.CaseResult` whose ``output`` carries the ``answer`` +
+``retrieved_titles`` the :class:`HotpotQAScorer` reads back, and whose
+``run_metrics.trace_evidence.per_component_feedback`` carries the
+per-component diagnostics (``policy_prompt`` + ``summarize_prompt``) the
+reflection LM reads when rewriting each component.
 
-This module is the single entry point GEPA hits per case — everything
-under :mod:`hotpotqa.agent` is implementation detail it composes.
+This module is the single entry point the optimizer hits per case —
+everything under :mod:`hotpotqa.agent` is implementation detail it composes.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from typing import Any
 
-from rilixai.prompt_optimization.models import PromptCandidate
+from rilixai import Case, CaseResult, OptimizationTargets, RunCase
 
 from ..agent.types import AgentToolCall, HotpotQAAgentOutput
 from ..config import HotpotQAConfig
 from ..data.dataset import HotpotQARecord
 from .feedback import build_agent_per_component_feedback
+from .metrics import ANSWER_FIELD, RETRIEVED_TITLES_KEY
 
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class HotpotQARunResult:
-    """One case's output, shaped for the rilixai field-extractor contract."""
-
-    answer: str
-    retrieved_titles: list[str]
-    run_metrics: dict[str, Any] = field(default_factory=dict)
-
-
-def build_hotpotqa_runtime(
+def build_hotpotqa_run_case(
     *,
     config: HotpotQAConfig | None = None,
     pydantic_agent: Any | None = None,
-) -> Callable[..., Awaitable[HotpotQARunResult]]:
-    """Build an async ``ExtractionRuntime`` for the HotpotQA agent.
+) -> RunCase:
+    """Build the async :data:`rilixai.RunCase` for the HotpotQA agent.
 
-    Returns a callable the rilixai adapter invokes per case. ``config``
+    Returns the callable the optimizer invokes per case. ``config``
     pins the retrieval mode + agent loop knobs; ``pydantic_agent`` is
     an optional pre-built :class:`HotpotQAPydanticAgent` (tests inject
     one with a scripted ``FunctionModel`` here).
@@ -65,7 +58,7 @@ def build_hotpotqa_runtime(
     elif pydantic_agent is None:
         if cfg.pydantic_agent_model is None:
             raise ValueError(
-                "build_hotpotqa_runtime requires either a pre-built agent or HotpotQAConfig.pydantic_agent_model."
+                "build_hotpotqa_run_case requires either a pre-built agent or HotpotQAConfig.pydantic_agent_model."
             )
         resolved_agent = HotpotQAPydanticAgent(
             model=cfg.pydantic_agent_model,
@@ -84,9 +77,10 @@ def build_hotpotqa_runtime(
             f"pydantic_agent must be a HotpotQAPydanticAgent or None, got {type(pydantic_agent).__name__}."
         )
 
-    async def _runtime(**kwargs: Any) -> HotpotQARunResult:
-        record, candidate = _unpack_runtime_inputs(kwargs)
-        resolved_agent.apply_candidate(candidate.components)
+    async def _run_case(*, case: Case, targets: OptimizationTargets, runtime: Any = None) -> CaseResult:
+        del runtime
+        record = _record_from_case(case)
+        resolved_agent.apply_candidate(targets.to_dict())
         # Reuse the mode-dispatching retrieve fn so the agent sees the
         # same retrieval corpus the runtime's ``cfg.retrieval_mode``
         # selects. Before this, ``_do_retrieve`` always searched the
@@ -100,13 +94,15 @@ def build_hotpotqa_runtime(
             retrieve_k_fn=retrieve_k_fn,
         )
         run_metrics = build_agent_run_metrics(record=record, output=output, agent_kind="pydantic", config=cfg)
-        return HotpotQARunResult(
-            answer=output.answer,
-            retrieved_titles=[p.title for p in output.retrieved_paragraphs],
+        return CaseResult(
+            output={
+                ANSWER_FIELD: output.answer,
+                RETRIEVED_TITLES_KEY: [p.title for p in output.retrieved_paragraphs],
+            },
             run_metrics=run_metrics,
         )
 
-    return _runtime
+    return _run_case
 
 
 def build_agent_run_metrics(
@@ -211,16 +207,13 @@ def _tool_call_for_agent_step(step: AgentToolCall) -> dict[str, Any]:
 # ─── Shared helpers ─────────────────────────────────────────────────────
 
 
-def _unpack_runtime_inputs(kwargs: dict[str, Any]) -> tuple[HotpotQARecord, PromptCandidate]:
-    record = kwargs.get("input")
+def _record_from_case(case: Case) -> HotpotQARecord:
+    record = case.input
     if not isinstance(record, HotpotQARecord):
-        raise TypeError(f"HotpotQA runtime expected `input` to be a HotpotQARecord, got {type(record).__name__}.")
-    candidate = kwargs.get("candidate")
-    if not isinstance(candidate, PromptCandidate):
         raise TypeError(
-            f"HotpotQA runtime expected `candidate` to be a PromptCandidate, got {type(candidate).__name__}."
+            f"HotpotQA run_case expected `case.input` to be a HotpotQARecord, got {type(record).__name__}."
         )
-    return record, candidate
+    return record
 
 
 def _truncate(text: str, max_chars: int) -> str:

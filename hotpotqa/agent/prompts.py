@@ -12,7 +12,11 @@ what handwritten prose already encodes.
 
 from __future__ import annotations
 
-from rilixai.prompt_optimization.models import PromptCandidate, seed_candidate_from_components
+from rilixai import OptimizationTargets, optimization_targets_from_prompts
+
+
+POLICY_PROMPT_COMPONENT = "policy_prompt"
+SUMMARIZE_PROMPT_COMPONENT = "summarize_prompt"
 
 
 DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT = (
@@ -24,11 +28,20 @@ DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT = (
 )
 
 
-def hotpotqa_pydantic_agent_seed_candidate() -> PromptCandidate:
-    """Agent-mode seed candidate (2 components: policy + summarize)."""
-    return seed_candidate_from_components(
+def hotpotqa_pydantic_agent_seed_targets() -> OptimizationTargets:
+    """Agent-mode seed :class:`OptimizationTargets` (2 components: policy + summarize)."""
+    return optimization_targets_from_prompts(
         {
-            "policy_prompt": DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
-            "summarize_prompt": DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
+            POLICY_PROMPT_COMPONENT: DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
+            SUMMARIZE_PROMPT_COMPONENT: DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
         }
     )
+
+
+__all__ = [
+    "DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT",
+    "DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT",
+    "POLICY_PROMPT_COMPONENT",
+    "SUMMARIZE_PROMPT_COMPONENT",
+    "hotpotqa_pydantic_agent_seed_targets",
+]

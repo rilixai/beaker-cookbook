@@ -17,7 +17,7 @@ from apex_agents.agent.agent import (
     ApexReActAgent,
 )
 from apex_agents.agent.prompts import (
-    apex_agents_seed_candidate,
+    apex_agents_seed_targets,
     load_apex_agents_seed_prompts,
 )
 from apex_agents.data.dataset import ApexAgentsRecord, RubricCriterion
@@ -105,7 +105,7 @@ def test_agent_runs_end_to_end_add_tool_read_final_answer() -> None:
         ]
     )
     agent = _build_agent(model=model, world=world)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
+    agent.apply_candidate(apex_agents_seed_targets().to_dict())
     out = asyncio.run(agent.forward(record=_record()))
 
     assert out.status == "completed"
@@ -137,7 +137,7 @@ def test_domain_tool_rejected_until_added_to_toolbelt() -> None:
         ]
     )
     agent = _build_agent(model=model, world=world)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
+    agent.apply_candidate(apex_agents_seed_targets().to_dict())
     out = asyncio.run(agent.forward(record=_record()))
     tool_outputs = [m.output for m in out.messages if m.role == "tool"]
     assert any("not in the active toolbelt" in (o or "") for o in tool_outputs)
@@ -175,7 +175,7 @@ def test_final_answer_rejected_with_open_todos() -> None:
         ]
     )
     agent = _build_agent(model=model, world=world)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
+    agent.apply_candidate(apex_agents_seed_targets().to_dict())
     out = asyncio.run(agent.forward(record=_record()))
     assert out.final_answer == "real answer"
     tool_outputs = [m.output for m in out.messages if m.role == "tool"]
@@ -206,7 +206,7 @@ def test_apply_candidate_updates_inner_agent_prompts_on_next_forward() -> None:
     agent = _build_agent(model=model, world=world)
 
     # 1. Seed prompts → first forward.
-    agent.apply_candidate(apex_agents_seed_candidate().components)
+    agent.apply_candidate(apex_agents_seed_targets().to_dict())
     asyncio.run(agent.forward(record=_record()))
     first_system = model.seen[0][0]["content"]
     assert "BRAND_NEW_SYSTEM" not in first_system
@@ -253,7 +253,7 @@ def test_task_template_substitutes_task_variable() -> None:
         [{"content": "done", "tool_calls": [_tool_call("final_answer", {"answer": "x"})], "cost": 0.0}]
     )
     agent = _build_agent(model=model, world=world)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
+    agent.apply_candidate(apex_agents_seed_targets().to_dict())
     asyncio.run(agent.forward(record=_record()))
     user_msg = model.seen[0][1]["content"]
     # Seed task_template is "{{task}}" → user message == raw task prompt.
@@ -291,7 +291,7 @@ def test_resum_triggers_and_keeps_recent_messages() -> None:
         world_factory=lambda _r: world,
         model_factory=lambda _n, _t: model,
     )
-    agent.apply_candidate(apex_agents_seed_candidate().components)
+    agent.apply_candidate(apex_agents_seed_targets().to_dict())
     out = asyncio.run(agent.forward(record=_record()))
 
     assert out.resum_count >= 1, "ReSum never fired despite a tiny context budget"
@@ -311,7 +311,7 @@ def test_model_failure_surfaces_as_error_status() -> None:
             raise RuntimeError("simulated outage")
 
     agent = _build_agent(model=_BrokenModel(), world=world)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
+    agent.apply_candidate(apex_agents_seed_targets().to_dict())
     out = asyncio.run(agent.forward(record=_record()))
     assert out.status == "RuntimeError"
     assert out.final_answer == ""
@@ -350,7 +350,7 @@ def test_world_factory_runs_off_the_event_loop() -> None:
         world_factory=_factory,
         model_factory=lambda _n, _t: model,
     )
-    agent.apply_candidate(apex_agents_seed_candidate().components)
+    agent.apply_candidate(apex_agents_seed_targets().to_dict())
     out = asyncio.run(agent.forward(record=_record()))
     assert constructed_thread_ids, "world factory was never invoked"
     assert out.final_answer == "ok"
@@ -447,7 +447,7 @@ def test_todo_status_synonym_closes_the_final_answer_gate() -> None:
         ]
     )
     agent = _build_agent(model=model, world=world, max_steps=10)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
+    agent.apply_candidate(apex_agents_seed_targets().to_dict())
     out = asyncio.run(agent.forward(record=_record()))
     assert out.status == "completed"
     assert out.final_answer == "EV is $42"
@@ -477,7 +477,7 @@ def test_final_answer_livelock_guard_terminates_with_answer() -> None:
     ]
     model = _ScriptedModel(script)
     agent = _build_agent(model=model, world=world, max_steps=40)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
+    agent.apply_candidate(apex_agents_seed_targets().to_dict())
     out = asyncio.run(agent.forward(record=_record()))
     assert out.final_answer == "forced answer"
     assert out.extra.get("forced_final_answer") is True
@@ -557,7 +557,7 @@ def test_timeout_exception_fails_case_fast_not_hang() -> None:
             raise TimeoutError("litellm request timed out")
 
     agent = _build_agent(model=_TimeoutModel(), world=world)
-    agent.apply_candidate(apex_agents_seed_candidate().components)
+    agent.apply_candidate(apex_agents_seed_targets().to_dict())
     out = asyncio.run(agent.forward(record=_record()))
     assert out.status == "TimeoutError"
     assert "timed out" in str(out.extra.get("error", ""))

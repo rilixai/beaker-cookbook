@@ -27,19 +27,25 @@ export GOOGLE_API_KEY=...       # judge (gemini-2.5-flash default)
 
 ## Run locally
 
-```bash
-# Optimize on a small Law slice
-uv run python -m apex_agents.cli optimize \
-    --domain law --train-size 25 --val-size 20 --val-worlds 2 \
-    --max-metric-calls 100 --output-dir apex_agents_results/smoke
+This recipe depends on the lightweight `rilixai` SDK only. The local CLI
+covers the two SDK-only paths — `validate` (offline structural check) and
+`evaluate` (score one candidate via the SDK `run_case` + scorer loop). The
+full GEPA optimize loop runs server-side via `rilixai run` (see the Modal
+section below); the optimizer engine lives in the optional `rilixai-runtime`
+package, not in this recipe.
 
-# Evaluate (omit --candidate-json to score the seed prompts)
+```bash
+# Validate the spec structure offline (no network, no dataset download)
+uv run python -m apex_agents.cli validate --domain law
+
+# Evaluate one candidate (omit --candidate-json to score the seed prompts)
 uv run python -m apex_agents.cli evaluate \
-    --domain law --candidate-json apex_agents_results/smoke/best_candidate.json
+    --domain law --candidate-json path/to/candidate.json
 ```
 
-`--val-worlds` holds out whole worlds for validation so GEPA selects for
-cross-world transfer, not in-world fit. See `--help` for all flags.
+`--val-worlds` holds out whole worlds when `--split validation` builds the
+fixed val pool, so an evaluated candidate is scored for cross-world transfer
+rather than in-world fit. See `--help` for all flags.
 
 ## Run on Modal (rilixai sandbox)
 

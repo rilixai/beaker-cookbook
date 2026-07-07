@@ -20,10 +20,10 @@ from hotpotqa.agent.agent import (
     PYDANTIC_AGENT_SUMMARIZE_COMPONENT,
     HotpotQAPydanticAgent,
 )
-from hotpotqa.agent.prompts import hotpotqa_pydantic_agent_seed_candidate
+from hotpotqa.agent.prompts import hotpotqa_pydantic_agent_seed_targets
 from hotpotqa.config import HotpotQAConfig
 from hotpotqa.data.dataset import HotpotQAParagraph, HotpotQARecord
-from hotpotqa.optimization.runtime import build_hotpotqa_runtime
+from hotpotqa.optimization.runtime import build_hotpotqa_run_case
 
 
 def _record() -> HotpotQARecord:
@@ -136,7 +136,7 @@ def _build_agent(*, summarize_llm_call: object | None = None) -> tuple[HotpotQAP
 def test_agent_runs_end_to_end_with_two_tools_and_structured_output() -> None:
     record = _record()
     agent, _calls = _build_agent()
-    agent.apply_candidate(hotpotqa_pydantic_agent_seed_candidate().components)
+    agent.apply_candidate(hotpotqa_pydantic_agent_seed_targets().to_dict())
 
     output = asyncio.run(
         agent.forward(
@@ -276,7 +276,7 @@ def test_apply_candidate_updates_llm_visible_policy_prompt_end_to_end() -> None:
     )
 
     # 1. Forward with the seed candidate — model should see the seed system prompt.
-    agent.apply_candidate(hotpotqa_pydantic_agent_seed_candidate().components)
+    agent.apply_candidate(hotpotqa_pydantic_agent_seed_targets().to_dict())
     asyncio.run(
         agent.forward(
             question=record.question,
@@ -480,24 +480,21 @@ def test_agent_runtime_dispatches_retrieval_by_cfg_mode() -> None:
     assert all(p.title in {"Eiffel Tower", "Paris", "Berlin"} for p in deps_legacy.retrieved)
 
 
-def test_load_candidate_uses_mode_specific_seed_when_no_path_given() -> None:
-    """Default-seed selection must match the runtime's expected component vocabulary.
+def test_load_targets_uses_agent_seed_when_no_path_given() -> None:
+    """Default seed targets must match the runtime's expected component vocabulary.
 
-    Regression: ``_load_candidate(None)`` previously returned the
-    workflow seed unconditionally. The agent's runtime calls
+    ``_load_targets(None)`` returns the agent seed
+    :class:`~rilixai.OptimizationTargets`. The agent's runtime calls
     ``apply_candidate`` looking for ``policy_prompt`` /
-    ``summarize_prompt`` — workflow keys (``summarize1_prompt`` etc.)
-    are silently ignored, so the agent stayed at hardcoded fallback
-    strings. The fallbacks happened to be byte-identical to the
-    agent's actual seed values, so results were correct by accident.
-    This test pins the contract so any future drift in either seed
-    constant doesn't silently break agent evaluate-without-candidate
-    runs.
+    ``summarize_prompt``; any other keys are silently ignored, so the
+    agent would stay at hardcoded fallback strings. This test pins the
+    contract so any future drift in either seed constant doesn't
+    silently break agent evaluate-without-candidate runs.
     """
-    from hotpotqa.cli import _load_candidate
+    from hotpotqa.cli import _load_targets
 
-    default = _load_candidate(None)
-    assert set(default.components.keys()) == {"policy_prompt", "summarize_prompt"}
+    default = _load_targets(None)
+    assert set(default.prompts.keys()) == {"policy_prompt", "summarize_prompt"}
 
 
 def test_runtime_requires_explicit_pydantic_agent_or_model() -> None:
@@ -505,7 +502,7 @@ def test_runtime_requires_explicit_pydantic_agent_or_model() -> None:
     config, construction must fail loudly.
     """
     with pytest.raises(ValueError, match="pydantic_agent_model"):
-        build_hotpotqa_runtime(
+        build_hotpotqa_run_case(
             config=HotpotQAConfig(
                 retrieval_mode="distractor",
                 retrieve_k=1,

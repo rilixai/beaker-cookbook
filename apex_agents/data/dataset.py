@@ -30,7 +30,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from rilixai.prompt_optimization.models import Case
+from rilixai import Case, CaseDataLoader, DatasetRowContext, DatasetSchema
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,36 @@ DEFAULT_DOMAIN = "Investment Banking"
 APEX_AGENTS_HF_REPO = "mercor/apex-agents"
 _TASKS_FILE = "tasks_and_rubrics.json"
 _WORLDS_FILE = "world_descriptions.json"
+
+
+# Dataset row schema for the ``mercor/apex-agents`` task objects. Declared
+# on :class:`ApexAgentsDataLoader` so rilixai's upload surfaces can
+# validate JSONL rows before a hosted run. Each row is one HF task dict.
+APEX_AGENTS_DATASET_SCHEMA = DatasetSchema(
+    json_schema={
+        "type": "object",
+        "required": ["task_id", "prompt", "world_id", "rubric"],
+        "properties": {
+            "task_id": {"type": "string", "minLength": 1},
+            "task_name": {"type": "string"},
+            "domain": {"type": "string"},
+            "prompt": {"type": "string"},
+            "world_id": {"type": "string"},
+            "task_input_files": {"type": "array", "items": {"type": "string"}},
+            "rubric": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "verifier_id": {"type": "string"},
+                        "criteria": {"type": "string"},
+                    },
+                },
+            },
+        },
+        "additionalProperties": True,
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -346,6 +376,26 @@ def load_apex_agents_cases(
     return cases_from_records(records)
 
 
+class ApexAgentsDataLoader(CaseDataLoader[ApexAgentsRecord]):
+    """Typed rilixai data loader over the ``mercor/apex-agents`` task rows.
+
+    Maps each raw HF task dict to a normalized :class:`ApexAgentsRecord`
+    (``parse_row``) and emits exactly one :class:`Case` per record
+    (``iter_cases``). The rubric + prompt + world/task ids are bundled
+    onto the case's ground truth so the runtime's LLM judge and the
+    per-component feedback have everything they need after the agent runs.
+    """
+
+    dataset_schema = APEX_AGENTS_DATASET_SCHEMA
+
+    def parse_row(self, raw: Mapping[str, Any], context: DatasetRowContext) -> ApexAgentsRecord:
+        return _normalize_record(raw, index_hint=context.line_number or 0)
+
+    def iter_cases(self, row: ApexAgentsRecord, context: DatasetRowContext) -> Iterable[Case]:
+        del context
+        yield record_to_case(row)
+
+
 def world_ids_for_cases(cases: Iterable[Case]) -> list[str]:
     """Return the sorted distinct ``world_id`` group keys across cases."""
     seen: set[str] = set()
@@ -357,8 +407,10 @@ def world_ids_for_cases(cases: Iterable[Case]) -> list[str]:
 
 
 __all__ = [
+    "APEX_AGENTS_DATASET_SCHEMA",
     "APEX_AGENTS_HF_REPO",
     "DEFAULT_DOMAIN",
+    "ApexAgentsDataLoader",
     "ApexAgentsRecord",
     "RubricCriterion",
     "_APEX_AGENTS_GROUND_TRUTH_KEY",
