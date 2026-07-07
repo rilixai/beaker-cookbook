@@ -315,6 +315,25 @@ def test_apply_candidate_updates_llm_visible_policy_prompt_end_to_end() -> None:
     assert agent._agent is inner_before, "apply_candidate must not rebuild when policy_prompt is unchanged"  # noqa: SLF001
 
 
+def test_agent_defers_inner_build_until_first_use() -> None:
+    """Constructing the agent must not build the pydantic-ai Agent eagerly.
+
+    Building it from a model *string* instantiates the provider client (e.g.
+    ``AsyncOpenAI()``), which raises without ``OPENAI_API_KEY``. Deferring the
+    build keeps spec construction — and the offline ``cli.py validate`` path,
+    which builds a spec but never runs a case — network- and key-free.
+    """
+    agent = HotpotQAPydanticAgent(
+        model="openai:gpt-4.1-mini",
+        top_k=2,
+        max_iters=4,
+    )
+    assert agent._agent is None  # noqa: SLF001 — asserting the lazy-build invariant
+    # Applying the seed candidate (unchanged policy) must not force a build.
+    agent.apply_candidate(hotpotqa_pydantic_agent_seed_targets().to_dict())
+    assert agent._agent is None  # noqa: SLF001
+
+
 def test_summarize_feedback_reads_pydantic_ai_tool_arg_names() -> None:
     """``_format_summarize_call`` must read tool args by their parameter names.
 

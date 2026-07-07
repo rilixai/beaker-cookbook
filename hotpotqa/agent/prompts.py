@@ -14,9 +14,15 @@ from __future__ import annotations
 
 from rilixai import OptimizationTargets, optimization_targets_from_prompts
 
+from .types import POLICY_COMPONENT, SUMMARIZE_COMPONENT
 
-POLICY_PROMPT_COMPONENT = "policy_prompt"
-SUMMARIZE_PROMPT_COMPONENT = "summarize_prompt"
+
+# Re-export the canonical component names defined in ``types.py`` under the
+# legacy ``*_PROMPT_COMPONENT`` spellings kept for external importers. The
+# constants themselves live in ``types.py`` (single source of truth) so the
+# two names can't drift out of sync.
+POLICY_PROMPT_COMPONENT = POLICY_COMPONENT
+SUMMARIZE_PROMPT_COMPONENT = SUMMARIZE_COMPONENT
 
 
 DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT = (

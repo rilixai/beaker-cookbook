@@ -152,7 +152,6 @@ def promote_image(version: str) -> None:
         "spec",
         "promote",
         SPEC_NAME,
-        "--version",
         version,
     ]
     print(f"\n→ {' '.join(cmd)}\n", flush=True)

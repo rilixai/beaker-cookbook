@@ -95,6 +95,12 @@ def build_apex_agents_run_case(
         resolved_agent.apply_candidate(targets.to_dict())
         output = await resolved_agent.forward(record=record)
         rubric_payload = [{"verifier_id": c.verifier_id, "criteria": c.criteria} for c in record.rubric]
+        # A rubric with no non-blank criteria is unscoreable. Signal that to
+        # the scorer with ``None`` (rather than a real ``0.0``) so it can omit
+        # the field and keep the case out of the aggregate ``rubric_pass_rate``
+        # — matching the pre-migration metrics layer, which excluded
+        # rubric-less cases so they couldn't deflate the benchmark score.
+        has_scoreable_criteria = any(str(c.get("criteria") or "").strip() for c in rubric_payload)
         rubric_pass_rate = await asyncio.to_thread(
             score_rubric,
             rubric=rubric_payload,
@@ -110,7 +116,7 @@ def build_apex_agents_run_case(
         )
         return CaseResult(
             output={
-                RUBRIC_FIELD: rubric_pass_rate,
+                RUBRIC_FIELD: rubric_pass_rate if has_scoreable_criteria else None,
                 "final_answer": output.final_answer,
             },
             run_metrics=run_metrics,

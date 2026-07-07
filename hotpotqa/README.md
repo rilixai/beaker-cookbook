@@ -71,7 +71,7 @@ To trigger from code, or to tune knobs (`max_metric_calls`, `retrieval_mode`,
 `train_size`, models, …), call `client.create_optimization_run(...)` — the
 run config keys are documented in `_DEFAULT_SANDBOX_CONFIG` at the top of
 `hotpotqa/optimization/spec.py`. Roll back with
-`uv run rilixai spec promote hotpotqa-agent --version <older-sha>`.
+`uv run rilixai spec promote hotpotqa-agent v<older-sha>`.
 
 CI (`.github/workflows/push-spec.yml`) runs `sandbox.py --build --no-trigger`
 on every merge to `main` that touches `hotpotqa/`: it ships the image and

@@ -243,6 +243,14 @@ class ApexAgentsScorer:
     async def score_case(self, *, case: Case, result: CaseResult) -> CaseScore:
         del case
         output = result.output if isinstance(result.output, Mapping) else {}
+        if RUBRIC_FIELD in output and output[RUBRIC_FIELD] is None:
+            # An explicit ``None`` marks an unscoreable case (empty/blank
+            # rubric): omit the field entirely so it is excluded from the
+            # aggregate ``rubric_pass_rate`` accuracy (per the SDK ``CaseScore``
+            # contract) instead of counting as a real ``0.0`` and deflating the
+            # benchmark metric. A *missing* key is a malformed result and still
+            # coerces to a conservative ``0.0`` below.
+            return CaseScore(field_scores={}, objective=0.0, key=RUBRIC_FIELD)
         rate = _coerce_pass_rate(output.get(RUBRIC_FIELD))
         field_scores = {RUBRIC_FIELD: rate}
         return CaseScore(

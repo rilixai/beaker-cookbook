@@ -68,7 +68,7 @@ To trigger from code, or to tune knobs (`max_metric_calls`, `domain`,
 `train_size`, models, …), call `client.create_optimization_run(...)` — the
 run config keys are documented in `_DEFAULT_SANDBOX_CONFIG` at the top of
 `apex_agents/optimization/spec.py`. Roll back with
-`uv run rilixai spec promote apex-agents --version <older-sha>`.
+`uv run rilixai spec promote apex-agents v<older-sha>`.
 
 ## Tests
 

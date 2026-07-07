@@ -242,7 +242,18 @@ def _load_targets(path: Path | None) -> OptimizationTargets:
         prompts = raw
     if not isinstance(prompts, dict):
         raise ValueError(f"Candidate JSON at {path} must be an object of prompt name → text.")
-    return optimization_targets_from_prompts({str(k): str(v) for k, v in prompts.items()})
+    parsed = {str(k): str(v) for k, v in prompts.items()}
+    # Guard against a mis-shaped/typo'd file being read as a bare name→text map:
+    # ``apply_candidate`` silently ignores unknown component names, so without
+    # this a candidate whose keys match nothing would evaluate the *seed*
+    # prompts and report that score as the candidate's.
+    known = set(apex_agents_seed_targets().to_dict())
+    if not (parsed.keys() & known):
+        raise ValueError(
+            f"Candidate JSON at {path} has no recognized prompt components "
+            f"(expected any of {sorted(known)}, got {sorted(parsed)})."
+        )
+    return optimization_targets_from_prompts(parsed)
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -299,6 +310,7 @@ def _run_evaluate(args: argparse.Namespace) -> int:
     summary = {
         "split": args.split,
         "num_cases": report.num_cases,
+        "num_errored": report.num_errored,
         "objective": report.objective,
         "field_accuracies": report.field_accuracies,
         "field_sample_counts": report.field_sample_counts,

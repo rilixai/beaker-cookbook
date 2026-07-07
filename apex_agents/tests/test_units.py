@@ -376,6 +376,109 @@ def test_run_case_scored_by_scorer_yields_objective() -> None:
     assert score.objective == 0.75
 
 
+def test_scorer_excludes_unscoreable_case_from_field_accuracy() -> None:
+    """A ``None`` ``rubric_pass_rate`` (empty rubric) is omitted, not scored 0.
+
+    The pre-migration metrics layer skipped rubric-less cases so they could
+    not deflate the benchmark; the SDK ``CaseScore`` contract expresses that by
+    omitting the field. A real ``0.0`` (all criteria failed) must still count.
+    """
+    scorer = ApexAgentsScorer()
+    unscoreable = asyncio.run(
+        scorer.score_case(case=record_to_case(_pipeline_record()), result=CaseResult(output={RUBRIC_FIELD: None}))
+    )
+    assert unscoreable.field_scores == {}
+    genuine_zero = asyncio.run(
+        scorer.score_case(case=record_to_case(_pipeline_record()), result=CaseResult(output={RUBRIC_FIELD: 0.0}))
+    )
+    assert genuine_zero.field_scores == {RUBRIC_FIELD: 0.0}
+
+
+def test_run_case_signals_unscoreable_for_empty_rubric() -> None:
+    """A record with no rubric criteria yields ``rubric_pass_rate=None``."""
+    from apex_agents.agent.agent import ApexReActAgent
+    from apex_agents.agent.prompts import load_apex_agents_seed_prompts
+    from apex_agents.optimization.runtime import build_apex_agents_run_case
+
+    sys_p, task_t, resum_p = load_apex_agents_seed_prompts()
+    agent = ApexReActAgent(
+        model_name="scripted/test",
+        default_system_prompt=sys_p,
+        default_task_template=task_t,
+        default_resum_summary_prompt=resum_p,
+        world_factory=lambda _r: FakeWorld({}),
+        model_factory=lambda _n, _t: _scripted_model(),
+    )
+
+    def _judge_must_not_fire(*_args: Any) -> bool:
+        raise AssertionError("judge should not run on an unscoreable (empty-rubric) case result")
+
+    record = ApexAgentsRecord(
+        task_id="ib-empty",
+        task_name="memo",
+        domain="Investment Banking",
+        prompt="State the EV.",
+        world_id="world-a",
+        rubric=(),
+        task_input_files=(),
+        raw_task={"task_id": "ib-empty"},
+    )
+    run_case = build_apex_agents_run_case(config=ApexAgentsConfig(), agent=agent, judge=_judge_must_not_fire)
+    result = asyncio.run(run_case(case=record_to_case(record), targets=apex_agents_seed_targets(), runtime=None))
+    assert result.output[RUBRIC_FIELD] is None
+
+
+def test_local_eval_contains_per_case_errors() -> None:
+    """One case raising must score 0 (not abort the batch or drop results).
+
+    Mirrors the pre-migration contract: an errored case contributes zero to the
+    objective and every field accuracy so a single failure can't inflate — or
+    silently discard — the run.
+    """
+    from types import SimpleNamespace
+
+    from rilixai import CaseScore
+
+    from apex_agents.optimization.local_eval import evaluate_targets_on_cases
+
+    good = record_to_case(_pipeline_record())
+    bad = record_to_case(
+        ApexAgentsRecord(
+            task_id="ib-bad",
+            task_name="memo",
+            domain="Investment Banking",
+            prompt="State the EV.",
+            world_id="world-b",
+            rubric=(RubricCriterion("output_llm", "States an EV."),),
+            task_input_files=(),
+            raw_task={"task_id": "ib-bad"},
+        )
+    )
+
+    async def _run_case(*, case: Case, targets: Any, runtime: Any = None) -> CaseResult:
+        if case.case_id == "ib-bad":
+            raise RuntimeError("boom")
+        return CaseResult(output={RUBRIC_FIELD: 1.0})
+
+    class _Scorer:
+        async def score_case(self, *, case: Case, result: CaseResult) -> CaseScore:
+            return CaseScore(field_scores={RUBRIC_FIELD: 1.0}, objective=1.0, key=RUBRIC_FIELD)
+
+    spec = SimpleNamespace(run_case=_run_case, scorer=_Scorer())
+    report = asyncio.run(
+        evaluate_targets_on_cases(spec=spec, targets=apex_agents_seed_targets(), cases=[good, bad], max_concurrency=2)
+    )
+    assert report.num_cases == 2
+    assert report.num_errored == 1
+    # Errored case scored 0 on the objective and the rubric field: mean = 0.5.
+    assert report.objective == 0.5
+    assert report.field_accuracies[RUBRIC_FIELD] == 0.5
+    assert report.field_sample_counts[RUBRIC_FIELD] == 2
+    errored = next(c for c in report.per_case if c["case_id"] == "ib-bad")
+    assert errored["objective"] == 0.0
+    assert "RuntimeError: boom" in errored["error"]
+
+
 def test_run_case_requires_agent_or_world_factory() -> None:
     from apex_agents.optimization.runtime import build_apex_agents_run_case
 
