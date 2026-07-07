@@ -349,6 +349,24 @@ def test_run_case_emits_per_component_feedback_and_scores_with_stub_judge() -> N
     assert aa["rubric_pass_rate"] == 1.0
 
 
+def test_load_targets_accepts_prompts_components_and_flat_shapes(tmp_path: Path) -> None:
+    """`--candidate-json` must parse all three on-disk candidate shapes.
+
+    A legacy optimizer artifact wraps prompts under ``components`` (the
+    pre-migration ``PromptCandidate`` shape); the new SDK wire shape uses
+    ``prompts``; a bare ``{name: text}`` map is also accepted. All three must
+    round-trip to the same targets — silently mis-parsing the legacy shape
+    would score the wrong candidate with no error.
+    """
+    from apex_agents.cli import _load_targets
+
+    expected = {"system_prompt": "S", "task_template": "T", "resum_summary_prompt": "R"}
+    for payload in ({"prompts": expected}, {"components": expected}, expected):
+        p = tmp_path / "cand.json"
+        p.write_text(json.dumps(payload))
+        assert _load_targets(p).to_dict() == expected
+
+
 def test_run_case_scored_by_scorer_yields_objective() -> None:
     """The scorer reads ``rubric_pass_rate`` off the run_case result output."""
     scorer = ApexAgentsScorer()

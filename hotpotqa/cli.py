@@ -177,9 +177,15 @@ def _load_targets(path: Path | None) -> OptimizationTargets:
     if path is None:
         return hotpotqa_pydantic_agent_seed_targets()
     raw = json.loads(path.read_text())
-    # Accept either the ``OptimizationTargets`` wire shape (``{"prompts": {...}}``)
-    # or a bare ``{name: text}`` mapping.
-    prompts = raw.get("prompts") if isinstance(raw, dict) and "prompts" in raw else raw
+    # Accept the ``OptimizationTargets`` wire shape (``{"prompts": {...}}``), the
+    # legacy ``PromptCandidate`` shape (``{"components": {...}}``) written by the
+    # pre-migration optimizer, or a bare ``{name: text}`` mapping.
+    if isinstance(raw, dict) and "prompts" in raw:
+        prompts = raw["prompts"]
+    elif isinstance(raw, dict) and "components" in raw:
+        prompts = raw["components"]
+    else:
+        prompts = raw
     if not isinstance(prompts, dict):
         raise ValueError(f"Candidate JSON at {path} must be an object of prompt name → text.")
     return optimization_targets_from_prompts({str(k): str(v) for k, v in prompts.items()})

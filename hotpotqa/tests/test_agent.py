@@ -497,6 +497,28 @@ def test_load_targets_uses_agent_seed_when_no_path_given() -> None:
     assert set(default.prompts.keys()) == {"policy_prompt", "summarize_prompt"}
 
 
+def test_load_targets_accepts_prompts_components_and_flat_shapes(tmp_path: object) -> None:
+    """`--candidate-json` must parse all three on-disk candidate shapes.
+
+    A legacy optimizer artifact wraps prompts under ``components`` (the
+    pre-migration ``PromptCandidate`` shape); the new SDK wire shape uses
+    ``prompts``; a bare ``{name: text}`` map is also accepted. All three must
+    round-trip to the same targets — silently mis-parsing the legacy shape
+    would score the wrong candidate with no error.
+    """
+    import json
+    from pathlib import Path
+
+    from hotpotqa.cli import _load_targets
+
+    base = Path(str(tmp_path))
+    expected = {"policy_prompt": "P", "summarize_prompt": "S"}
+    for payload in ({"prompts": expected}, {"components": expected}, expected):
+        p = base / "cand.json"
+        p.write_text(json.dumps(payload))
+        assert _load_targets(p).to_dict() == expected
+
+
 def test_runtime_requires_explicit_pydantic_agent_or_model() -> None:
     """If the runtime gets neither an agent instance nor a model string in the
     config, construction must fail loudly.
