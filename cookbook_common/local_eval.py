@@ -37,6 +37,7 @@ class LocalEvalReport:
     field_sample_counts: dict[str, int]
     per_case: list[dict[str, Any]] = field(default_factory=list)
     num_errored: int = 0
+    num_unscoreable: int = 0
 
 
 async def evaluate_targets_on_cases(
@@ -80,13 +81,21 @@ async def evaluate_targets_on_cases(
             field_names.update(score.field_scores)
 
     objective_total = 0.0
+    # Denominator for the objective mean. An errored case counts as 0 (a real
+    # failure must deflate, never inflate). A successful-but-unscoreable case
+    # (empty ``field_scores`` — e.g. an empty rubric) is excluded entirely, the
+    # same way it is dropped from the field accuracies: it is not measurable, so
+    # it must not drag the objective below field_accuracies.
+    objective_count = 0
     field_totals: dict[str, float] = dict.fromkeys(field_names, 0.0)
     field_counts: dict[str, int] = dict.fromkeys(field_names, 0)
     per_case: list[dict[str, Any]] = []
     num_errored = 0
+    num_unscoreable = 0
     for case, score, err in results:
         if err is not None:
             num_errored += 1
+            objective_count += 1  # denominator grows, total stays 0
             for name in field_names:
                 field_counts[name] += 1  # denominator grows, total stays 0
             per_case.append(
@@ -99,7 +108,22 @@ async def evaluate_targets_on_cases(
                 }
             )
             continue
+        if not score.field_scores:
+            # Nothing was scoreable (e.g. empty rubric): omit from both the
+            # objective mean and the field accuracies, matching the #5 fix.
+            num_unscoreable += 1
+            per_case.append(
+                {
+                    "case_id": case.case_id,
+                    "group_key": case.group_key,
+                    "objective": float(score.objective),
+                    "field_scores": {},
+                    "unscoreable": True,
+                }
+            )
+            continue
         objective_total += float(score.objective)
+        objective_count += 1
         for name, value in score.field_scores.items():
             field_totals[name] = field_totals.get(name, 0.0) + float(value)
             field_counts[name] = field_counts.get(name, 0) + 1
@@ -116,11 +140,12 @@ async def evaluate_targets_on_cases(
     field_accuracies = {name: field_totals[name] / field_counts[name] for name in field_totals if field_counts[name]}
     return LocalEvalReport(
         num_cases=num_cases,
-        objective=(objective_total / num_cases) if num_cases else 0.0,
+        objective=(objective_total / objective_count) if objective_count else 0.0,
         field_accuracies=field_accuracies,
         field_sample_counts=dict(field_counts),
         per_case=per_case,
         num_errored=num_errored,
+        num_unscoreable=num_unscoreable,
     )
 
 

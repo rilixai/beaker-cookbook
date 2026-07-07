@@ -69,6 +69,13 @@ testpaths = ["hotpotqa/tests", "apex_agents/tests"]
 # the "module already imported under a different __file__" collision
 # that pytest's default ``prepend`` mode raises.
 addopts = "--import-mode=importlib"
+# Put the repo root on ``sys.path`` so the workspace members
+# (``hotpotqa`` / ``apex_agents`` / ``cookbook_common``) import as
+# top-level packages regardless of how pytest is launched. The uv
+# editable installs remap each member dir onto its import name, which
+# resolves under ``python -m`` (cwd on path) but not the bare
+# ``pytest`` console script; this makes discovery deterministic.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 119

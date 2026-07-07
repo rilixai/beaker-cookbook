@@ -76,6 +76,7 @@ def eval_summary(report: LocalEvalReport, *, split: str) -> dict[str, Any]:
         "split": split,
         "num_cases": report.num_cases,
         "num_errored": report.num_errored,
+        "num_unscoreable": report.num_unscoreable,
         "objective": report.objective,
         "field_accuracies": report.field_accuracies,
         "field_sample_counts": report.field_sample_counts,

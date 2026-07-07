@@ -504,6 +504,59 @@ def test_local_eval_contains_per_case_errors() -> None:
     assert "RuntimeError: boom" in errored["error"]
 
 
+def test_local_eval_unscoreable_case_does_not_deflate_objective() -> None:
+    """An unscoreable (empty-rubric) case must not drag the objective mean.
+
+    The scorer omits every field for a rubric-less case (see the #5 fix), so
+    such a case is not measurable. It must be excluded from BOTH the field
+    accuracies and the objective mean — otherwise its ``objective=0`` would pull
+    the reported objective below ``field_accuracies``.
+    """
+    from types import SimpleNamespace
+
+    from rilixai import CaseScore
+
+    from apex_agents.optimization.local_eval import evaluate_targets_on_cases
+
+    good = record_to_case(_pipeline_record())
+    empty = record_to_case(
+        ApexAgentsRecord(
+            task_id="ib-empty",
+            task_name="memo",
+            domain="Investment Banking",
+            prompt="State the EV.",
+            world_id="world-c",
+            rubric=(),
+            task_input_files=(),
+            raw_task={"task_id": "ib-empty"},
+        )
+    )
+
+    async def _run_case(*, case: Case, targets: Any, runtime: Any = None) -> CaseResult:
+        return CaseResult(output={RUBRIC_FIELD: None if case.case_id == "ib-empty" else 1.0})
+
+    class _Scorer:
+        async def score_case(self, *, case: Case, result: CaseResult) -> CaseScore:
+            if result.output[RUBRIC_FIELD] is None:
+                # Unscoreable: no field, objective 0 (mirrors ApexAgentsScorer).
+                return CaseScore(field_scores={}, objective=0.0, key=RUBRIC_FIELD)
+            return CaseScore(field_scores={RUBRIC_FIELD: 1.0}, objective=1.0, key=RUBRIC_FIELD)
+
+    spec = SimpleNamespace(run_case=_run_case, scorer=_Scorer())
+    report = asyncio.run(
+        evaluate_targets_on_cases(
+            spec=spec, targets=apex_agents_seed_targets(), cases=[good, empty], max_concurrency=2
+        )
+    )
+    assert report.num_cases == 2
+    assert report.num_unscoreable == 1
+    assert report.num_errored == 0
+    # Only the scoreable case counts: objective == field accuracy == 1.0.
+    assert report.objective == 1.0
+    assert report.field_accuracies[RUBRIC_FIELD] == 1.0
+    assert report.field_sample_counts[RUBRIC_FIELD] == 1
+
+
 def test_run_case_requires_agent_or_world_factory() -> None:
     from apex_agents.optimization.runtime import build_apex_agents_run_case
 
