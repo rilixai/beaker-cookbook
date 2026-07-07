@@ -51,23 +51,39 @@ rather than in-world fit. See `--help` for all flags.
 
 `optimization/spec.py` registers a `@spec(name="apex-agents")` factory that
 rilixai's sandbox runs. `sandbox.py` builds the image, promotes it to
-`apex-agents@production`, and triggers a run in one shot:
+`apex-agents@production`, and triggers a run in one shot.
+
+**A dataset upload is required.** The migrated spec no longer loads data
+itself — the optimizer reads its cases from an uploaded JSONL dataset via
+`ApexAgentsDataLoader` (see `ApexAgentsDataLoader.dataset_schema` in
+`apex_agents/data/dataset.py`). A run triggered with no dataset reference is
+rejected at startup. Which domain subset (`law` / `investment_banking`) a run
+optimizes over is decided by which cases you export into the uploaded dataset —
+not a per-trigger flag. Upload once, then trigger:
 
 ```bash
 export RILIXAI_API_KEY=sk-...
 export RILIXAI_API_BASE_URL=https://<id>.execute-api.<region>.amazonaws.com/prod/
 
+# One-time (or when the data changes): upload the JSONL split as a dataset.
+uv run rilixai dataset upload --name apex-agents-dataset path/to/jsonl-dir/
+
 uv run apex_agents/sandbox.py --build   # build + promote + trigger
 uv run apex_agents/sandbox.py           # trigger only (current @production)
 ```
 
+The trigger defaults to `--dataset apex-agents-dataset@production` and
+`--spec apex-agents@production`; override either to pin a specific revision.
+
 Provider keys (`OPENAI_API_KEY`, `GOOGLE_API_KEY`) and `HF_TOKEN` are bound
 as project-level secrets on rilixai's side, injected into each sandbox.
 
-To trigger from code, or to tune knobs (`max_metric_calls`, `domain`,
-`train_size`, models, …), call `client.create_optimization_run(...)` — the
-run config keys are documented in `_DEFAULT_SANDBOX_CONFIG` at the top of
-`apex_agents/optimization/spec.py`. Roll back with
+To trigger from code, or to tune the agent knobs (`max_metric_calls`, models,
+…), call `client.create_optimization_run(...)` with a `dataset_ref` — the run
+config keys are documented in `_DEFAULT_SANDBOX_CONFIG` at the top of
+`apex_agents/optimization/spec.py`. The domain subset and train/val split come
+from the uploaded dataset, so there are no `domain`/`train_size`/`val_size`/
+`val_worlds` knobs. Roll back with
 `uv run rilixai spec promote apex-agents v<older-sha>`.
 
 ## Tests

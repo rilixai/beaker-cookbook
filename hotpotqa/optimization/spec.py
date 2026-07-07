@@ -69,7 +69,6 @@ _DEFAULT_SANDBOX_CONFIG: dict[str, Any] = {
     "max_iters": 8,
     "pydantic_agent_model": "openai:gpt-4.1-mini",
     "task_temperature": 0.0,
-    "max_concurrency": 4,
 }
 
 

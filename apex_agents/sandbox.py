@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tomllib
@@ -73,6 +74,14 @@ SPEC_NAME = "apex-agents"
 SCOPE_KEY = "apex-agents"
 TASK_TYPE = "apex_agent"
 DEFAULT_SPEC_REFERENCE = f"{SPEC_NAME}@production"
+# The migrated spec no longer self-loads data: the optimizer sources cases from
+# an uploaded JSONL dataset via ``ApexAgentsDataLoader``. Every run therefore
+# needs a dataset reference or the server rejects it at startup ("Optimization
+# run requires a dataset input artifact"). Upload one first with
+# ``rilixai dataset upload --name apex-agents-dataset <jsonl-dir>``; this is the
+# reference the trigger passes by default. The domain subset is chosen at upload
+# time (which cases you export), not per-trigger.
+DEFAULT_DATASET_REFERENCE = f"{SPEC_NAME}-dataset@production"
 
 
 def _short_sha() -> str:
@@ -95,6 +104,20 @@ def _short_sha() -> str:
     return result.stdout.strip() or "dev"
 
 
+# Requirements the sandbox image already provides without an index install:
+# ``rilixai`` (baked in by the build worker) and ``cookbook-common`` (a
+# workspace member installed by the bundle-root ``pip install /spec``). Both
+# are matched by normalized distribution name (``_`` / ``-`` insensitive).
+_BUNDLE_PROVIDED_PREFIXES = ("rilixai",)
+_BUNDLE_PROVIDED_NAMES = ("cookbook-common",)
+
+
+def _is_bundle_provided(dep: str) -> bool:
+    """True if ``dep`` is already in the image and must not be ``--pip-install``ed."""
+    name = re.split(r"[<>=!~;\[ ]", dep.strip(), maxsplit=1)[0].strip().lower().replace("_", "-")
+    return name.startswith(_BUNDLE_PROVIDED_PREFIXES) or name in _BUNDLE_PROVIDED_NAMES
+
+
 def _member_pip_deps() -> list[str]:
     """Read the apex_agents workspace member's runtime deps from its pyproject.
 
@@ -107,11 +130,16 @@ def _member_pip_deps() -> list[str]:
 
     ``rilixai`` is stripped because rilixai's build worker bakes its
     own pinned wheel into every spec image — customer pins for
-    rilixai are rejected.
+    rilixai are rejected. ``cookbook-common`` is stripped because it is
+    a workspace member with no index release: the bundle-root ``pip
+    install /spec`` already installs it (the root pyproject's setuptools
+    package list includes ``cookbook_common*``), so passing it to
+    ``--pip-install`` would send the build worker looking for a
+    nonexistent PyPI release.
     """
     data = tomllib.loads(MEMBER_PYPROJECT.read_text())
     deps = data["project"]["dependencies"]
-    return [d for d in deps if not d.lstrip().lower().startswith("rilixai")]
+    return [d for d in deps if not _is_bundle_provided(d)]
 
 
 def push_image(version: str) -> None:
@@ -157,16 +185,18 @@ def trigger_run(
     *,
     client: RilixAIClient,
     spec_reference: str,
-    domain: str,
-    train_size: int,
-    val_size: int,
-    val_worlds: int,
+    dataset_reference: str,
     max_metric_calls: int,
 ) -> str:
     response = client.create_optimization_run(
         task_type=TASK_TYPE,
         spec=spec_reference,
         scope_key=SCOPE_KEY,
+        # The optimizer reads its cases from this uploaded JSONL dataset — the
+        # migrated spec no longer loads data itself, so a run with no dataset
+        # reference fails at startup. ``name@production`` resolves server-side
+        # to the currently promoted dataset revision.
+        dataset_ref=dataset_reference,
         config={
             # GEPA per-run knobs (consumed by rilixai's sandbox runtime).
             "max_metric_calls": max_metric_calls,
@@ -174,10 +204,8 @@ def trigger_run(
             "reflection_model": "openai/gpt-4.1",
             "seed": 0,
             # APEX-Agents cookbook knobs (consumed by build_spec in spec.py).
-            "domain": domain,
-            "train_size": train_size,
-            "val_size": val_size,
-            "val_worlds": val_worlds,
+            # The domain subset + train/val split come from the uploaded
+            # dataset, so no domain/train_size/val_size/val_worlds knobs here.
             "task_model": "openai/gpt-4.1-mini-2025-04-14",
             "task_temperature": 0.0,
             "judge_model": "gemini/gemini-2.5-flash",
@@ -226,28 +254,14 @@ def main() -> int:
         ),
     )
     parser.add_argument(
-        "--domain",
-        choices=("law", "investment_banking"),
-        default="law",
-        help="Domain subset of mercor/apex-agents. Default: law.",
-    )
-    parser.add_argument(
-        "--train-size",
-        type=int,
-        default=25,
-        help="Train cases (stratified across train worlds). Default: 25.",
-    )
-    parser.add_argument(
-        "--val-size",
-        type=int,
-        default=20,
-        help="Val cases (drawn from held-out worlds). Default: 20.",
-    )
-    parser.add_argument(
-        "--val-worlds",
-        type=int,
-        default=2,
-        help="Number of whole worlds to hold out for inner validation. Default: 2.",
+        "--dataset",
+        default=DEFAULT_DATASET_REFERENCE,
+        help=(
+            f"rilixai dataset reference the run sources cases from. Defaults to "
+            f"{DEFAULT_DATASET_REFERENCE} (upload it first with "
+            f"`rilixai dataset upload --name {SPEC_NAME}-dataset <jsonl-dir>`). "
+            "Override with apex-agents-dataset@<revision> to pin a revision."
+        ),
     )
     parser.add_argument(
         "--max-metric-calls",
@@ -287,10 +301,7 @@ def main() -> int:
     run_id = trigger_run(
         client=client,
         spec_reference=args.spec,
-        domain=args.domain,
-        train_size=args.train_size,
-        val_size=args.val_size,
-        val_worlds=args.val_worlds,
+        dataset_reference=args.dataset,
         max_metric_calls=args.max_metric_calls,
     )
     print(f"queued run: {run_id} (spec={args.spec})")
