@@ -112,6 +112,11 @@ def push_image(version: str) -> None:
         SPEC_NAME,
         "--version",
         version,
+        # Exported datasets (incl. base64-embedded documents) live under
+        # scripts/_datasets/; they belong in uploaded datasets, not the spec
+        # image, so keep them out of the bundle.
+        "--exclude",
+        "scripts/_datasets/*",
         *pip_install_args,
         str(SPEC_TARGET),
     ]
