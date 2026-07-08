@@ -92,8 +92,11 @@ export RILIXAI_API_BASE_URL=https://<id>.execute-api.<region>.amazonaws.com/prod
 export RILIXAI_AGENT_KEY=harvey-lab   # agent the trigger targets (or pass --agent)
 
 git clone https://github.com/harveyai/harvey-labs
-uv run python scripts/export_harvey_lab_dataset.py --tasks-root harvey-labs/tasks
-uv run rilixai dataset upload --name harvey-lab-dataset scripts/_datasets/harvey_lab
+# --test-areas carves a disjoint test.jsonl the optimizer scores the winner on
+# post-optimization (unbiased held-out); omit it for train/val only.
+uv run python scripts/export_harvey_lab_dataset.py --tasks-root harvey-labs/tasks --val-areas 3 --test-areas 3
+uv run rilixai dataset upload --name harvey-lab-dataset \
+  --split train=883 --split val=123 --split test=126 scripts/_datasets/harvey_lab
 
 uv run harvey_lab/sandbox.py --build   # build + promote + trigger
 uv run harvey_lab/sandbox.py           # trigger only (current @production)
