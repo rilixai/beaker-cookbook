@@ -78,6 +78,7 @@ _DEFAULT_SANDBOX_CONFIG: dict[str, Any] = {
     "task_temperature": 0.0,
     "judge_model": "gemini/gemini-2.5-flash",
     "max_turns": 40,
+    "max_output_tokens": 16_000,
 }
 
 
@@ -102,6 +103,7 @@ def build_spec(ctx: OptimizationContext) -> Spec:
         task_temperature=float(cfg_in["task_temperature"]),
         judge_model=str(cfg_in["judge_model"]),
         max_turns=int(cfg_in["max_turns"]),
+        max_output_tokens=int(cfg_in["max_output_tokens"]),
     )
     from ..agent.workspace import build_github_task_source
 

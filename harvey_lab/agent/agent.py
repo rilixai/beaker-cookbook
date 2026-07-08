@@ -232,7 +232,7 @@ class HarveyLabAgent:
             client = self._model_factory(
                 self._config.task_model,
                 self._config.task_temperature,
-                self._config.max_context_tokens,
+                self._config.max_output_tokens,
             )
             agent: Any = Agent(
                 client=client,

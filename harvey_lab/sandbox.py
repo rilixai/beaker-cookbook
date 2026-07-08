@@ -149,6 +149,7 @@ def trigger_run(
             "task_temperature": 0.0,
             "judge_model": "gemini/gemini-2.5-flash",
             "max_turns": 40,
+            "max_output_tokens": 16_000,
         },
     )
     return str(response["id"])

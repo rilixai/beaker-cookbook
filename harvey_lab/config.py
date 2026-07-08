@@ -26,8 +26,10 @@ class HarveyLabConfig:
     # The inner legal agent (driven through Stirrup). LiteLLM model spec.
     task_model: str = "openai/gpt-4.1-mini-2025-04-14"
     task_temperature: float = 0.0
-    # Context window budget handed to the Stirrup client, in tokens.
-    max_context_tokens: int = 120_000
+    # Per-call completion-token cap handed to the Stirrup client (litellm's
+    # ``max_tokens``). Must stay within the task model's output limit —
+    # gpt-4.1-mini caps completions at 32768, so the default leaves headroom.
+    max_output_tokens: int = 16_000
 
     # The per-criterion rubric judge. Harvey LAB-AA defaults to
     # ``claude-sonnet``; a cheaper Gemini flash keeps smoke runs affordable
