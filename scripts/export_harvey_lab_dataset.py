@@ -25,9 +25,38 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import defaultdict
 from pathlib import Path
 
-from harvey_lab.data.dataset import attach_document_blobs, load_harvey_lab_records, record_to_row
+from harvey_lab.data.dataset import HarveyLabRecord, attach_document_blobs, load_harvey_lab_records, record_to_row
+
+
+def _cap_round_robin(rows: list[HarveyLabRecord], limit: int | None) -> list[HarveyLabRecord]:
+    """Subsample ``rows`` to at most ``limit`` while spreading across practice
+    areas (round-robin) so every area stays represented. Deterministic:
+    preserves the loader's within-area order and iterates areas alphabetically.
+    """
+    if limit is None or len(rows) <= limit:
+        return rows
+    by_area: dict[str, list[HarveyLabRecord]] = defaultdict(list)
+    for r in rows:
+        by_area[r.practice_area].append(r)
+    order = sorted(by_area)
+    picked: list[HarveyLabRecord] = []
+    idx = 0
+    while len(picked) < limit:
+        progressed = False
+        for area in order:
+            bucket = by_area[area]
+            if idx < len(bucket):
+                picked.append(bucket[idx])
+                progressed = True
+                if len(picked) >= limit:
+                    break
+        if not progressed:
+            break
+        idx += 1
+    return picked
 
 
 def main() -> None:
@@ -43,6 +72,9 @@ def main() -> None:
         default=0,
         help="Number of practice areas to hold out for the optional post-optimization test split (disjoint from train/val).",
     )
+    ap.add_argument("--max-train", type=int, default=None, help="Cap total train rows (round-robin across areas).")
+    ap.add_argument("--max-val", type=int, default=None, help="Cap total val rows (round-robin across areas).")
+    ap.add_argument("--max-test", type=int, default=None, help="Cap total test rows (round-robin across areas).")
     ap.add_argument(
         "--embed-documents",
         action="store_true",
@@ -55,9 +87,6 @@ def main() -> None:
     records = load_harvey_lab_records(args.tasks_root, practice_areas=areas, max_per_area=args.max_per_area)
     if not records:
         raise SystemExit(f"No task records found under {args.tasks_root!r}.")
-
-    if args.embed_documents:
-        records = [attach_document_blobs(r, args.tasks_root) for r in records]
 
     present_areas = sorted({r.practice_area for r in records})
     if len(present_areas) <= args.val_areas + args.test_areas:
@@ -74,6 +103,17 @@ def main() -> None:
     train = [r for r in records if r.practice_area not in val_areas and r.practice_area not in test_areas]
     val = [r for r in records if r.practice_area in val_areas]
     test = [r for r in records if r.practice_area in test_areas]
+
+    # Cap each split (round-robin across its areas) before embedding, so we only
+    # base64-encode the documents we actually keep.
+    train = _cap_round_robin(train, args.max_train)
+    val = _cap_round_robin(val, args.max_val)
+    test = _cap_round_robin(test, args.max_test)
+
+    if args.embed_documents:
+        train = [attach_document_blobs(r, args.tasks_root) for r in train]
+        val = [attach_document_blobs(r, args.tasks_root) for r in val]
+        test = [attach_document_blobs(r, args.tasks_root) for r in test]
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
