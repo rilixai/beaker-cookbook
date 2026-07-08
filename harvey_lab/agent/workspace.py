@@ -303,7 +303,6 @@ def build_github_task_source(
 
     def _factory(record: Any) -> TaskWorkspace:
         import tempfile
-        import urllib.request
 
         task_id = str(getattr(record, "task_id", "") or "")
         documents: tuple[str, ...] = tuple(getattr(record, "documents", ()) or ())
@@ -312,11 +311,48 @@ def build_github_task_source(
             url = f"https://raw.githubusercontent.com/{repo}/{commit}/tasks/{task_id}/documents/{name}"
             dest = ws.documents_dir / name
             dest.parent.mkdir(parents=True, exist_ok=True)
-            with urllib.request.urlopen(url, timeout=60) as resp:  # noqa: S310 - pinned https host
-                dest.write_bytes(resp.read())
+            dest.write_bytes(_fetch_bytes(url))
         return ws
 
     return _factory
+
+
+# raw.githubusercontent.com rate-limits unauthenticated requests; many cases
+# fetch concurrently, so a bare urlopen hits HTTP 429. Retry transient failures
+# (429 + 5xx + connection errors) with exponential backoff honouring
+# ``Retry-After`` when present.
+_FETCH_MAX_ATTEMPTS = 6
+_FETCH_BASE_DELAY = 2.0
+_FETCH_MAX_DELAY = 60.0
+
+
+def _fetch_bytes(url: str) -> bytes:
+    import random
+    import time
+    import urllib.error
+    import urllib.request
+
+    last_exc: Exception | None = None
+    for attempt in range(_FETCH_MAX_ATTEMPTS):
+        req = urllib.request.Request(url, headers={"User-Agent": "harvey-lab-cookbook/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 - pinned https host
+                return bytes(resp.read())
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 and exc.code < 500:
+                raise
+            last_exc = exc
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            delay = float(retry_after) if retry_after and retry_after.isdigit() else None
+        except urllib.error.URLError as exc:
+            last_exc = exc
+            delay = None
+        if attempt == _FETCH_MAX_ATTEMPTS - 1:
+            break
+        if delay is None:
+            delay = min(_FETCH_BASE_DELAY * (2**attempt), _FETCH_MAX_DELAY)
+        time.sleep(delay + random.uniform(0, 1.0))
+    raise RuntimeError(f"Failed to fetch {url} after {_FETCH_MAX_ATTEMPTS} attempts") from last_exc
 
 
 def task_source_from_mapping(mapping: Mapping[str, TaskWorkspace]) -> TaskSource:
