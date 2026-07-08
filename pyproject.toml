@@ -31,8 +31,13 @@ dev = [
 # members in editable mode, so ``import hotpotqa.dataset`` works
 # without sys.path hacks and per-benchmark deps stay isolated.
 [tool.uv.workspace]
-members = ["hotpotqa", "apex_agents"]
+members = ["hotpotqa", "apex_agents", "cookbook_common"]
 # As benchmarks migrate, add: "cl_bench"
+
+# ``cookbook_common`` is a shared internal member the recipes depend on;
+# resolve it from the workspace (editable) rather than an index.
+[tool.uv.sources]
+cookbook-common = { workspace = true }
 
 # The workspace root isn't an installable Python package for local dev
 # — uv installs each member from its own pyproject (``package = false``).
@@ -53,7 +58,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["hotpotqa*", "apex_agents*"]
+include = ["hotpotqa*", "apex_agents*", "cookbook_common*"]
 exclude = ["*.tests", "*.tests.*", "*.scripts", "*.scripts.*"]
 
 [tool.pytest.ini_options]
@@ -64,6 +69,13 @@ testpaths = ["hotpotqa/tests", "apex_agents/tests"]
 # the "module already imported under a different __file__" collision
 # that pytest's default ``prepend`` mode raises.
 addopts = "--import-mode=importlib"
+# Put the repo root on ``sys.path`` so the workspace members
+# (``hotpotqa`` / ``apex_agents`` / ``cookbook_common``) import as
+# top-level packages regardless of how pytest is launched. The uv
+# editable installs remap each member dir onto its import name, which
+# resolves under ``python -m`` (cwd on path) but not the bare
+# ``pytest`` console script; this makes discovery deterministic.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 119
@@ -97,7 +109,7 @@ show_error_codes = true
 # as the rilixai repo (mypy runs over the package only, not tests or
 # scripts, since the tests use fixture-shaped types that intentionally
 # bend strict typing).
-files = ["hotpotqa", "apex_agents"]
+files = ["hotpotqa", "apex_agents", "cookbook_common"]
 exclude = ["hotpotqa/tests/", "hotpotqa/scripts/", "apex_agents/tests/", "apex_agents/scripts/"]
 
 # Mirror the rilixai-side ``ignore_missing_imports`` overrides for

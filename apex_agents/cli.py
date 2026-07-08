@@ -1,85 +1,66 @@
-"""CLI entrypoint for APEX-Agents benchmarking.
+"""CLI entrypoint for APEX-Agents benchmarking (SDK-only / Shape B).
 
-Run as ``python -m rilixai.benchmarks.apex_agents.cli ...``.
+Run as ``python -m apex_agents.cli ...``.
 
 Subcommands:
-* ``optimize`` — runs GEPA on the train worlds.
-* ``evaluate`` — scores a single candidate on the test/validation split.
-* ``kfold`` — runs optimize+evaluate for one ``--fold-index`` of the
-  world-level k-fold (or a single offline dry path).
+* ``validate`` — build the spec + run ``validate_spec`` (fully offline; no
+  network, no dataset download).
+* ``evaluate`` — score ONE candidate (the seed prompts by default, or a
+  ``--candidate-json``) on the loaded cases via the SDK ``run_case`` + scorer
+  loop, writing an ``eval_summary.json`` + ``eval_outputs.json``.
 
-Defaults:
-* ``--max-metric-calls 200`` — small HF-friendly budget.
-* ``--task-temperature 0.0`` — deterministic at the agent's API level.
-* ``--max-steps 60`` / ``--cost-limit 3.0`` — caps on the ReAct loop
-  (smaller than Archipelago's 250 to bound sales-demo cost).
-* ``--judge-model gemini/gemini-2.5-flash`` — Mercor's default rubric
-  judge.
-* ``--max-concurrency 4``.
+The full GEPA optimize/kfold loop is intentionally NOT part of this CLI: the
+optimizer engine lives in the optional ``rilixai-runtime`` package and runs
+server-side for hosted ``rilixai run`` triggers (see ``sandbox.py`` +
+``rilixai.yaml``). This recipe depends on the lightweight ``rilixai`` SDK only.
 
-``--no-network`` is the test-friendly guard: instead of building the
-real HF world factory + litellm judge it raises ``RuntimeError`` so a
-misconfigured production run never accidentally hits HF / an LLM.
-Tests construct the spec directly via :func:`build_apex_agents_spec`
-with an injected :class:`FakeWorld` factory + stub judge and bypass
-this CLI entirely.
+``--no-network`` is the test-friendly guard: instead of building the real HF
+world factory + litellm judge + downloading the gated dataset it raises
+``RuntimeError`` so a misconfigured run never accidentally hits HF / an LLM.
+Tests construct the spec directly via :func:`build_apex_agents_spec` with an
+injected :class:`FakeWorld` factory + stub judge and bypass this CLI entirely.
 """
 
 from __future__ import annotations
 
 import argparse
-import dataclasses
-import json
 import logging
 import sys
-import threading
-import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from rilixai.prompt_optimization.evaluation import (
-    evaluate_candidate_on_cases,
-    field_accuracy_rows,
-    serialize_eval_outputs,
-)
-from rilixai.prompt_optimization.models import Case, PromptCandidate
-from rilixai.prompt_optimization.optimization import extract_best_candidate, summarize_gepa_result_metadata
-from rilixai.prompt_optimization.spec import (
-    PromptOptimizationRunConfig,
-    build_adapter_from_spec,
-    run_optimization_from_spec,
-)
+from rilixai import OptimizationTargets
 
-from .agent.prompts import apex_agents_seed_candidate
+from cookbook_common.cli_support import eval_summary, load_targets_from_json, validate_and_log, write_json
+from cookbook_common.local_eval import run_local_evaluation
+
+from .agent.prompts import apex_agents_seed_targets
 from .config import ApexAgentsConfig
-from .data.dataset import DEFAULT_DOMAIN, load_apex_agents_cases, world_ids_for_cases
-from .data.world_splits import (
-    fixed_val_split,
-    stratified_case_cap,
-    world_held_out_val_split,
-    world_level_folds,
-)
+from .data.dataset import DEFAULT_DOMAIN, load_apex_agents_cases
+from .data.world_splits import fixed_val_split, stratified_case_cap
+from .optimization.metrics import RUBRIC_FIELD
 from .optimization.spec import build_apex_agents_spec
 
 
-logger = logging.getLogger("rilixai.benchmarks.apex_agents")
+logger = logging.getLogger("apex_agents")
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "APEX-Agents benchmark for the rilixai prompt optimizer. Drives a "
-            "faithful ReAct toolbelt agent (seeded verbatim from Archipelago's "
-            "reference prompts) and optimizes its three components "
-            "(system_prompt, task_template, resum_summary_prompt) on "
-            "investment-banking tasks, evaluating with an LLM rubric judge."
+            "APEX-Agents benchmark for the rilixai prompt optimizer (SDK-only). "
+            "Drives a faithful ReAct toolbelt agent (seeded verbatim from "
+            "Archipelago's reference prompts) and locally evaluates its three "
+            "components (system_prompt, task_template, resum_summary_prompt) on "
+            "investment-banking tasks with an LLM rubric judge. The full GEPA "
+            "optimization runs server-side via `rilixai run`."
         ),
     )
     parser.add_argument(
         "command",
-        choices=("optimize", "evaluate", "kfold"),
-        help="`optimize` runs GEPA; `evaluate` scores a candidate; `kfold` runs one fold.",
+        choices=("validate", "evaluate"),
+        help="`validate` builds + validates the spec offline; `evaluate` scores a candidate.",
     )
     parser.add_argument(
         "--domain",
@@ -87,88 +68,35 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_DOMAIN,
         help='Domain subset to load. Default "Investment Banking".',
     )
-    parser.add_argument("--k", type=int, default=5, help="Number of world-level folds. Default 5.")
-    parser.add_argument(
-        "--fold-index",
-        type=int,
-        default=0,
-        help="Which fold to run for the `kfold` command (0-based).",
-    )
-    parser.add_argument(
-        "--train-size",
-        type=int,
-        default=None,
-        help=(
-            "Cap on GEPA training cases — the scaling axis (grows across a "
-            "sweep). Drawn from the non-validation worlds. None = full pool."
-        ),
-    )
-    parser.add_argument(
-        "--train-size-mode",
-        choices=("stratified", "frontslice"),
-        default="stratified",
-        help=(
-            "How --train-size caps the pool. 'stratified' (default): "
-            "round-robin across all train worlds so the world set stays wide "
-            "at every size (clean 'more data, same worlds' curve). "
-            "'frontslice': legacy pool[:n] (worlds collapse at small n)."
-        ),
-    )
     parser.add_argument(
         "--val-worlds",
         type=int,
         default=2,
-        help=(
-            "Number of WHOLE worlds forming GEPA's FIXED validation pool — "
-            "disjoint from the train worlds, so candidate selection rewards "
-            "cross-world transfer (anti-overfit). Constant across a sweep."
-        ),
+        help="Number of WHOLE worlds forming the fixed validation pool.",
     )
     parser.add_argument(
         "--val-size",
         type=int,
         default=20,
-        help=(
-            "Validation case count — HELD CONSTANT across the sweep, fully "
-            "decoupled from --train-size. Cases are stratified across the "
-            "val worlds. None/0 = all cases in the val worlds."
-        ),
+        help="Validation case count (stratified across the val worlds). 0/None = all.",
     )
     parser.add_argument(
         "--test-size",
         type=int,
         default=None,
-        help="Optional cap on test/validation cases.",
+        help="Optional cap on the number of evaluated cases.",
     )
     parser.add_argument(
         "--split",
-        choices=("all", "validation", "test"),
+        choices=("all", "validation"),
         default="all",
-        help=(
-            "`evaluate` only. 'all' (default): score on the ENTIRE domain "
-            "dataset (leaderboard-shaped; the summary also reports a clean "
-            "cross-world held-out subset). 'validation': the fixed val pool. "
-            "'test': legacy kfold fold-0 held-out worlds."
-        ),
+        help="`evaluate` only. 'all' scores the entire domain dataset; 'validation' the fixed val pool.",
     )
-    parser.add_argument(
-        "--max-metric-calls",
-        type=int,
-        default=200,
-        help="GEPA metric-call budget for `optimize`. Default 200 (HF-friendly small budget).",
-    )
-    parser.add_argument("--reflection-minibatch-size", type=int, default=3)
     parser.add_argument(
         "--seed",
         type=int,
         default=0,
-        help="Seed for the optimizer + the world-level k-fold shuffle.",
-    )
-    parser.add_argument(
-        "--mode",
-        choices=("agent",),
-        default="agent",
-        help="Which APEX-Agents pipeline shape to run. Only `agent` is wired.",
+        help="Seed for the world-level validation carve + stratified caps.",
     )
     parser.add_argument(
         "--task-model",
@@ -204,17 +132,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--llm-timeout",
         type=float,
         default=120.0,
-        help=(
-            "Per-LLM-call timeout in seconds for the agent model AND the rubric "
-            "judge (litellm `timeout`, bounded retries). Default 120. A hung "
-            "provider request fails the case fast instead of wedging the run."
-        ),
-    )
-    parser.add_argument(
-        "--reflection-model",
-        type=str,
-        default="openai/gpt-4.1",
-        help="Reflection LM passed to optimize_prompts (provider/model or plain name).",
+        help="Per-LLM-call timeout in seconds for the agent model AND the rubric judge.",
     )
     parser.add_argument("--max-concurrency", type=int, default=4)
     parser.add_argument(
@@ -227,7 +145,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=Path("apex_agents_run"),
-        help="Directory where results and reflection artifacts are written.",
+        help="Directory where results are written.",
     )
     parser.add_argument(
         "--cache-dir",
@@ -238,13 +156,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--no-network",
         action="store_true",
-        help="Refuse to build the real HF world factory / litellm judge — tests and dry runs only.",
+        help="Refuse to build the real HF world factory / litellm judge / dataset download.",
     )
     return parser.parse_args(argv)
 
 
 def _resolve_world_factory(args: argparse.Namespace) -> Callable[[Any], Any]:
-    """Return the per-case world factory the spec uses to build worlds."""
+    """Return the per-case world factory the run_case uses to build worlds."""
     if args.no_network:
 
         def _refuse(_record: Any) -> Any:
@@ -271,28 +189,20 @@ def _resolve_judge(args: argparse.Namespace) -> Callable[[str, str, str], bool] 
             )
 
         return _refuse
-    # None → the runtime builds the default litellm-backed judge.
+    # None → the run_case builds the default litellm-backed judge.
     return None
 
 
-def _load_all_cases(args: argparse.Namespace) -> list[Case]:
-    # The dataset loader is a network call (gated HF dataset
-    # ``mercor/apex-agents``). Honor ``--no-network`` here too so a dry
-    # run fails fast with a clear message instead of leaking the HF
-    # client's "gated repo" traceback. The guard's contract is "tests
-    # and dry runs only" — that has to include the dataset download,
-    # not just the world factory + judge. Offline structural validation
-    # is the test suite (FakeWorld, no HF access required), not this
-    # CLI path.
+def _load_all_cases(args: argparse.Namespace) -> list[Any]:
     if args.no_network:
         raise RuntimeError(
             "Refusing to download the gated HF dataset 'mercor/apex-agents' because "
             "--no-network was set. This guard is for dry runs / accidental-spend "
             "prevention. For offline structural validation run: "
-            "uv run --locked python -m pytest tests/test_apex_agents_*.py "
-            "(FakeWorld + scripted model + stub judge, zero network). For real "
-            "runs, request access at https://huggingface.co/datasets/mercor/apex-agents "
-            "then `huggingface-cli login` (or export HF_TOKEN=...)."
+            "uv run --locked python -m pytest apex_agents/tests (FakeWorld + scripted "
+            "model + stub judge, zero network). For real runs, request access at "
+            "https://huggingface.co/datasets/mercor/apex-agents then `huggingface-cli "
+            "login` (or export HF_TOKEN=...)."
         )
     return load_apex_agents_cases(
         domain=args.domain,
@@ -300,193 +210,66 @@ def _load_all_cases(args: argparse.Namespace) -> list[Case]:
     )
 
 
-def _split_cases_by_world(
-    cases: list[Case],
-    *,
-    train_world_ids: list[str],
-    test_world_ids: list[str],
-) -> tuple[list[Case], list[Case]]:
-    train_set = set(train_world_ids)
-    test_set = set(test_world_ids)
-    train = [c for c in cases if str(c.metadata.get("world_id")) in train_set]
-    test = [c for c in cases if str(c.metadata.get("world_id")) in test_set]
-    return train, test
+def _select_eval_cases(args: argparse.Namespace) -> tuple[list[Any], set[str]]:
+    """Build the cases the `evaluate` command scores + the excluded worlds.
 
-
-def _carve_inner_val(train: list[Case], args: argparse.Namespace) -> tuple[list[Case], list[Case]]:
-    """Split a fold's train pool into (inner_train, validation) by WHOLE worlds.
-
-    GEPA selects candidates on the validation score; a same-world random
-    slice rewards in-world fit and the chosen prompt collapses on unseen
-    worlds. World-held-out validation makes selection reward cross-world
-    transfer. ``--val-size`` is retained only as an optional cap on the
-    number of validation cases (the carving is by world, via
-    :func:`world_held_out_val_split`).
+    The second element is the fixed cross-world validation world ids (non-empty
+    only for ``--split all``) so ``_run_evaluate`` can report a clean cross-world
+    subset alongside the (validation-inclusive) all-cases number.
     """
-    inner_train, validation = world_held_out_val_split(train, n_val_worlds=args.val_worlds, seed=args.seed)
-    if args.val_size is not None and args.val_size > 0:
-        # Stratify (round-robin across the held-out worlds) rather than
-        # front-slice: a plain validation[:val_size] collapses the cap onto
-        # the first world(s), reintroducing the in-world-fit selection bias
-        # this whole-world carve exists to avoid. Mirrors the sandbox path
-        # (spec.py) and the stratified train cap.
-        validation = stratified_case_cap(validation, args.val_size, seed=args.seed)
-    return inner_train, validation
-
-
-def _load_splits_for_command(args: argparse.Namespace) -> dict[str, list[Case]]:
-    """Build the cases-by-split mapping for the active command."""
     all_cases = _load_all_cases(args)
-    world_ids = world_ids_for_cases(all_cases)
-    folds = world_level_folds(world_ids, k=args.k, seed=args.seed)
-    if args.command == "kfold":
-        if not 0 <= args.fold_index < len(folds):
-            raise ValueError(f"--fold-index {args.fold_index} out of range for k={args.k} ({len(folds)} folds).")
-        train_world_ids, test_world_ids = folds[args.fold_index]
-        train, test = _split_cases_by_world(all_cases, train_world_ids=train_world_ids, test_world_ids=test_world_ids)
-        # Cap train with the same stratified (round-robin across worlds) policy
-        # the optimize path uses, so ``--train-size-mode`` is honored here too
-        # instead of silently front-slicing (which collapses worlds at small
-        # --train-size). ``stratified_case_cap`` returns the pool unchanged when
-        # train_size is None.
-        train = stratified_case_cap(train, args.train_size, mode=args.train_size_mode, seed=args.seed)
-        if args.test_size is not None:
-            test = test[: args.test_size]
-        inner_train, validation = _carve_inner_val(train, args)
-        return {"train": inner_train, "validation": validation, "test": test}
-
-    # optimize / evaluate: FIXED cross-world validation (constant across a
-    # train-size sweep) + a growing train pool from the non-val worlds +
-    # final eval on the ENTIRE dataset.
-    train_pool, val_cases, val_world_ids = fixed_val_split(
+    # The fixed, seed-derived validation worlds. A hosted GEPA run selects
+    # candidates against this pool, so the all-cases score is inflated w.r.t.
+    # it; carve it out to get a clean cross-world number (see #7).
+    _, val_cases, val_world_ids = fixed_val_split(
         all_cases,
         n_val_worlds=args.val_worlds,
         val_size=(args.val_size if args.val_size and args.val_size > 0 else None),
         seed=args.seed,
     )
-    train = stratified_case_cap(train_pool, args.train_size, mode=args.train_size_mode, seed=args.seed)
-    train_world_ids = {str(getattr(c, "group_key", "") or "") for c in train}
-    # Worlds GEPA saw (trained or validated on) — used to carve a clean
-    # cross-world held-out subset from the full-dataset eval.
-    args._excluded_world_ids = set(val_world_ids) | train_world_ids  # type: ignore[attr-defined]
-
-    splits: dict[str, list[Case]] = {}
-    if args.command == "optimize":
-        splits["train"] = train
-        splits["validation"] = val_cases
-        return splits
-    # evaluate
-    if args.split == "all":
-        splits["all"] = list(all_cases)
-    elif args.split == "validation":
-        splits["validation"] = val_cases
-    else:  # legacy "test": fold-0 held-out worlds
-        _, test = _split_cases_by_world(all_cases, train_world_ids=folds[0][0], test_world_ids=folds[0][1])
-        if args.test_size is not None:
-            test = test[: args.test_size]
-        splits["test"] = test
-    return splits
+    excluded_world_ids: set[str] = set()
+    if args.split == "validation":
+        cases = list(val_cases)
+    else:  # "all"
+        cases = list(all_cases)
+        excluded_world_ids = {str(w) for w in val_world_ids}
+    if args.test_size is not None:
+        cases = stratified_case_cap(cases, args.test_size, seed=args.seed)
+    return cases, excluded_world_ids
 
 
-def _load_candidate(path: Path | None) -> PromptCandidate:
-    if path is None:
-        return apex_agents_seed_candidate()
-    raw = json.loads(path.read_text())
-    return PromptCandidate.from_dict(raw)
+def _heldout_subset_summary(per_case: list[dict[str, Any]], excluded_world_ids: set[str]) -> dict[str, Any]:
+    """Clean cross-world subset of a full-dataset eval (pure, testable).
 
-
-def _write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, default=str))
-
-
-def _format_field_table(accuracies: dict[str, float], sample_counts: dict[str, int]) -> str:
-    rows = field_accuracy_rows(accuracies, sample_counts)
-    if not rows:
-        return "(no field scores)"
-    return "\n".join(f"  {name:<32s} acc={acc:.4f}  n={count}" for name, acc, count in rows)
-
-
-def _wrap_runtime_with_progress(
-    runtime: Callable[..., Awaitable[Any]],
-    *,
-    label: str,
-    total: int | None = None,
-    log_every_n: int = 1,
-    log_every_seconds: float = 30.0,
-) -> Callable[..., Awaitable[Any]]:
-    """Wrap an async extraction runtime to log per-case progress + ETA.
-
-    Mirrors the IFBench / HotpotQA / SWE-bench CLI helpers. CRITICAL:
-    never ``return`` from the ``finally`` block — that would silently
-    override the runtime's actual result with ``None``.
+    Restricts to cases whose world (``group_key``) is NOT in
+    ``excluded_world_ids`` — i.e. worlds outside the reserved cross-world
+    validation pool a hosted GEPA run selects candidates against — and averages
+    ``rubric_pass_rate`` over only the held-out cases that were actually scored
+    (empty-rubric cases omit the field, matching the report's own aggregate).
     """
-    state: dict[str, Any] = {
-        "done": 0,
-        "started": None,
-        "last_log_count": 0,
-        "last_log_time": 0.0,
+    held = [r for r in per_case if r.get("group_key") and str(r["group_key"]) not in excluded_world_ids]
+    scores = [
+        float(fs[RUBRIC_FIELD]) for r in held if isinstance((fs := r.get("field_scores")), dict) and RUBRIC_FIELD in fs
+    ]
+    return {
+        "excluded_world_ids": sorted(excluded_world_ids),
+        "num_heldout_cases": len(held),
+        "num_heldout_scored": len(scores),
+        f"{RUBRIC_FIELD}_heldout": (sum(scores) / len(scores)) if scores else None,
+        "note": (
+            f"{RUBRIC_FIELD} is over ALL cases incl. the reserved cross-world validation "
+            f"pool a hosted GEPA run selects against (validation-inclusive, NOT a clean "
+            f"generalization measure). {RUBRIC_FIELD}_heldout is the subset whose worlds "
+            f"fall outside that pool."
+        ),
     }
-    lock = threading.Lock()
-
-    async def _wrapped(**kwargs: Any) -> Any:
-        with lock:
-            if state["started"] is None:
-                state["started"] = time.monotonic()
-        try:
-            result = await runtime(**kwargs)
-        finally:
-            # Do NOT ``return`` here — see the matching note in
-            # swe_bench/cli.py for context.
-            with lock:
-                state["done"] += 1
-                done = state["done"]
-                now = time.monotonic()
-                elapsed = now - state["started"]
-                is_first = done == 1
-                is_last = total is not None and done >= total
-                interval_ok = (done - state["last_log_count"]) >= log_every_n
-                time_ok = (now - state["last_log_time"]) >= log_every_seconds
-                should_log = is_first or is_last or interval_ok or time_ok
-                if should_log:
-                    state["last_log_count"] = done
-                    state["last_log_time"] = now
-            if should_log:
-                rate = (done / elapsed) if elapsed > 0 else 0.0
-                if total:
-                    remaining = max(0, total - done)
-                    eta = (remaining / rate) if rate > 0 else 0.0
-                    logger.info(
-                        "[%s] %d/%d (%.1f%%) elapsed=%s rate=%.2f/s eta=%s",
-                        label,
-                        done,
-                        total,
-                        100.0 * done / total,
-                        _fmt_hms(elapsed),
-                        rate,
-                        _fmt_hms(eta),
-                    )
-                else:
-                    logger.info(
-                        "[%s] %d done elapsed=%s rate=%.2f/s",
-                        label,
-                        done,
-                        _fmt_hms(elapsed),
-                        rate,
-                    )
-        return result
-
-    return _wrapped
 
 
-def _fmt_hms(seconds: float) -> str:
-    total_seconds = int(round(max(0.0, seconds)))
-    hours, rem = divmod(total_seconds, 3600)
-    minutes, sec = divmod(rem, 60)
-    return f"{hours}:{minutes:02d}:{sec:02d}"
+def _load_targets(path: Path | None) -> OptimizationTargets:
+    return load_targets_from_json(path, seed_targets=apex_agents_seed_targets())
 
 
-def _build_spec_for_args(args: argparse.Namespace, splits: dict[str, list[Case]]) -> Any:
+def _build_spec_for_args(args: argparse.Namespace) -> Any:
     config = ApexAgentsConfig(
         task_model=args.task_model,
         task_temperature=args.task_temperature,
@@ -496,109 +279,60 @@ def _build_spec_for_args(args: argparse.Namespace, splits: dict[str, list[Case]]
         llm_timeout=args.llm_timeout,
     )
     return build_apex_agents_spec(
-        cases_by_split={name: list(cases) for name, cases in splits.items()},
-        model=args.task_model,
-        max_concurrency=args.max_concurrency,
+        model_factory=None,
         config=config,
         world_factory=_resolve_world_factory(args),
         judge=_resolve_judge(args),
     )
 
 
-def _run_optimize(args: argparse.Namespace, spec: Any, output_dir: Path) -> int:
-    run_config = PromptOptimizationRunConfig.from_spec(
-        spec,
-        max_metric_calls=args.max_metric_calls,
-        reflection_minibatch_size=args.reflection_minibatch_size,
-        reflection_model=args.reflection_model,
-        run_dir=str(output_dir),
-        reflection_artifact_dir=str(output_dir / "reflection_artifacts"),
-        seed=args.seed,
-    )
-    optimize_started = time.monotonic()
-    logger.info("Starting optimize (max_metric_calls=%d)...", args.max_metric_calls)
-    result = run_optimization_from_spec(spec, run_config)
-    logger.info("optimize complete in %s", _fmt_hms(time.monotonic() - optimize_started))
-    best = extract_best_candidate(result)
-    metadata = summarize_gepa_result_metadata(result)
-    _write_json(output_dir / "best_candidate.json", best.to_dict())
-    _write_json(output_dir / "gepa_metadata.json", metadata)
-    logger.info("Best candidate written to %s", output_dir / "best_candidate.json")
-    logger.info("GEPA metadata: %s", metadata)
-    return 0
+def _run_validate(args: argparse.Namespace) -> int:
+    # Build with the refusing world factory + judge so validation never
+    # touches the network; validate_spec only inspects structure.
+    args.no_network = True
+    spec = _build_spec_for_args(args)
+    return validate_and_log(spec, logger=logger)
 
 
-def _heldout_subset_summary(serialized_rows: list[dict[str, Any]], excluded_world_ids: set[str]) -> dict[str, Any]:
-    """Clean cross-world subset of a full-dataset eval (pure, testable).
-
-    Returns the mean ``rubric_pass_rate`` over only the cases whose world
-    is NOT in ``excluded_world_ids`` (i.e. worlds GEPA never trained or
-    validated on) — the leaderboard-defensible number alongside the
-    train-inclusive all-cases number.
-    """
-
-    def _world_of(row: dict[str, Any]) -> str:
-        gt = row.get("ground_truth") or {}
-        if gt.get("world_id"):
-            return str(gt["world_id"])
-        ap = ((row.get("prediction") or {}).get("run_metrics") or {}).get("apex_agents") or {}
-        return str(ap.get("world_id") or "")
-
-    held = [r for r in serialized_rows if _world_of(r) and _world_of(r) not in excluded_world_ids]
-    scores = [float((r.get("field_scores") or {}).get("rubric_pass_rate") or 0.0) for r in held]
-    return {
-        "excluded_world_ids": sorted(excluded_world_ids),
-        "num_heldout_cases": len(held),
-        "rubric_pass_rate_heldout": (sum(scores) / len(scores)) if scores else None,
-        "note": (
-            "rubric_pass_rate is over ALL cases incl. those GEPA trained/validated on "
-            "(train-inclusive, NOT leaderboard-comparable). rubric_pass_rate_heldout is "
-            "the clean cross-world subset (worlds GEPA never saw)."
-        ),
-    }
-
-
-def _run_evaluate(args: argparse.Namespace, spec: Any, splits: dict[str, list[Case]], output_dir: Path) -> int:
-    adapter = build_adapter_from_spec(spec)
-    candidate = _load_candidate(args.candidate_json)
-    target_cases = list(splits.get(args.split, []))
-    if not target_cases:
+def _run_evaluate(args: argparse.Namespace) -> int:
+    cases, excluded_world_ids = _select_eval_cases(args)
+    if not cases:
         logger.error("evaluate command got no cases for --split %s.", args.split)
         return 2
-    eval_started = time.monotonic()
-    logger.info("Starting evaluate on split=%s (%d cases)...", args.split, len(target_cases))
-    report = evaluate_candidate_on_cases(adapter=adapter, candidate=candidate, cases=target_cases)
-    eval_elapsed = time.monotonic() - eval_started
-    logger.info("evaluate complete in %s (%d cases)", _fmt_hms(eval_elapsed), len(target_cases))
-    serialized = serialize_eval_outputs(report.outputs)
-    summary: dict[str, Any] = {
-        "split": args.split,
-        "num_cases": len(target_cases),
-        "weighted_objective": report.weighted_objective,
-        "field_accuracies": report.field_accuracies,
-        "field_sample_counts": report.field_sample_counts,
-    }
-    # On a full-dataset eval, the score is train-inclusive (inflated, not
-    # leaderboard-comparable). Also report the CLEAN cross-world subset:
-    # cases whose world GEPA never trained or validated on. Free — same run.
-    if args.split == "all":
-        summary.update(_heldout_subset_summary(serialized, getattr(args, "_excluded_world_ids", set()) or set()))
-    _write_json(output_dir / "eval_summary.json", summary)
-    _write_json(output_dir / "eval_outputs.json", serialized)
-    logger.info(
-        "Split=%s | weighted_objective=%.4f over %d cases",
-        args.split,
-        report.weighted_objective,
-        len(target_cases),
+    spec = _build_spec_for_args(args)
+    targets = _load_targets(args.candidate_json)
+    logger.info("Starting evaluate on split=%s (%d cases)...", args.split, len(cases))
+    report = run_local_evaluation(
+        spec=spec,
+        targets=targets,
+        cases=cases,
+        max_concurrency=args.max_concurrency,
     )
-    logger.info("Field accuracies:\n%s", _format_field_table(report.field_accuracies, report.field_sample_counts))
-    if args.split == "all" and summary.get("rubric_pass_rate_heldout") is not None:
+    summary = eval_summary(report, split=args.split)
+    # On a full-dataset eval the score is validation-inclusive (inflated,
+    # not a clean generalization measure). Also report the CLEAN cross-world
+    # subset — cases outside the reserved validation worlds. Free: same run.
+    if args.split == "all":
+        summary.update(_heldout_subset_summary(report.per_case, excluded_world_ids))
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    write_json(args.output_dir / "eval_summary.json", summary)
+    write_json(args.output_dir / "eval_outputs.json", report.per_case)
+    logger.info(
+        "Split=%s | %s=%.4f over %d cases",
+        args.split,
+        RUBRIC_FIELD,
+        report.field_accuracies.get(RUBRIC_FIELD, report.objective),
+        report.num_cases,
+    )
+    heldout = summary.get(f"{RUBRIC_FIELD}_heldout")
+    if args.split == "all" and heldout is not None:
         logger.info(
-            "Clean cross-world held-out: rubric_pass_rate=%.4f over %d cases "
-            "(worlds GEPA never trained/validated on); the all-cases number above "
-            "is train-inclusive / not leaderboard-comparable.",
-            summary["rubric_pass_rate_heldout"],
-            summary["num_heldout_cases"],
+            "Clean cross-world held-out: %s=%.4f over %d scored cases (worlds outside "
+            "the reserved validation pool); the all-cases number above is "
+            "validation-inclusive / not a clean generalization measure.",
+            RUBRIC_FIELD,
+            heldout,
+            summary["num_heldout_scored"],
         )
     return 0
 
@@ -606,52 +340,9 @@ def _run_evaluate(args: argparse.Namespace, spec: Any, splits: dict[str, list[Ca
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
-
-    splits = _load_splits_for_command(args)
-    spec = _build_spec_for_args(args, splits)
-
-    if args.command == "evaluate":
-        progress_total: int | None = len(splits.get(args.split, []))
-        progress_label = f"evaluate:{args.split}"
-        progress_every_n = 1
-    elif args.command == "kfold":
-        progress_total = args.max_metric_calls
-        progress_label = f"kfold:{args.fold_index}"
-        progress_every_n = max(1, args.max_metric_calls // 80)
-    else:
-        progress_total = args.max_metric_calls
-        progress_label = "optimize"
-        progress_every_n = max(1, args.max_metric_calls // 80)
-    spec = dataclasses.replace(
-        spec,
-        extraction_runtime=_wrap_runtime_with_progress(
-            spec.extraction_runtime,
-            label=progress_label,
-            total=progress_total,
-            log_every_n=progress_every_n,
-            log_every_seconds=30.0,
-        ),
-    )
-
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    if args.command == "optimize":
-        return _run_optimize(args, spec, args.output_dir)
-
-    if args.command == "kfold":
-        fold_dir = args.output_dir / f"fold{args.fold_index}"
-        (fold_dir / "optimize").mkdir(parents=True, exist_ok=True)
-        opt_code = _run_optimize(args, spec, fold_dir / "optimize")
-        if opt_code != 0:
-            return opt_code
-        # Re-evaluate the optimized candidate on the held-out test worlds.
-        eval_spec = _build_spec_for_args(args, splits)
-        args.candidate_json = fold_dir / "optimize" / "best_candidate.json"
-        args.split = "test"
-        return _run_evaluate(args, eval_spec, splits, fold_dir / "after")
-
-    # evaluate
-    return _run_evaluate(args, spec, splits, args.output_dir)
+    if args.command == "validate":
+        return _run_validate(args)
+    return _run_evaluate(args)
 
 
 if __name__ == "__main__":

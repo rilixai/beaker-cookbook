@@ -21,7 +21,7 @@ drift would shift the GEPA optimization curve off the paper baseline.
 
 from __future__ import annotations
 
-from rilixai.prompt_optimization.models import PromptCandidate, seed_candidate_from_components
+from rilixai import OptimizationTargets, optimization_targets_from_prompts
 
 
 SYSTEM_PROMPT_COMPONENT = "system_prompt"
@@ -94,9 +94,9 @@ Be specific. Include concrete values needed to continue."""
 TASK_TEMPLATE_SEED = "{{task}}"
 
 
-def apex_agents_seed_candidate() -> PromptCandidate:
-    """Return the seed :class:`PromptCandidate` for the APEX-Agents agent."""
-    return seed_candidate_from_components(
+def apex_agents_seed_targets() -> OptimizationTargets:
+    """Return the seed :class:`OptimizationTargets` for the APEX-Agents agent."""
+    return optimization_targets_from_prompts(
         {
             SYSTEM_PROMPT_COMPONENT: SYSTEM_PROMPT_SEED,
             TASK_TEMPLATE_COMPONENT: TASK_TEMPLATE_SEED,
@@ -117,6 +117,6 @@ __all__ = [
     "SYSTEM_PROMPT_SEED",
     "TASK_TEMPLATE_COMPONENT",
     "TASK_TEMPLATE_SEED",
-    "apex_agents_seed_candidate",
+    "apex_agents_seed_targets",
     "load_apex_agents_seed_prompts",
 ]

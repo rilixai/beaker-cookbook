@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+from typing import Any
+
 import pytest
-from rilixai.prompt_optimization.models import Case
+from rilixai import Case, CaseResult
 
 from hotpotqa.data.dataset import (
     HotpotQAParagraph,
@@ -14,12 +17,12 @@ from hotpotqa.data.dataset import (
 from hotpotqa.optimization.metrics import (
     ANSWER_F1_FIELD,
     ANSWER_FIELD,
+    RETRIEVED_TITLES_KEY,
     SUPPORTING_TITLES_RECALL_FIELD,
-    HotpotQAMetricsCalculator,
+    HotpotQAScorer,
     f1_score,
     normalize_answer,
 )
-from hotpotqa.optimization.runtime import HotpotQARunResult
 
 
 # ─── dataset ────────────────────────────────────────────────────────────
@@ -229,57 +232,76 @@ def test_f1_score_yes_no_short_circuits_to_exact_match() -> None:
     assert f1_score("noanswer", "noanswer") == 1.0
 
 
-def test_metrics_calculator_aggregates_em_f1_and_recall() -> None:
-    metrics = HotpotQAMetricsCalculator()
-    results = {
-        "case-a": HotpotQARunResult(
-            answer="Eiffel Tower",
-            retrieved_titles=["Eiffel Tower", "Paris"],
-        ),
-        "case-b": HotpotQARunResult(
-            answer="wrong answer",
-            retrieved_titles=["Some Other Page"],
-        ),
-    }
-    ground_truth = {
-        "case-a": {"answer": "Eiffel Tower", "supporting_titles": ["Eiffel Tower", "Paris"]},
-        "case-b": {"answer": "Statue of Liberty", "supporting_titles": ["Statue of Liberty"]},
-    }
-    aggregate = metrics.calculate_metrics(results, ground_truth)
+def _gt_case(*, answer: str, titles: list[str]) -> Case:
+    """Build a Case whose ground_truth carries the gold answer + titles.
 
-    assert aggregate.field_sample_counts[ANSWER_FIELD] == 2
-    assert aggregate.field_sample_counts[ANSWER_F1_FIELD] == 2
-    assert aggregate.field_sample_counts[SUPPORTING_TITLES_RECALL_FIELD] == 2
-
-    assert aggregate.field_accuracies[ANSWER_FIELD] == pytest.approx(0.5)
-    # Case A: F1=1.0 (perfect), Case B: F1=0.0 (no token overlap with "Statue of Liberty")
-    assert aggregate.field_accuracies[ANSWER_F1_FIELD] == pytest.approx(0.5)
-    # Case A: 2/2 gold titles retrieved; Case B: 0/1 retrieved → mean 0.5.
-    assert aggregate.field_accuracies[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(0.5)
+    ``record_to_case`` bundles ``answer`` + ``supporting_titles`` onto
+    ``case.ground_truth`` — exactly the keys :class:`HotpotQAScorer`
+    scores against.
+    """
+    record = HotpotQARecord(
+        case_id="case",
+        question="q?",
+        answer=answer,
+        question_type="bridge",
+        level="easy",
+        paragraphs=(),
+        supporting_titles=tuple(titles),
+    )
+    return record_to_case(record)
 
 
-def test_metrics_calculator_skips_samples_without_supervised_signal() -> None:
-    metrics = HotpotQAMetricsCalculator()
-    results = {"case-x": HotpotQARunResult(answer="anything", retrieved_titles=[])}
-    ground_truth = {"case-x": {"answer": "", "supporting_titles": []}}
-    aggregate = metrics.calculate_metrics(results, ground_truth)
+def _score(*, output: dict, answer: str, titles: list[str]) -> Any:
+    """Score one run_case ``output`` dict via :class:`HotpotQAScorer`."""
+    scorer = HotpotQAScorer()
+    return asyncio.run(
+        scorer.score_case(case=_gt_case(answer=answer, titles=titles), result=CaseResult(output=output))
+    )
 
-    assert aggregate.field_sample_counts[ANSWER_FIELD] == 0
-    assert aggregate.field_sample_counts[ANSWER_F1_FIELD] == 0
-    assert aggregate.field_sample_counts[SUPPORTING_TITLES_RECALL_FIELD] == 0
+
+def test_scorer_scores_em_f1_and_recall_per_case() -> None:
+    # Case A: perfect answer + both gold titles retrieved.
+    score_a = _score(
+        output={ANSWER_FIELD: "Eiffel Tower", RETRIEVED_TITLES_KEY: ["Eiffel Tower", "Paris"]},
+        answer="Eiffel Tower",
+        titles=["Eiffel Tower", "Paris"],
+    )
+    assert score_a.field_scores[ANSWER_FIELD] == pytest.approx(1.0)
+    assert score_a.field_scores[ANSWER_F1_FIELD] == pytest.approx(1.0)
+    assert score_a.field_scores[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(1.0)
+    # Objective collapses to pure EM (default field weights).
+    assert score_a.objective == pytest.approx(1.0)
+
+    # Case B: wrong answer (no token overlap) + zero gold titles retrieved.
+    score_b = _score(
+        output={ANSWER_FIELD: "wrong answer", RETRIEVED_TITLES_KEY: ["Some Other Page"]},
+        answer="Statue of Liberty",
+        titles=["Statue of Liberty"],
+    )
+    assert score_b.field_scores[ANSWER_FIELD] == pytest.approx(0.0)
+    assert score_b.field_scores[ANSWER_F1_FIELD] == pytest.approx(0.0)
+    assert score_b.field_scores[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(0.0)
+    assert score_b.objective == pytest.approx(0.0)
+
+
+def test_scorer_skips_fields_without_supervised_signal() -> None:
+    score = _score(
+        output={ANSWER_FIELD: "anything", RETRIEVED_TITLES_KEY: []},
+        answer="",
+        titles=[],
+    )
+    assert ANSWER_FIELD not in score.field_scores
+    assert ANSWER_F1_FIELD not in score.field_scores
+    assert SUPPORTING_TITLES_RECALL_FIELD not in score.field_scores
 
 
 def test_supporting_titles_recall_is_case_insensitive() -> None:
-    metrics = HotpotQAMetricsCalculator()
-    aggregate = metrics.calculate_metrics(
-        results={
-            "case": HotpotQARunResult(answer="x", retrieved_titles=["EIFFEL TOWER", "paris"]),
-        },
-        ground_truth={
-            "case": {"answer": "x", "supporting_titles": ["Eiffel Tower", "Paris"]},
-        },
+    score = _score(
+        output={ANSWER_FIELD: "x", RETRIEVED_TITLES_KEY: ["EIFFEL TOWER", "paris"]},
+        answer="x",
+        titles=["Eiffel Tower", "Paris"],
     )
-    assert aggregate.field_accuracies[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(1.0)
+    assert score.field_scores[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(1.0)
 
 
 # ─── rilixai Modal sandbox @spec wiring ─────────────────────────────────

@@ -30,53 +30,63 @@ export OPENAI_API_KEY=sk-...    # agent + summarize (gpt-4.1-mini default)
 
 ## Run locally
 
-```bash
-# Optimize on a paper-aligned slice (use a smaller --max-metric-calls for smoke)
-uv run python -m hotpotqa.cli optimize \
-    --train-size 150 --max-metric-calls 6871 \
-    --reflection-model openai/gpt-4.1 \
-    --output-dir hotpotqa_results/optimize-150
+This recipe depends on the lightweight `rilixai` SDK only. The local CLI
+covers the two SDK-only paths — `validate` (offline structural check) and
+`evaluate` (score one candidate via the SDK `run_case` + scorer loop). The
+full GEPA optimize loop runs server-side via `rilixai run` (see the Modal
+section below); the optimizer engine lives in the optional `rilixai-runtime`
+package, not in this recipe.
 
-# Evaluate (omit --candidate-json to score the seed prompts)
+```bash
+# Validate the spec structure offline (no network, no dataset download)
+uv run python -m hotpotqa.cli validate
+
+# Evaluate one candidate (omit --candidate-json to score the seed prompts)
 uv run python -m hotpotqa.cli evaluate \
-    --candidate-json hotpotqa_results/optimize-150/best_candidate.json \
-    --output-dir hotpotqa_results/after-150
+    --split test --candidate-json path/to/candidate.json \
+    --output-dir hotpotqa_results/seed
 ```
 
-Defaults are paper-aligned (`--max-metric-calls 6871` matches the artifact's
-HotpotQA budget; `--reflection-model openai/gpt-4.1` matches the paper's
-stronger reflection LM). Evaluate with no flags scores the seed candidate on
-the 300-case fullwiki test slice. See `--help` for all flags.
-
-A train-size sweep is also available:
-
-```bash
-uv run python -m hotpotqa.scripts.run_train_size_sweep \
-    --output-root hotpotqa_sweep --skip-existing
-```
+Evaluate with no flags scores the seed candidate on the 300-case fullwiki
+test slice. See `--help` for all flags.
 
 ## Run on Modal (rilixai sandbox)
 
 `optimization/spec.py` registers a `@spec(name="hotpotqa-agent")` factory
 that rilixai's sandbox runs. `sandbox.py` builds the image, promotes it to
-`hotpotqa-agent@production`, and triggers a run in one shot:
+`hotpotqa-agent@production`, and triggers a run in one shot.
+
+**A dataset upload is required.** The migrated spec no longer loads data
+itself — the optimizer reads its cases from an uploaded JSONL dataset via
+`HotpotQADataLoader` (row schema: raw `hotpotqa/hotpot_qa` records; see
+`HOTPOTQA_DATASET_SCHEMA` in `hotpotqa/data/dataset.py`). A run triggered with
+no dataset reference is rejected at startup. Upload a split directory once, then
+trigger:
 
 ```bash
 export RILIXAI_API_KEY=sk-...
 export RILIXAI_API_BASE_URL=https://<id>.execute-api.<region>.amazonaws.com/prod/
+export RILIXAI_AGENT_KEY=hotpotqa-agent   # agent the trigger targets (or pass --agent)
+
+# One-time (or when the data changes): upload the JSONL split as a dataset.
+uv run rilixai dataset upload --name hotpotqa-agent-dataset path/to/jsonl-dir/
 
 uv run hotpotqa/sandbox.py --build   # build + promote + trigger
 uv run hotpotqa/sandbox.py           # trigger only (current @production)
 ```
 
+The trigger defaults to `--dataset hotpotqa-agent-dataset@production` and
+`--spec hotpotqa-agent@production`; override either to pin a specific revision.
+
 `OPENAI_API_KEY` is bound as a project-level secret on rilixai's side,
 injected into each sandbox.
 
-To trigger from code, or to tune knobs (`max_metric_calls`, `retrieval_mode`,
-`train_size`, models, …), call `client.create_optimization_run(...)` — the
-run config keys are documented in `_DEFAULT_SANDBOX_CONFIG` at the top of
-`hotpotqa/optimization/spec.py`. Roll back with
-`uv run rilixai spec promote hotpotqa-agent --version <older-sha>`.
+To trigger from code, or to tune the agent knobs (`max_metric_calls`,
+`retrieval_mode`, models, …), call `client.create_optimization_run(...)` with a
+`dataset_ref` — the run config keys are documented in `_DEFAULT_SANDBOX_CONFIG`
+at the top of `hotpotqa/optimization/spec.py`. The train/val split is derived
+from the uploaded dataset server-side, so there are no `train_size`/`val_size`
+knobs. Roll back with `uv run rilixai spec promote hotpotqa-agent v<older-sha>`.
 
 CI (`.github/workflows/push-spec.yml`) runs `sandbox.py --build --no-trigger`
 on every merge to `main` that touches `hotpotqa/`: it ships the image and

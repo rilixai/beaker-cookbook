@@ -23,10 +23,32 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from rilixai.prompt_optimization.models import Case
+from rilixai import Case, CaseDataLoader, DatasetRowContext, DatasetSchema
 
 
 logger = logging.getLogger(__name__)
+
+
+# Dataset row schema for the ``hotpotqa/hotpot_qa`` task objects. Declared
+# on :class:`HotpotQADataLoader` so rilixai's upload surfaces can validate
+# JSONL rows before a hosted run. Each row is one raw HF HotpotQA record.
+HOTPOTQA_DATASET_SCHEMA = DatasetSchema(
+    json_schema={
+        "type": "object",
+        "required": ["question", "answer"],
+        "properties": {
+            "id": {"type": "string"},
+            "_id": {"type": "string"},
+            "question": {"type": "string", "minLength": 1},
+            "answer": {"type": "string"},
+            "type": {"type": "string"},
+            "level": {"type": "string"},
+            "supporting_facts": {"type": "object"},
+            "context": {"type": "object"},
+        },
+        "additionalProperties": True,
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -336,3 +358,35 @@ def load_hotpotqa_paper_split(
     global_indices = [start + i for i in local_indices]
     records: list[Mapping[str, Any]] = [dataset[i] for i in global_indices]
     return cases_from_records(records)
+
+
+class HotpotQADataLoader(CaseDataLoader[HotpotQARecord]):
+    """Typed rilixai data loader over raw ``hotpotqa/hotpot_qa`` rows.
+
+    Maps each raw HF record to a normalized :class:`HotpotQARecord`
+    (``parse_row``) and emits exactly one :class:`Case` per record
+    (``iter_cases``). The gold answer + supporting titles are bundled onto
+    the case's ground truth so :class:`HotpotQAScorer` can score EM / F1 /
+    supporting-title recall after the agent runs.
+    """
+
+    dataset_schema = HOTPOTQA_DATASET_SCHEMA
+
+    def parse_row(self, raw: Mapping[str, Any], context: DatasetRowContext) -> HotpotQARecord:
+        return _normalize_record(raw, index_hint=context.line_number or 0)
+
+    def iter_cases(self, row: HotpotQARecord, context: DatasetRowContext) -> Iterable[Case]:
+        del context
+        yield record_to_case(row)
+
+
+__all__ = [
+    "HOTPOTQA_DATASET_SCHEMA",
+    "HotpotQADataLoader",
+    "HotpotQAParagraph",
+    "HotpotQARecord",
+    "cases_from_records",
+    "load_hotpotqa_paper_split",
+    "load_hotpotqa_split",
+    "record_to_case",
+]

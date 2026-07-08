@@ -8,16 +8,11 @@ optimization (the leakage-free evaluation the plan calibrates to).
 
 This module groups the world-aware split helpers:
 
-* :func:`world_held_out_val_split` — carve inner validation out of a
-  train pool by holding out whole worlds (used by both the local CLI
-  and the Modal ``build_spec``).
-* :func:`fixed_val_split` — a fixed cross-world validation pool that
-  stays constant across a train-size sweep (local CLI).
+* :func:`fixed_val_split` — a fixed cross-world validation pool used by
+  ``evaluate --split validation`` to score a candidate on whole worlds
+  disjoint from the train pool.
 * :func:`stratified_case_cap` — round-robin cap to ``n`` cases that
-  keeps the world set as wide as possible (used everywhere).
-* :func:`world_level_folds` — the k-fold partitioner behind the CLI's
-  ``kfold`` command: shuffle the world ids under a seed and partition
-  into ``k`` near-equal, disjoint test groups.
+  keeps the world set as wide as possible (``evaluate --test-size``).
 
 All helpers are deterministic given their ``(cases, …, seed)`` inputs.
 """
@@ -32,8 +27,6 @@ from typing import Any
 __all__ = [
     "fixed_val_split",
     "stratified_case_cap",
-    "world_held_out_val_split",
-    "world_level_folds",
 ]
 
 
@@ -126,9 +119,7 @@ def stratified_case_cap(
     ``mode="stratified"`` (default): round-robin across the pool's worlds
     so the world set stays as wide as possible at every ``n`` — the only
     varying axis is per-world depth, giving a clean "more data, same
-    worlds" scaling curve. ``mode="frontslice"``: legacy ``pool[:n]``
-    (worlds collapse at small ``n`` — confounds the curve). ``n=None``
-    returns the full pool unchanged.
+    worlds" scaling curve. ``n=None`` returns the full pool unchanged.
 
     ``seed`` shuffles the *within-world* case order (deterministically per
     seed, like the other splitters in this module) so the cases chosen to
@@ -140,10 +131,8 @@ def stratified_case_cap(
     pool = list(train_pool)
     if n is None or n >= len(pool):
         return pool
-    if mode == "frontslice":
-        return pool[:n]
     if mode != "stratified":
-        raise ValueError(f"stratified_case_cap mode must be 'stratified' or 'frontslice', got {mode!r}.")
+        raise ValueError(f"stratified_case_cap mode must be 'stratified', got {mode!r}.")
     by_world = _group_by_world(pool)
     rng = _random.Random(seed)
     groups: list[list[Any]] = []
@@ -152,123 +141,3 @@ def stratified_case_cap(
         rng.shuffle(group)
         groups.append(group)
     return _round_robin_take(groups, n)
-
-
-def world_level_folds(
-    world_ids: Sequence[str],
-    k: int = 5,
-    seed: int = 0,
-) -> list[tuple[list[str], list[str]]]:
-    """Partition ``world_ids`` into ``k`` ``(train_world_ids, test_world_ids)`` folds.
-
-    Deterministic given ``(world_ids, k, seed)``:
-
-    1. De-duplicate and sort ``world_ids`` (stable starting order so
-       the shuffle is reproducible regardless of input ordering).
-    2. Shuffle with ``random.Random(seed)``.
-    3. Partition into ``k`` contiguous test groups of near-equal size
-       (sizes differ by at most one).
-    4. For each fold, ``train`` = every world NOT in that fold's test
-       group.
-
-    Invariants asserted before returning:
-
-    * Every world appears in exactly one test fold (a partition).
-    * Fold sizes are balanced (max - min <= 1).
-
-    For the 10 investment-banking worlds with ``k=5`` this yields 5
-    folds of 2 test worlds / 8 train worlds.
-    """
-    if k < 2:
-        raise ValueError(f"world_level_folds requires k >= 2, got {k}.")
-    unique_sorted = sorted({str(w) for w in world_ids if str(w)})
-    n = len(unique_sorted)
-    if n < k:
-        raise ValueError(f"world_level_folds needs at least k={k} distinct worlds, got {n} ({unique_sorted}).")
-
-    shuffled = list(unique_sorted)
-    _random.Random(seed).shuffle(shuffled)
-
-    # Contiguous near-equal partition: the first ``n % k`` folds get
-    # one extra world so sizes differ by at most one.
-    base, remainder = divmod(n, k)
-    folds: list[tuple[list[str], list[str]]] = []
-    cursor = 0
-    test_groups: list[list[str]] = []
-    for fold_index in range(k):
-        size = base + (1 if fold_index < remainder else 0)
-        test_group = shuffled[cursor : cursor + size]
-        cursor += size
-        test_groups.append(test_group)
-
-    for test_group in test_groups:
-        test_set = set(test_group)
-        train_group = [w for w in unique_sorted if w not in test_set]
-        folds.append((train_group, sorted(test_group)))
-
-    # Invariant: the union of test groups is an exact partition of the
-    # world set (every world in exactly one test fold).
-    seen: list[str] = []
-    for _, test_group in folds:
-        seen.extend(test_group)
-    assert sorted(seen) == unique_sorted, (
-        f"world_level_folds did not partition the worlds: {sorted(seen)} != {unique_sorted}"
-    )
-    assert len(seen) == len(set(seen)), "world_level_folds produced a world in more than one test fold"
-
-    # Invariant: balanced fold sizes (differ by at most one).
-    sizes = [len(test_group) for _, test_group in folds]
-    assert max(sizes) - min(sizes) <= 1, f"world_level_folds produced unbalanced folds: {sizes}"
-
-    return folds
-
-
-def world_held_out_val_split(
-    train_cases: Sequence[Any],
-    *,
-    n_val_worlds: int,
-    seed: int = 0,
-) -> tuple[list[Any], list[Any]]:
-    """Split a fold's train cases into ``(inner_train, validation)`` by WORLD.
-
-    GEPA selects candidates by validation score. If validation is a random
-    slice of the *same* worlds GEPA trains on, candidate selection rewards
-    in-world fit and the chosen prompt collapses on unseen worlds (exactly
-    what the Law fold-0 run showed: val 0.28 → held-out 0.14). Holding out
-    whole worlds for the inner validation makes GEPA select for *cross-world*
-    transfer instead.
-
-    Cases are grouped by ``group_key`` (set to ``world_id`` in
-    :func:`record_to_case`). ``n_val_worlds`` whole worlds are chosen
-    deterministically (``random.Random(seed)``) as validation; the rest are
-    inner-train. At least one world is always left for inner-train; if the
-    pool has only one world the split degenerates to (all, all) so optimize
-    still has a (leaky, last-resort) signal rather than crashing.
-    """
-    by_world: dict[str, list[Any]] = {}
-    for case in train_cases:
-        by_world.setdefault(str(getattr(case, "group_key", "") or ""), []).append(case)
-    worlds = sorted(by_world)
-    n_worlds = len(worlds)
-    if n_worlds == 0:
-        return [], []
-    if n_worlds == 1:
-        only = by_world[worlds[0]]
-        return list(only), list(only)
-
-    n_val = max(1, min(int(n_val_worlds), n_worlds - 1))
-    shuffled = list(worlds)
-    _random.Random(seed).shuffle(shuffled)
-    val_worlds = set(shuffled[:n_val])
-
-    inner_train: list[Any] = []
-    validation: list[Any] = []
-    for w in worlds:  # stable, sorted order
-        (validation if w in val_worlds else inner_train).extend(by_world[w])
-
-    assert inner_train, "world_held_out_val_split left no inner-train cases"
-    assert validation, "world_held_out_val_split left no validation cases"
-    # Invariant: inner-train and validation worlds are disjoint.
-    it_worlds = {str(getattr(c, "group_key", "") or "") for c in inner_train}
-    assert it_worlds.isdisjoint(val_worlds), "inner-train and validation worlds overlap"
-    return inner_train, validation

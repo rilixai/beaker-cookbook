@@ -25,7 +25,7 @@ from .prompts import (
     SYSTEM_PROMPT_SEED,
     TASK_TEMPLATE_COMPONENT,
     TASK_TEMPLATE_SEED,
-    apex_agents_seed_candidate,
+    apex_agents_seed_targets,
     load_apex_agents_seed_prompts,
 )
 from .types import AgentToolCall, ApexAgentsAgentOutput
@@ -41,6 +41,6 @@ __all__ = [
     "AgentToolCall",
     "ApexAgentsAgentOutput",
     "ApexReActAgent",
-    "apex_agents_seed_candidate",
+    "apex_agents_seed_targets",
     "load_apex_agents_seed_prompts",
 ]

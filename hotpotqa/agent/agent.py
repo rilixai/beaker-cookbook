@@ -11,7 +11,7 @@ structured output type, two optimizable prompts.
     summarization. The agent decides whether to call it (and whether
     to pass a previous summary as ``context``).
 
-* **Optimizable components** (2 — matches the rilixai PromptCandidate dict)
+* **Optimizable components** (2 — matches the rilixai OptimizationTargets dict)
   * ``policy_prompt`` → the agent's ``system_prompt`` (tool-use
     policy).
   * ``summarize_prompt`` → injected as the ``system`` message in the
@@ -166,7 +166,13 @@ class HotpotQAPydanticAgent:
         # correctness corruption.
         self._build_lock = threading.Lock()
 
-        self._agent = self._build_agent()
+        # Built lazily on first ``apply_candidate``/``forward``. Constructing a
+        # ``pydantic_ai.Agent`` from a model string eagerly infers the provider
+        # and instantiates its client (e.g. ``AsyncOpenAI()``), which raises
+        # without ``OPENAI_API_KEY``. Deferring the build keeps spec
+        # construction — and the offline ``cli.py validate`` path that builds a
+        # spec but never runs a case — network- and key-free.
+        self._agent: Agent[HotpotQADeps, HotpotQAOutput] | None = None
 
     def _build_agent(self) -> Agent[HotpotQADeps, HotpotQAOutput]:
         """Construct a fresh inner ``pydantic_ai.Agent`` with the current policy prompt.
@@ -213,6 +219,13 @@ class HotpotQAPydanticAgent:
 
         return agent
 
+    def _ensure_agent(self) -> Agent[HotpotQADeps, HotpotQAOutput]:
+        """Return the inner Agent, building it on first use (see ``__init__``)."""
+        with self._build_lock:
+            if self._agent is None:
+                self._agent = self._build_agent()
+            return self._agent
+
     def apply_candidate(self, components: Mapping[str, str]) -> None:
         """Apply a new candidate's components.
 
@@ -235,7 +248,10 @@ class HotpotQAPydanticAgent:
         with self._build_lock:
             if policy_prompt is not None and policy_prompt != self._current_policy_prompt:
                 self._current_policy_prompt = policy_prompt
-                self._agent = self._build_agent()
+                # Only rebuild if the Agent already exists; otherwise the new
+                # policy prompt is picked up when it is lazily built.
+                if self._agent is not None:
+                    self._agent = self._build_agent()
             if summarize_prompt is not None:
                 self._current_summarize_prompt = summarize_prompt
 
@@ -264,7 +280,7 @@ class HotpotQAPydanticAgent:
         # completion. The summarize snapshot rides through ``deps`` so
         # ``_do_summarize`` (invoked indirectly via PydanticAI's tool
         # dispatch) reads the same value the case started with.
-        agent = self._agent
+        agent = self._ensure_agent()
         summarize_prompt_snapshot = self._current_summarize_prompt
 
         deps = HotpotQADeps(

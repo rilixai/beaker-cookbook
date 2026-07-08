@@ -1,10 +1,11 @@
-"""Factory that assembles a :class:`PromptOptimizationSpec` for APEX-Agents.
+"""Factory that assembles a rilixai :class:`~rilixai.Spec` for APEX-Agents.
 
-Once built, the same ``run_optimization_from_spec`` and
-``build_adapter_from_spec`` helpers used for production extraction
-tasks run APEX-Agents end-to-end. The factory accepts an
-:class:`ApexAgentsConfig` and the three-component seed candidate
-(``system_prompt`` + ``task_template`` + ``resum_summary_prompt``).
+The SDK :class:`~rilixai.Spec` binds four things the optimizer needs:
+the seed :class:`~rilixai.OptimizationTargets` (``system_prompt`` +
+``task_template`` + ``resum_summary_prompt``), a
+:class:`~apex_agents.data.dataset.ApexAgentsDataLoader` that turns
+uploaded JSONL rows into cases, the async ``run_case`` that drives the
+ReAct agent + rubric judge, and the :class:`ApexAgentsScorer`.
 
 ``world_factory`` is plumbed through so tests can inject a
 :class:`FakeWorld` factory; ``judge`` lets tests inject a stub rubric
@@ -19,67 +20,31 @@ run. See the cookbook README for the push + promote + trigger flow.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any
 
-from rilixai import spec
-from rilixai.prompt_optimization.models import Case, PromptCandidate
-from rilixai.prompt_optimization.protocols import EvaluationProfile
-from rilixai.prompt_optimization.spec import OptimizationContext, PromptOptimizationSpec
+from rilixai import CaseDataLoader, OptimizationContext, OptimizationTargets, Spec, spec
 
-from ..agent.prompts import apex_agents_seed_candidate
+from ..agent.prompts import apex_agents_seed_targets
 from ..config import ApexAgentsConfig
-from ..data.dataset import load_apex_agents_cases
-from ..data.world_splits import stratified_case_cap, world_held_out_val_split
-from .metrics import (
-    APEX_AGENTS_FIELD_WEIGHTS,
-    ApexAgentsMetricsCalculator,
-    build_apex_agents_field_extractor,
-)
-from .runtime import build_apex_agents_runtime
-
-
-_APEX_AGENTS_PROFILE_KEY = "apex_agents"
-
-
-def _apex_agents_agent_resolver(**_: Any) -> tuple[None, None]:
-    """The runtime owns the agent + world, so adapter agent resolution is a no-op."""
-    return (None, None)
-
-
-def _build_apex_agents_profile_resolver(
-    metrics: ApexAgentsMetricsCalculator,
-    field_weights: dict[str, float] | None = None,
-) -> Any:
-    profile = EvaluationProfile(
-        profile_key=_APEX_AGENTS_PROFILE_KEY,
-        metrics_calculator=metrics,
-        field_weights=dict(field_weights or APEX_AGENTS_FIELD_WEIGHTS),
-    )
-
-    def _resolver(**_: Any) -> EvaluationProfile:
-        return profile
-
-    return _resolver
+from ..data.dataset import ApexAgentsDataLoader, ApexAgentsRecord
+from .metrics import ApexAgentsScorer
+from .runtime import build_apex_agents_run_case
 
 
 def build_apex_agents_spec(
     *,
-    cases_by_split: dict[str, Sequence[Case]],
-    seed_candidate: PromptCandidate | None = None,
+    seed_targets: OptimizationTargets | None = None,
     config: ApexAgentsConfig | None = None,
     agent: Any | None = None,
     world_factory: Callable[[Any], Any] | None = None,
     model_factory: Callable[[str, float], Any] | None = None,
     judge: Callable[[str, str, str], bool] | None = None,
-    name: str = "apex_agents",
-    user_id: str = "__apex_agents_benchmark__",
-    model: str | None = None,
-    max_concurrency: int = 4,
-    reflection_evidence_mode: str = "curated_plus_trace",
+    name: str = "apex-agents",
     field_weights: dict[str, float] | None = None,
-) -> PromptOptimizationSpec:
-    """Build a ready-to-run :class:`PromptOptimizationSpec` for APEX-Agents.
+    data_loader: CaseDataLoader[ApexAgentsRecord] | None = None,
+) -> Spec:
+    """Build a ready-to-run rilixai :class:`~rilixai.Spec` for APEX-Agents.
 
     ``world_factory`` is required at run time unless a pre-built
     ``agent`` is supplied — production code passes the HF world
@@ -87,33 +52,26 @@ def build_apex_agents_spec(
     ``judge`` defaults to the litellm rubric judge; tests inject a
     stub.
 
-    ``curated_plus_trace`` is the default reflection mode because the
-    runtime populates ``trace_evidence.per_component_feedback`` that
-    scalar field scores cannot represent.
+    The optimizer sources cases from ``data_loader`` (uploaded JSONL);
+    ``ApexAgentsDataLoader`` maps each row to one :class:`~rilixai.Case`
+    whose ``run_metrics.trace_evidence.per_component_feedback`` carries
+    the reflection signal scalar field scores cannot represent.
     """
     cfg = config or ApexAgentsConfig()
-    seed = seed_candidate or apex_agents_seed_candidate()
-    metrics = ApexAgentsMetricsCalculator()
-    runtime = build_apex_agents_runtime(
+    seed = seed_targets or apex_agents_seed_targets()
+    run_case = build_apex_agents_run_case(
         config=cfg,
         agent=agent,
         world_factory=world_factory,
         model_factory=model_factory,
         judge=judge,
     )
-    return PromptOptimizationSpec(
-        cases_by_split=cases_by_split,
-        seed_candidate=seed,
-        extraction_runtime=runtime,
-        agent_resolver=_apex_agents_agent_resolver,
-        field_extractor=build_apex_agents_field_extractor(),
-        evaluation_profile_resolver=_build_apex_agents_profile_resolver(metrics, field_weights),
+    return Spec(
         name=name,
-        user_id=user_id,
-        model=model,
-        task_type="apex_agent",
-        max_concurrency=max_concurrency,
-        reflection_evidence_mode=reflection_evidence_mode,
+        seed_targets=seed,
+        data_loader=data_loader or ApexAgentsDataLoader(),
+        run_case=run_case,
+        scorer=ApexAgentsScorer(field_weights=field_weights),
     )
 
 
@@ -123,17 +81,11 @@ def build_apex_agents_spec(
 # Defaults the sandbox build_spec applies when ctx.config omits a key.
 # See README for the full key reference (GEPA vs cookbook split).
 _DEFAULT_SANDBOX_CONFIG: dict[str, Any] = {
-    "domain": "law",
-    "val_worlds": 2,
-    "val_size": 20,
-    "train_size": 25,
     "task_model": "openai/gpt-4.1-mini-2025-04-14",
     "task_temperature": 0.0,
     "judge_model": "gemini/gemini-2.5-flash",
     "max_steps": 60,
     "cost_limit": 3.0,
-    "seed": 0,
-    "max_concurrency": 4,
 }
 
 
@@ -141,9 +93,10 @@ _DEFAULT_SANDBOX_CONFIG: dict[str, Any] = {
     name="apex-agents",
     description="APEX-Agents (Mercor law/IB) — faithful ReAct toolbelt agent + GEPA",
     metadata={"benchmark": "apex_agents", "agent_kind": "react_toolbelt"},
+    dataset_schema=ApexAgentsDataLoader.dataset_schema,
 )
-def build_spec(ctx: OptimizationContext) -> PromptOptimizationSpec:
-    """Spec factory for the rilixai Modal sandbox path. See README for usage.
+def build_spec(ctx: OptimizationContext) -> Spec:
+    """Spec factory for the rilixai sandbox path. See README for usage.
 
     No ``version=...`` argument here: ``sandbox.py --build`` supplies
     the push-time version (defaulting to ``v<short_sha>``) via
@@ -152,6 +105,11 @@ def build_spec(ctx: OptimizationContext) -> PromptOptimizationSpec:
     ``apex-agents@production`` so rilixai resolves the current
     promoted version server-side — no rilix-side / cookbook-side
     version bumps for routine deploys.
+
+    Under the SDK-only shape the optimizer sources cases from the
+    uploaded JSONL dataset via :class:`ApexAgentsDataLoader`; the
+    ReAct-agent knobs still come from ``ctx.config`` (merged over
+    :data:`_DEFAULT_SANDBOX_CONFIG`).
     """
     cfg_in: dict[str, Any] = {**_DEFAULT_SANDBOX_CONFIG, **dict(ctx.config or {})}
     apex_cfg = ApexAgentsConfig(
@@ -162,36 +120,14 @@ def build_spec(ctx: OptimizationContext) -> PromptOptimizationSpec:
         cost_limit=float(cfg_in["cost_limit"]),
     )
 
-    # Load all cases for the requested domain, then carve train/val
-    # by world. Held-out val worlds are disjoint from train worlds,
-    # so GEPA selects for cross-world transfer (not in-world fit) —
-    # this avoids the val→test collapse the Law fold-0 run originally
-    # showed.
-    all_cases = load_apex_agents_cases(domain=str(cfg_in["domain"]))
-    inner_train, validation = world_held_out_val_split(
-        all_cases,
-        n_val_worlds=int(cfg_in["val_worlds"]),
-        seed=int(cfg_in["seed"]),
-    )
-    # Stratified caps: round-robin across worlds so train width stays
-    # constant per ``train_size`` point and val sampling is balanced.
-    train_cases = stratified_case_cap(inner_train, int(cfg_in["train_size"]), seed=int(cfg_in["seed"]))
-    val_cases = stratified_case_cap(validation, int(cfg_in["val_size"]), seed=int(cfg_in["seed"]))
-
     # World factory: lazy HF download per case. Network is available
-    # inside the Modal container; ``build_world_factory`` extracts the
+    # inside the sandbox container; ``build_world_factory`` extracts the
     # per-case world zip + per-task input files on demand.
     from ..agent.world.world import build_world_factory
 
     return build_apex_agents_spec(
-        cases_by_split={
-            "train": list(train_cases),
-            "validation": list(val_cases),
-        },
         config=apex_cfg,
         world_factory=build_world_factory(),
-        model=cfg_in.get("model") or ctx.model,
-        max_concurrency=int(cfg_in["max_concurrency"]),
     )
 
 

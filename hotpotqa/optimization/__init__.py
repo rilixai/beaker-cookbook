@@ -2,13 +2,12 @@
 
 Everything the rilixai optimizer consumes lives here:
 
-* :mod:`.runtime` — the async ``ExtractionRuntime`` adapter the optimizer
+* :mod:`.runtime` — the async ``RunCase`` adapter the optimizer
   invokes per case.
-* :mod:`.spec` — assembles the :class:`PromptOptimizationSpec` that
-  ``run_optimization_from_spec`` and ``build_adapter_from_spec``
-  consume.
-* :mod:`.metrics` — the :class:`HotpotQAMetricsCalculator` that scores
-  per-case outputs against ground truth.
+* :mod:`.spec` — assembles the :class:`~rilixai.Spec` that the hosted
+  optimizer and ``validate_spec`` consume.
+* :mod:`.metrics` — the :class:`HotpotQAScorer` (:class:`~rilixai.CaseScorer`)
+  that scores per-case outputs against ground truth.
 * :mod:`.feedback` — per-component textual feedback the reflection LM
   reads when rewriting ``policy_prompt`` / ``summarize_prompt``.
 
@@ -25,17 +24,15 @@ from .feedback import (
     AGENT_SUMMARIZE_COMPONENT,
     build_agent_per_component_feedback,
 )
+from .local_eval import LocalEvalReport, evaluate_targets_on_cases, run_local_evaluation
 from .metrics import (
     ANSWER_F1_FIELD,
     ANSWER_FIELD,
     HOTPOTQA_FIELD_WEIGHTS,
     SUPPORTING_TITLES_RECALL_FIELD,
-    HotpotQAFieldConfig,
-    HotpotQAMetricsCalculator,
-    HotpotQAMetricsResult,
-    build_hotpotqa_field_extractor,
+    HotpotQAScorer,
 )
-from .runtime import HotpotQARunResult, build_agent_run_metrics, build_hotpotqa_runtime
+from .runtime import build_agent_run_metrics, build_hotpotqa_run_case
 from .spec import build_hotpotqa_spec
 
 
@@ -47,13 +44,12 @@ __all__ = [
     "HOTPOTQA_FIELD_WEIGHTS",
     "SUPPORTING_TITLES_RECALL_FIELD",
     "HotpotQAConfig",
-    "HotpotQAFieldConfig",
-    "HotpotQAMetricsCalculator",
-    "HotpotQAMetricsResult",
-    "HotpotQARunResult",
+    "HotpotQAScorer",
+    "LocalEvalReport",
     "build_agent_per_component_feedback",
     "build_agent_run_metrics",
-    "build_hotpotqa_field_extractor",
-    "build_hotpotqa_runtime",
+    "build_hotpotqa_run_case",
     "build_hotpotqa_spec",
+    "evaluate_targets_on_cases",
+    "run_local_evaluation",
 ]

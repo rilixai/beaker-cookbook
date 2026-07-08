@@ -20,11 +20,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from rilixai.prompt_optimization.evaluation import evaluate_candidate_on_cases
-from rilixai.prompt_optimization.models import Case
-from rilixai.prompt_optimization.spec import build_adapter_from_spec, validate_spec
+from rilixai import Case, CaseResult, validate_spec
 
-from apex_agents.agent.prompts import apex_agents_seed_candidate
+from apex_agents.agent.prompts import apex_agents_seed_targets
 from apex_agents.agent.types import (
     AgentToolCall,
     ApexAgentsAgentOutput,
@@ -43,21 +41,19 @@ from apex_agents.data.dataset import (
 from apex_agents.data.world_splits import (
     fixed_val_split,
     stratified_case_cap,
-    world_held_out_val_split,
-    world_level_folds,
 )
 from apex_agents.optimization.feedback import (
     SYSTEM_PROMPT_COMPONENT,
     build_apex_per_component_feedback,
 )
+from apex_agents.optimization.local_eval import run_local_evaluation
 from apex_agents.optimization.metrics import (
     APEX_AGENTS_FIELD_WEIGHTS,
     RUBRIC_FIELD,
-    ApexAgentsMetricsCalculator,
+    ApexAgentsScorer,
     build_rubric_judge,
     score_rubric,
 )
-from apex_agents.optimization.runtime import ApexAgentsRunResult
 from apex_agents.optimization.spec import build_apex_agents_spec
 from apex_agents.tests.fake_world import FakeWorld, fake_world_factory
 
@@ -310,10 +306,10 @@ def _scripted_model() -> Any:
     return _M()
 
 
-def test_runtime_emits_per_component_feedback_and_scores_with_stub_judge() -> None:
+def test_run_case_emits_per_component_feedback_and_scores_with_stub_judge() -> None:
     from apex_agents.agent.agent import ApexReActAgent
     from apex_agents.agent.prompts import load_apex_agents_seed_prompts
-    from apex_agents.optimization.runtime import build_apex_agents_runtime
+    from apex_agents.optimization.runtime import build_apex_agents_run_case
 
     sys_p, task_t, resum_p = load_apex_agents_seed_prompts()
     agent = ApexReActAgent(
@@ -332,11 +328,13 @@ def test_runtime_emits_per_component_feedback_and_scores_with_stub_judge() -> No
         return "EV" in answer
 
     cfg = ApexAgentsConfig()
-    runtime = build_apex_agents_runtime(config=cfg, agent=agent, judge=_stub_judge)
-    result = asyncio.run(runtime(input=_pipeline_record(), candidate=apex_agents_seed_candidate()))
+    run_case = build_apex_agents_run_case(config=cfg, agent=agent, judge=_stub_judge)
+    case = record_to_case(_pipeline_record())
+    result = asyncio.run(run_case(case=case, targets=apex_agents_seed_targets(), runtime=None))
 
-    assert isinstance(result, ApexAgentsRunResult)
-    assert result.rubric_pass_rate == 1.0
+    assert isinstance(result, CaseResult)
+    assert result.output[RUBRIC_FIELD] == 1.0
+    assert result.output["final_answer"] == "The EV is $5M."
     assert judged and judged[0][1] == "The EV is $5M."
     feedback = result.run_metrics["trace_evidence"]["per_component_feedback"]
     assert set(feedback) == {"system_prompt", "task_template", "resum_summary_prompt"}
@@ -349,54 +347,229 @@ def test_runtime_emits_per_component_feedback_and_scores_with_stub_judge() -> No
     assert aa["rubric_pass_rate"] == 1.0
 
 
-def test_runtime_requires_agent_or_world_factory() -> None:
-    from apex_agents.optimization.runtime import build_apex_agents_runtime
+def test_load_targets_accepts_prompts_components_and_flat_shapes(tmp_path: Path) -> None:
+    """`--candidate-json` must parse all three on-disk candidate shapes.
 
-    with pytest.raises(ValueError, match="world_factory"):
-        build_apex_agents_runtime(config=ApexAgentsConfig())
-
-
-def test_wrap_runtime_with_progress_preserves_runtime_result_when_throttled() -> None:
-    """``_wrap_runtime_with_progress`` must return the inner result on every call.
-
-    Same regression as IFBench / HotpotQA / SWE-bench: an earlier
-    version ``return``-ed inside the ``finally`` block, silently
-    overriding the runtime's actual result with ``None``.
+    A legacy optimizer artifact wraps prompts under ``components`` (the
+    pre-migration ``PromptCandidate`` shape); the new SDK wire shape uses
+    ``prompts``; a bare ``{name: text}`` map is also accepted. All three must
+    round-trip to the same targets — silently mis-parsing the legacy shape
+    would score the wrong candidate with no error.
     """
-    from apex_agents.cli import _wrap_runtime_with_progress
+    from apex_agents.cli import _load_targets
 
-    async def _inner_runtime(**kwargs: object) -> dict[str, object]:
-        return {"rubric_pass_rate": 1.0, "kwargs_seen": kwargs}
+    expected = {"system_prompt": "S", "task_template": "T", "resum_summary_prompt": "R"}
+    for payload in ({"prompts": expected}, {"components": expected}, expected):
+        p = tmp_path / "cand.json"
+        p.write_text(json.dumps(payload))
+        assert _load_targets(p).to_dict() == expected
 
-    wrapped = _wrap_runtime_with_progress(
-        _inner_runtime,
-        label="test",
-        total=None,
-        log_every_n=10,
-        log_every_seconds=10_000.0,
+
+def test_heldout_subset_summary_excludes_reserved_validation_worlds() -> None:
+    """`evaluate --split all` must also report the clean cross-world subset.
+
+    The all-cases number is validation-inclusive; the held-out summary averages
+    ``rubric_pass_rate`` over only the cases whose world falls outside the
+    reserved validation pool, and over only the cases that were actually scored
+    (empty-rubric cases omit the field — see the #5 fix).
+    """
+    from apex_agents.cli import _heldout_subset_summary
+
+    per_case = [
+        {"group_key": "w-val-a", "field_scores": {RUBRIC_FIELD: 1.0}},
+        {"group_key": "w-val-b", "field_scores": {RUBRIC_FIELD: 1.0}},
+        {"group_key": "w-clean1", "field_scores": {RUBRIC_FIELD: 0.5}},
+        {"group_key": "w-clean2", "field_scores": {RUBRIC_FIELD: 0.1}},
+        {"group_key": "w-clean2", "field_scores": {}},  # unscoreable: held but not averaged
+    ]
+    out = _heldout_subset_summary(per_case, {"w-val-a", "w-val-b"})
+    assert out["excluded_world_ids"] == ["w-val-a", "w-val-b"]
+    assert out["num_heldout_cases"] == 3
+    assert out["num_heldout_scored"] == 2
+    assert abs(out[f"{RUBRIC_FIELD}_heldout"] - (0.5 + 0.1) / 2) < 1e-9
+
+    empty = _heldout_subset_summary(per_case[:2], {"w-val-a", "w-val-b"})
+    assert empty["num_heldout_cases"] == 0 and empty[f"{RUBRIC_FIELD}_heldout"] is None
+
+
+def test_run_case_scored_by_scorer_yields_objective() -> None:
+    """The scorer reads ``rubric_pass_rate`` off the run_case result output."""
+    scorer = ApexAgentsScorer()
+    result = CaseResult(output={RUBRIC_FIELD: 0.75, "final_answer": "x"})
+    score = asyncio.run(scorer.score_case(case=record_to_case(_pipeline_record()), result=result))
+    assert score.field_scores[RUBRIC_FIELD] == 0.75
+    assert score.objective == 0.75
+
+
+def test_scorer_excludes_unscoreable_case_from_field_accuracy() -> None:
+    """A ``None`` ``rubric_pass_rate`` (empty rubric) is omitted, not scored 0.
+
+    The pre-migration metrics layer skipped rubric-less cases so they could
+    not deflate the benchmark; the SDK ``CaseScore`` contract expresses that by
+    omitting the field. A real ``0.0`` (all criteria failed) must still count.
+    """
+    scorer = ApexAgentsScorer()
+    unscoreable = asyncio.run(
+        scorer.score_case(case=record_to_case(_pipeline_record()), result=CaseResult(output={RUBRIC_FIELD: None}))
+    )
+    assert unscoreable.field_scores == {}
+    genuine_zero = asyncio.run(
+        scorer.score_case(case=record_to_case(_pipeline_record()), result=CaseResult(output={RUBRIC_FIELD: 0.0}))
+    )
+    assert genuine_zero.field_scores == {RUBRIC_FIELD: 0.0}
+
+
+def test_run_case_signals_unscoreable_for_empty_rubric() -> None:
+    """A record with no rubric criteria yields ``rubric_pass_rate=None``."""
+    from apex_agents.agent.agent import ApexReActAgent
+    from apex_agents.agent.prompts import load_apex_agents_seed_prompts
+    from apex_agents.optimization.runtime import build_apex_agents_run_case
+
+    sys_p, task_t, resum_p = load_apex_agents_seed_prompts()
+    agent = ApexReActAgent(
+        model_name="scripted/test",
+        default_system_prompt=sys_p,
+        default_task_template=task_t,
+        default_resum_summary_prompt=resum_p,
+        world_factory=lambda _r: FakeWorld({}),
+        model_factory=lambda _n, _t: _scripted_model(),
     )
 
-    async def _drive() -> list[dict[str, object]]:
-        results = []
-        for i in range(12):
-            results.append(await wrapped(case_index=i))
-        return results
+    def _judge_must_not_fire(*_args: Any) -> bool:
+        raise AssertionError("judge should not run on an unscoreable (empty-rubric) case result")
 
-    results = asyncio.run(_drive())
-    assert len(results) == 12
-    for i, r in enumerate(results):
-        assert r is not None, f"call {i} returned None — finally-return regression"
-        assert r["rubric_pass_rate"] == 1.0
-        assert r["kwargs_seen"]["case_index"] == i
+    record = ApexAgentsRecord(
+        task_id="ib-empty",
+        task_name="memo",
+        domain="Investment Banking",
+        prompt="State the EV.",
+        world_id="world-a",
+        rubric=(),
+        task_input_files=(),
+        raw_task={"task_id": "ib-empty"},
+    )
+    run_case = build_apex_agents_run_case(config=ApexAgentsConfig(), agent=agent, judge=_judge_must_not_fire)
+    result = asyncio.run(run_case(case=record_to_case(record), targets=apex_agents_seed_targets(), runtime=None))
+    assert result.output[RUBRIC_FIELD] is None
+
+
+def test_local_eval_contains_per_case_errors() -> None:
+    """One case raising must score 0 (not abort the batch or drop results).
+
+    Mirrors the pre-migration contract: an errored case contributes zero to the
+    objective and every field accuracy so a single failure can't inflate — or
+    silently discard — the run.
+    """
+    from types import SimpleNamespace
+
+    from rilixai import CaseScore
+
+    from apex_agents.optimization.local_eval import evaluate_targets_on_cases
+
+    good = record_to_case(_pipeline_record())
+    bad = record_to_case(
+        ApexAgentsRecord(
+            task_id="ib-bad",
+            task_name="memo",
+            domain="Investment Banking",
+            prompt="State the EV.",
+            world_id="world-b",
+            rubric=(RubricCriterion("output_llm", "States an EV."),),
+            task_input_files=(),
+            raw_task={"task_id": "ib-bad"},
+        )
+    )
+
+    async def _run_case(*, case: Case, targets: Any, runtime: Any = None) -> CaseResult:
+        if case.case_id == "ib-bad":
+            raise RuntimeError("boom")
+        return CaseResult(output={RUBRIC_FIELD: 1.0})
+
+    class _Scorer:
+        async def score_case(self, *, case: Case, result: CaseResult) -> CaseScore:
+            return CaseScore(field_scores={RUBRIC_FIELD: 1.0}, objective=1.0, key=RUBRIC_FIELD)
+
+    spec = SimpleNamespace(run_case=_run_case, scorer=_Scorer())
+    report = asyncio.run(
+        evaluate_targets_on_cases(spec=spec, targets=apex_agents_seed_targets(), cases=[good, bad], max_concurrency=2)
+    )
+    assert report.num_cases == 2
+    assert report.num_errored == 1
+    # Errored case scored 0 on the objective and the rubric field: mean = 0.5.
+    assert report.objective == 0.5
+    assert report.field_accuracies[RUBRIC_FIELD] == 0.5
+    assert report.field_sample_counts[RUBRIC_FIELD] == 2
+    errored = next(c for c in report.per_case if c["case_id"] == "ib-bad")
+    assert errored["objective"] == 0.0
+    assert "RuntimeError: boom" in errored["error"]
+
+
+def test_local_eval_unscoreable_case_does_not_deflate_objective() -> None:
+    """An unscoreable (empty-rubric) case must not drag the objective mean.
+
+    The scorer omits every field for a rubric-less case (see the #5 fix), so
+    such a case is not measurable. It must be excluded from BOTH the field
+    accuracies and the objective mean — otherwise its ``objective=0`` would pull
+    the reported objective below ``field_accuracies``.
+    """
+    from types import SimpleNamespace
+
+    from rilixai import CaseScore
+
+    from apex_agents.optimization.local_eval import evaluate_targets_on_cases
+
+    good = record_to_case(_pipeline_record())
+    empty = record_to_case(
+        ApexAgentsRecord(
+            task_id="ib-empty",
+            task_name="memo",
+            domain="Investment Banking",
+            prompt="State the EV.",
+            world_id="world-c",
+            rubric=(),
+            task_input_files=(),
+            raw_task={"task_id": "ib-empty"},
+        )
+    )
+
+    async def _run_case(*, case: Case, targets: Any, runtime: Any = None) -> CaseResult:
+        return CaseResult(output={RUBRIC_FIELD: None if case.case_id == "ib-empty" else 1.0})
+
+    class _Scorer:
+        async def score_case(self, *, case: Case, result: CaseResult) -> CaseScore:
+            if result.output[RUBRIC_FIELD] is None:
+                # Unscoreable: no field, objective 0 (mirrors ApexAgentsScorer).
+                return CaseScore(field_scores={}, objective=0.0, key=RUBRIC_FIELD)
+            return CaseScore(field_scores={RUBRIC_FIELD: 1.0}, objective=1.0, key=RUBRIC_FIELD)
+
+    spec = SimpleNamespace(run_case=_run_case, scorer=_Scorer())
+    report = asyncio.run(
+        evaluate_targets_on_cases(
+            spec=spec, targets=apex_agents_seed_targets(), cases=[good, empty], max_concurrency=2
+        )
+    )
+    assert report.num_cases == 2
+    assert report.num_unscoreable == 1
+    assert report.num_errored == 0
+    # Only the scoreable case counts: objective == field accuracy == 1.0.
+    assert report.objective == 1.0
+    assert report.field_accuracies[RUBRIC_FIELD] == 1.0
+    assert report.field_sample_counts[RUBRIC_FIELD] == 1
+
+
+def test_run_case_requires_agent_or_world_factory() -> None:
+    from apex_agents.optimization.runtime import build_apex_agents_run_case
+
+    with pytest.raises(ValueError, match="world_factory"):
+        build_apex_agents_run_case(config=ApexAgentsConfig())
 
 
 def test_no_network_guard_blocks_gated_dataset_download(monkeypatch: Any) -> None:
     """``--no-network`` must refuse the gated HF dataset download too.
 
     Regression: the guard originally only covered the world factory +
-    judge, so ``_load_splits_for_command`` hit ``hf_hub_download``
-    before the guard was consulted and leaked the HF client's "gated
-    repo" traceback.
+    judge, so case loading hit ``hf_hub_download`` before the guard was
+    consulted and leaked the HF client's "gated repo" traceback.
     """
     import argparse
 
@@ -412,99 +585,45 @@ def test_no_network_guard_blocks_gated_dataset_download(monkeypatch: Any) -> Non
         apex_cli._load_all_cases(args)
 
 
-def test_heldout_subset_summary_excludes_trained_validated_worlds() -> None:
-    """Full-dataset eval must also report the clean cross-world subset."""
-    from apex_agents.cli import _heldout_subset_summary
-
-    rows = [
-        {"ground_truth": {"world_id": "w-train"}, "field_scores": {"rubric_pass_rate": 1.0}},
-        {"ground_truth": {"world_id": "w-val"}, "field_scores": {"rubric_pass_rate": 1.0}},
-        {"ground_truth": {"world_id": "w-clean1"}, "field_scores": {"rubric_pass_rate": 0.5}},
-        {"ground_truth": {"world_id": "w-clean2"}, "field_scores": {"rubric_pass_rate": 0.1}},
-        {
-            "prediction": {"run_metrics": {"apex_agents": {"world_id": "w-clean2"}}},
-            "field_scores": {"rubric_pass_rate": 0.3},
-        },
-    ]
-    out = _heldout_subset_summary(rows, {"w-train", "w-val"})
-    assert out["num_heldout_cases"] == 3
-    assert abs(out["rubric_pass_rate_heldout"] - (0.5 + 0.1 + 0.3) / 3) < 1e-9
-    assert out["excluded_world_ids"] == ["w-train", "w-val"]
-    empty = _heldout_subset_summary(rows[:2], {"w-train", "w-val"})
-    assert empty["num_heldout_cases"] == 0 and empty["rubric_pass_rate_heldout"] is None
-
-
 # ─────────────────────────────────────────────────────────────────────
 # Section 3: metrics + LLM judge
 # ─────────────────────────────────────────────────────────────────────
 
 
-def _ground_truth(task_id: str, *, n_criteria: int = 2) -> dict[str, Any]:
-    rubric = [{"verifier_id": "output_llm", "criteria": f"crit {i} for {task_id}"} for i in range(n_criteria)]
-    return {
-        "task_id": task_id,
-        "world_id": "w",
-        "prompt": "p",
-        "rubric": rubric,
-        _APEX_AGENTS_GROUND_TRUTH_KEY: {
-            "task_id": task_id,
-            "world_id": "w",
-            "prompt": "p",
-            "rubric": rubric,
-        },
-    }
+def _score(output: Any) -> Any:
+    """Score one ``CaseResult`` output through the scorer."""
+    scorer = ApexAgentsScorer()
+    return asyncio.run(scorer.score_case(case=record_to_case(_pipeline_record()), result=CaseResult(output=output)))
 
 
-def test_metrics_calculator_aggregates_and_handles_missing_or_empty() -> None:
+def test_scorer_reads_pass_rate_and_collapses_to_objective() -> None:
     assert APEX_AGENTS_FIELD_WEIGHTS == {RUBRIC_FIELD: 1.0}
-    metrics = ApexAgentsMetricsCalculator()
 
-    # 3 cases with mixed pass rates → mean.
-    out = metrics.calculate_metrics(
-        {
-            "case-0": {"rubric_pass_rate": 1.0},
-            "case-1": {"rubric_pass_rate": 0.5},
-            "case-2": {"rubric_pass_rate": 0.0},
-        },
-        {
-            "case-0": _ground_truth("case-0"),
-            "case-1": _ground_truth("case-1"),
-            "case-2": _ground_truth("case-2"),
-        },
+    # A precomputed pass rate flows straight through to field score + objective.
+    score = _score({RUBRIC_FIELD: 0.5})
+    assert score.field_scores[RUBRIC_FIELD] == 0.5
+    assert score.objective == 0.5
+    assert score.key == RUBRIC_FIELD
+
+    # Custom field weights collapse the single field to the weighted objective.
+    weighted = asyncio.run(
+        ApexAgentsScorer(field_weights={RUBRIC_FIELD: 0.5}).score_case(
+            case=record_to_case(_pipeline_record()),
+            result=CaseResult(output={RUBRIC_FIELD: 1.0}),
+        )
     )
-    assert out.field_accuracies[RUBRIC_FIELD] == (1.0 + 0.5 + 0.0) / 3
-    assert out.field_sample_counts[RUBRIC_FIELD] == 3
-
-    # Cases without rubric criteria are skipped.
-    no_rubric = _ground_truth("case-x")
-    no_rubric["rubric"] = []
-    no_rubric[_APEX_AGENTS_GROUND_TRUTH_KEY]["rubric"] = []
-    out2 = metrics.calculate_metrics(
-        {"case-x": {"rubric_pass_rate": 1.0}, "case-y": {"rubric_pass_rate": 1.0}},
-        {"case-x": no_rubric, "case-y": _ground_truth("case-y")},
-    )
-    assert out2.field_accuracies[RUBRIC_FIELD] == 1.0
-    assert out2.field_sample_counts[RUBRIC_FIELD] == 1
-
-    # Missing result for a case → counts as 0 but the case is counted.
-    out3 = metrics.calculate_metrics({}, {"case-0": _ground_truth("case-0")})
-    assert out3.field_accuracies[RUBRIC_FIELD] == 0.0
-    assert out3.field_sample_counts[RUBRIC_FIELD] == 1
-
-    # Empty {} / {} → 0/0 returns 0.0.
-    out4 = metrics.calculate_metrics({}, {})
-    assert out4.field_accuracies[RUBRIC_FIELD] == 0.0
-    assert out4.field_sample_counts[RUBRIC_FIELD] == 0
+    assert weighted.field_scores[RUBRIC_FIELD] == 1.0
 
 
-def test_comparison_method_clamps_to_unit_interval() -> None:
-    metrics = ApexAgentsMetricsCalculator()
-    comparator = metrics._get_comparison_method(metrics.field_configs[0])
-    assert comparator(0.75, _ground_truth("c")) == 0.75
-    assert comparator(2.0, _ground_truth("c")) == 1.0
-    assert comparator(-1.0, _ground_truth("c")) == 0.0
-    assert comparator(None, _ground_truth("c")) == 0.0
-    assert comparator(True, _ground_truth("c")) == 1.0
+def test_scorer_clamps_and_coerces_pass_rate_values() -> None:
+    assert _score({RUBRIC_FIELD: 2.0}).field_scores[RUBRIC_FIELD] == 1.0
+    assert _score({RUBRIC_FIELD: -1.0}).field_scores[RUBRIC_FIELD] == 0.0
+    assert _score({RUBRIC_FIELD: True}).field_scores[RUBRIC_FIELD] == 1.0
+    assert _score({RUBRIC_FIELD: "0.25"}).field_scores[RUBRIC_FIELD] == 0.25
+    # Missing / non-numeric / non-mapping output → conservative 0.0.
+    assert _score({}).field_scores[RUBRIC_FIELD] == 0.0
+    assert _score({RUBRIC_FIELD: "not-a-number"}).field_scores[RUBRIC_FIELD] == 0.0
+    assert _score("unexpected").field_scores[RUBRIC_FIELD] == 0.0
 
 
 def test_score_rubric_with_stub_judge() -> None:
@@ -580,52 +699,8 @@ def test_parse_verdict_is_robust_to_verbose_reasoning_judges() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Section 4: k-fold splitters + val splits
+# Section 4: val split + case cap
 # ─────────────────────────────────────────────────────────────────────
-
-
-def _worlds(n: int) -> list[str]:
-    return [f"world-{i:02d}" for i in range(n)]
-
-
-def test_world_level_folds_shape_partition_and_determinism() -> None:
-    worlds = _worlds(10)
-    # 10 worlds / k=5 → 5 folds of 2 test / 8 train; disjoint; every world appears once.
-    folds = world_level_folds(worlds, k=5, seed=0)
-    assert len(folds) == 5
-    seen: list[str] = []
-    for train, test in folds:
-        assert len(test) == 2
-        assert len(train) == 8
-        assert not (set(train) & set(test))
-        seen.extend(test)
-    assert sorted(seen) == sorted(worlds)
-    assert len(seen) == len(set(seen))
-
-    # Same seed → identical; different seed → at least some fold differs;
-    # input order does not matter; dedup of inputs.
-    assert world_level_folds(worlds, k=5, seed=7) == world_level_folds(worlds, k=5, seed=7)
-    assert [t for _, t in world_level_folds(worlds, k=5, seed=0)] != [
-        t for _, t in world_level_folds(worlds, k=5, seed=1)
-    ]
-    assert world_level_folds(worlds, k=5, seed=3) == world_level_folds(list(reversed(worlds)), k=5, seed=3)
-    dedup_folds = world_level_folds(["w1", "w1", "w2", "w3", "w4"], k=2, seed=0)
-    deduped_seen: list[str] = []
-    for _, test in dedup_folds:
-        deduped_seen.extend(test)
-    assert sorted(deduped_seen) == ["w1", "w2", "w3", "w4"]
-
-
-def test_world_level_folds_uneven_balances_and_rejects_bad_args() -> None:
-    # 11 worlds / k=5 → sizes differ by ≤ 1, total 11.
-    sizes = sorted(len(t) for _, t in world_level_folds(_worlds(11), k=5, seed=0))
-    assert max(sizes) - min(sizes) <= 1
-    assert sum(sizes) == 11
-
-    with pytest.raises(ValueError, match="k >= 2"):
-        world_level_folds(_worlds(10), k=1)
-    with pytest.raises(ValueError, match="at least k"):
-        world_level_folds(_worlds(3), k=5)
 
 
 class _C:
@@ -640,31 +715,6 @@ def _cases(n_worlds: int, per_world: int = 3) -> list[_C]:
     return [_C(f"world-{w:02d}", i) for w in range(n_worlds) for i in range(per_world)]
 
 
-def test_inner_val_holds_out_whole_worlds_disjoint_and_deterministic() -> None:
-    """Fix 1: cross-world generalization — val split must hold out WHOLE worlds."""
-    train = _cases(9, per_world=4)  # 9 worlds, 36 cases
-    it, val = world_held_out_val_split(train, n_val_worlds=2, seed=0)
-    it_worlds = {c.group_key for c in it}
-    val_worlds = {c.group_key for c in val}
-    assert it_worlds.isdisjoint(val_worlds)
-    assert len(val_worlds) == 2
-    assert it_worlds | val_worlds == {f"world-{w:02d}" for w in range(9)}
-    assert len(it) + len(val) == len(train)
-    it2, val2 = world_held_out_val_split(train, n_val_worlds=2, seed=0)
-    assert {c.case_id for c in val2} == {c.case_id for c in val}
-    assert {c.group_key for c in world_held_out_val_split(train, n_val_worlds=2, seed=7)[1]} != val_worlds
-
-
-def test_inner_val_clamps_and_degrades_safely() -> None:
-    it, val = world_held_out_val_split(_cases(3), n_val_worlds=10, seed=0)
-    assert {c.group_key for c in it} and {c.group_key for c in val}
-    assert {c.group_key for c in it}.isdisjoint({c.group_key for c in val})
-    one = _cases(1, per_world=5)
-    it1, val1 = world_held_out_val_split(one, n_val_worlds=2, seed=0)
-    assert len(it1) == len(val1) == 5
-    assert world_held_out_val_split([], n_val_worlds=2, seed=0) == ([], [])
-
-
 def test_fixed_val_split_constant_and_disjoint() -> None:
     cases = _cases(9, per_world=10)
     tp, val, vw = fixed_val_split(cases, n_val_worlds=2, val_size=20, seed=0)
@@ -677,12 +727,13 @@ def test_fixed_val_split_constant_and_disjoint() -> None:
     assert len({c.group_key for c in val}) == 2
 
 
-def test_stratified_cap_keeps_worlds_wide_vs_frontslice() -> None:
+def test_stratified_cap_keeps_worlds_wide() -> None:
     pool = _cases(9, per_world=10)
     strat = stratified_case_cap(pool, 9, mode="stratified", seed=0)
-    front = stratified_case_cap(pool, 9, mode="frontslice", seed=0)
     assert len(strat) == 9 and len({c.group_key for c in strat}) == 9
-    assert len(front) == 9 and len({c.group_key for c in front}) == 1
+    # An invalid mode is rejected (``frontslice`` was removed with the k-fold path).
+    with pytest.raises(ValueError, match="must be 'stratified'"):
+        stratified_case_cap(pool, 9, mode="frontslice", seed=0)
     assert stratified_case_cap(pool, None) == pool
     assert [c.case_id for c in stratified_case_cap(pool, 18, seed=0)] == [
         c.case_id for c in stratified_case_cap(pool, 18, seed=0)
@@ -728,53 +779,49 @@ def _spec_stub_judge(criterion: str, answer: str, task_prompt: str) -> bool:
     return "enterprise value" in answer.lower()
 
 
-def test_build_apex_agents_spec_passes_validation_and_accepts_overrides() -> None:
+def test_build_apex_agents_spec_passes_validation_and_wires_loader() -> None:
     spec = build_apex_agents_spec(
-        cases_by_split={"train": [], "validation": []},
         world_factory=fake_world_factory({}),
         judge=_spec_stub_judge,
     )
     validate_spec(spec)
-    assert set(spec.seed_candidate.components.keys()) == {
+    assert set(spec.seed_targets.prompts) == {
         "system_prompt",
         "task_template",
         "resum_summary_prompt",
     }
-    assert spec.name == "apex_agents"
-    assert spec.task_type == "apex_agent"
-    assert spec.max_concurrency == 4
-    assert spec.reflection_evidence_mode == "curated_plus_trace"
-    # field_weights override flows through to the profile.
+    assert spec.name == "apex-agents"
+    assert asyncio.iscoroutinefunction(spec.run_case)
+    assert isinstance(spec.scorer, ApexAgentsScorer)
+    # The loader exposes the DatasetSchema validate_spec requires.
+    assert spec.data_loader.dataset_schema is not None
+    # field_weights override flows through to the scorer.
     override = build_apex_agents_spec(
-        cases_by_split={"train": []},
         world_factory=fake_world_factory({}),
         judge=_spec_stub_judge,
         field_weights={"rubric_pass_rate": 0.5},
     )
-    profile = override.evaluation_profile_resolver()
-    assert profile.field_weights == {"rubric_pass_rate": 0.5}
-    # Runtime is async.
-    assert asyncio.iscoroutinefunction(spec.extraction_runtime)
+    assert isinstance(override.scorer, ApexAgentsScorer)
+    assert override.scorer.field_weights == {"rubric_pass_rate": 0.5}
 
 
-def test_spec_end_to_end_via_adapter_with_fake_world_and_stub_judge() -> None:
+def test_spec_end_to_end_local_eval_with_fake_world_and_stub_judge() -> None:
     cases = cases_from_records([_spec_task_row(0), _spec_task_row(1)])
     spec = build_apex_agents_spec(
-        cases_by_split={"test": cases},
         world_factory=fake_world_factory({"brief.txt": "value"}),
         model_factory=_scripted_model_factory(),
         judge=_spec_stub_judge,
     )
     validate_spec(spec)
-    adapter = build_adapter_from_spec(spec)
-    report = evaluate_candidate_on_cases(
-        adapter=adapter,
-        candidate=apex_agents_seed_candidate(),
+    report = run_local_evaluation(
+        spec=spec,
+        targets=apex_agents_seed_targets(),
         cases=cases,
     )
     assert report.field_accuracies["rubric_pass_rate"] == 1.0
     assert report.field_sample_counts["rubric_pass_rate"] == 2
-    assert report.weighted_objective == 1.0
+    assert report.objective == 1.0
+    assert report.num_cases == 2
 
 
 # ─────────────────────────────────────────────────────────────────────

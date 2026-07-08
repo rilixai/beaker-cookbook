@@ -13,7 +13,7 @@ from typing import Any
 from ..data.dataset import HotpotQAParagraph
 
 
-# Component names the agent attaches to the rilixai PromptCandidate.
+# Component names the agent attaches to the rilixai OptimizationTargets.
 # Defined in this framework-neutral module so the agent runtime
 # (``agent.py``, which imports PydanticAI) and the GEPA-facing
 # feedback functions (``optimization/feedback.py``) can both import
