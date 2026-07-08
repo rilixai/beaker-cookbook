@@ -388,6 +388,38 @@ def test_embedded_documents_roundtrip_and_materialize(tasks_root: Path) -> None:
     assert "$50,000" in workspace.read_document("notes.txt")
 
 
+def test_partial_embed_fetches_missing_documents(
+    tasks_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A document named in the row but absent from ``document_blobs`` must be
+    fetched (not silently skipped). The fetch is stubbed so the test stays
+    hermetic; it asserts the exact missing entry is requested and materialized."""
+    import dataclasses
+
+    from harvey_lab.agent import workspace as ws_mod
+
+    fetched: list[str] = []
+
+    def _fake_fetch(url: str) -> bytes:
+        fetched.append(url)
+        return b"unbundled-bytes"
+
+    monkeypatch.setattr(ws_mod, "_fetch_bytes", _fake_fetch)
+
+    record = load_harvey_lab_records(tasks_root, practice_areas=["contracts"], max_per_area=1)[0]
+    embedded = attach_document_blobs(record, tasks_root)
+    # Declare an extra document that has no embedded blob.
+    partial = dataclasses.replace(embedded, documents=(*embedded.documents, "unbundled.txt"))
+
+    source = build_bundled_task_source(repo="acme/repo", commit="0" * 40)
+    workspace = source(partial)
+    # Only the unbundled doc is fetched; embedded ones are materialized locally.
+    assert len(fetched) == 1
+    assert fetched[0].endswith("/documents/unbundled.txt")
+    assert "unbundled-bytes" in workspace.read_document("unbundled.txt")
+    assert "$50,000" in workspace.read_document("notes.txt")
+
+
 def _ctx() -> Any:
     from rilixai import DatasetRowContext
 

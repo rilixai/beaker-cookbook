@@ -308,11 +308,16 @@ def build_github_task_source(
         task_id = str(getattr(record, "task_id", "") or "")
         documents: tuple[str, ...] = tuple(getattr(record, "documents", ()) or ())
         ws = TaskWorkspace(tempfile.mkdtemp(prefix="harvey_lab_"), max_document_chars=max_document_chars)
-        for name in documents:
-            url = f"https://raw.githubusercontent.com/{repo}/{commit}/tasks/{task_id}/documents/{name}"
-            dest = ws.documents_dir / name
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(_fetch_bytes(url))
+        # Clean up the temp tree if a fetch fails partway (don't leak on error).
+        try:
+            for name in documents:
+                url = f"https://raw.githubusercontent.com/{repo}/{commit}/tasks/{task_id}/documents/{name}"
+                dest = ws.documents_dir / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(_fetch_bytes(url))
+        except BaseException:
+            ws.close()
+            raise
         return ws
 
     return _factory
@@ -366,25 +371,35 @@ def build_bundled_task_source(
 
     When a record carries ``document_blobs`` (a dataset exported with
     ``--embed-documents``), the documents are materialized straight from the
-    base64 payload — no network. Records without embedded blobs fall back to
-    fetching from the pinned commit, so the same spec works for either dataset
-    shape.
+    base64 payload — no network. Any document named in ``record.documents``
+    that has no embedded blob is fetched from the pinned commit, so a
+    partially-embedded row still ends up with a complete ``documents/`` tree;
+    a row with no blobs at all fetches everything.
     """
     import base64
-
-    github_fallback = build_github_task_source(repo=repo, commit=commit, max_document_chars=max_document_chars)
 
     def _factory(record: Any) -> TaskWorkspace:
         import tempfile
 
+        task_id = str(getattr(record, "task_id", "") or "")
+        documents: tuple[str, ...] = tuple(getattr(record, "documents", ()) or ())
         blobs: Mapping[str, str] = getattr(record, "document_blobs", {}) or {}
-        if not blobs:
-            return github_fallback(record)
+        # Fetch any document that isn't embedded (all of them when no blobs).
+        missing = [name for name in documents if name not in blobs]
         ws = TaskWorkspace(tempfile.mkdtemp(prefix="harvey_lab_"), max_document_chars=max_document_chars)
-        for name, payload in blobs.items():
-            dest = ws.documents_dir / name
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(base64.b64decode(payload))
+        try:
+            for name, payload in blobs.items():
+                dest = ws.documents_dir / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(base64.b64decode(payload))
+            for name in missing:
+                url = f"https://raw.githubusercontent.com/{repo}/{commit}/tasks/{task_id}/documents/{name}"
+                dest = ws.documents_dir / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(_fetch_bytes(url))
+        except BaseException:
+            ws.close()
+            raise
         return ws
 
     return _factory

@@ -17,6 +17,7 @@ apex recipe work); tests inject a scripted client and never hit the network.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -193,31 +194,43 @@ class HarveyLabAgent:
         seed_system, seed_task = load_harvey_lab_seed_prompts()
         self._system_prompt = seed_system
         self._task_template = seed_task
+        # A single agent instance is reused across concurrent ``run_case``
+        # calls on worker threads. Guard the stashed components so an
+        # ``apply_candidate`` can't interleave with a ``forward`` snapshot and
+        # mix prompts from two candidates (mirrors ``ApexReActAgent``).
+        self._build_lock = threading.Lock()
 
     def apply_candidate(self, components: Mapping[str, str]) -> None:
         """Update the stashed prompt components from an optimizer candidate."""
         system = components.get(SYSTEM_PROMPT_COMPONENT)
         task = components.get(TASK_TEMPLATE_COMPONENT)
-        if system is not None:
-            self._system_prompt = system
-        if task is not None:
-            self._task_template = task
+        with self._build_lock:
+            if system is not None:
+                self._system_prompt = system
+            if task is not None:
+                self._task_template = task
+
+    def _snapshot_components(self) -> tuple[str, str]:
+        with self._build_lock:
+            return self._system_prompt, self._task_template
 
     @property
     def current_system_prompt(self) -> str:
-        return self._system_prompt
+        with self._build_lock:
+            return self._system_prompt
 
     @property
     def current_task_template(self) -> str:
-        return self._task_template
+        with self._build_lock:
+            return self._task_template
 
     async def forward(self, *, record: Any) -> HarveyLabAgentOutput:
         from stirrup import Agent
 
-        # Snapshot the components up-front so a concurrent ``apply_candidate``
-        # can't swap them mid-run (mirrors the apex agent's copy-then-run).
-        system_prompt = self._system_prompt
-        task_template = self._task_template
+        # Snapshot the components under the build lock so a concurrent
+        # ``apply_candidate`` can't swap them mid-run (mirrors the apex
+        # agent's lock-guarded copy-then-run).
+        system_prompt, task_template = self._snapshot_components()
 
         deliverable_lines = "\n".join(f"- `{name}`" for name in getattr(record, "deliverable_names", ()))
         user_prompt = _render_task_template(
