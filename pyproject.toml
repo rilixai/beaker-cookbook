@@ -31,7 +31,7 @@ dev = [
 # members in editable mode, so ``import hotpotqa.dataset`` works
 # without sys.path hacks and per-benchmark deps stay isolated.
 [tool.uv.workspace]
-members = ["hotpotqa", "apex_agents", "cookbook_common"]
+members = ["hotpotqa", "apex_agents", "harvey_lab", "cookbook_common"]
 # As benchmarks migrate, add: "cl_bench"
 
 # ``cookbook_common`` is a shared internal member the recipes depend on;
@@ -58,12 +58,12 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["hotpotqa*", "apex_agents*", "cookbook_common*"]
+include = ["hotpotqa*", "apex_agents*", "harvey_lab*", "cookbook_common*"]
 exclude = ["*.tests", "*.tests.*", "*.scripts", "*.scripts.*"]
 
 [tool.pytest.ini_options]
 # Test discovery walks into each workspace member's tests/ dir.
-testpaths = ["hotpotqa/tests", "apex_agents/tests"]
+testpaths = ["hotpotqa/tests", "apex_agents/tests", "harvey_lab/tests"]
 # ``importlib`` import mode lets workspace members share test
 # filenames (both have ``test_units.py`` / ``test_agent.py``) without
 # the "module already imported under a different __file__" collision
@@ -109,8 +109,8 @@ show_error_codes = true
 # as the rilixai repo (mypy runs over the package only, not tests or
 # scripts, since the tests use fixture-shaped types that intentionally
 # bend strict typing).
-files = ["hotpotqa", "apex_agents", "cookbook_common"]
-exclude = ["hotpotqa/tests/", "hotpotqa/scripts/", "apex_agents/tests/", "apex_agents/scripts/"]
+files = ["hotpotqa", "apex_agents", "harvey_lab", "cookbook_common"]
+exclude = ["hotpotqa/tests/", "hotpotqa/scripts/", "apex_agents/tests/", "apex_agents/scripts/", "harvey_lab/tests/", "harvey_lab/scripts/"]
 
 # Mirror the rilixai-side ``ignore_missing_imports`` overrides for
 # the scientific deps that ship without ``py.typed`` markers.
@@ -122,5 +122,7 @@ module = [
   "Stemmer",
   "openpyxl",
   "xlrd",
+  "stirrup",
+  "stirrup.*",
 ]
 ignore_missing_imports = true
