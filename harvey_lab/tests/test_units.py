@@ -328,6 +328,41 @@ def test_end_to_end_run_case_fail_when_judge_rejects(tasks_root: Path) -> None:
     assert result.output[CRITERION_PASS_RATE_FIELD] == 0.0
 
 
+def test_run_case_succeeds_in_worker_thread(tasks_root: Path) -> None:
+    """The hosted optimizer runs cases off the main thread; the Stirrup
+    session must not install a SIGINT handler (would raise "signal only works
+    in main thread of the main interpreter")."""
+    import threading
+
+    from harvey_lab.agent.prompts import harvey_lab_seed_targets
+
+    spec = build_harvey_lab_spec(
+        config=HarveyLabConfig(max_turns=5),
+        task_source=task_source_from_dir(tasks_root),
+        model_factory=_scripted_model_factory("Termination fee is $50,000, per notes.txt."),
+        judge=lambda _desc, _title, _match, out: "$50,000" in out or "notes.txt" in out,
+    )
+    records = load_harvey_lab_records(tasks_root, practice_areas=["contracts"], max_per_area=1)
+    case = cases_from_records(records)[0]
+
+    outcome: dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            outcome["result"] = asyncio.run(
+                spec.run_case(case=case, targets=harvey_lab_seed_targets(), runtime=None)
+            )
+        except BaseException as exc:  # noqa: BLE001 - surface to the assertion below
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=_worker)
+    thread.start()
+    thread.join()
+
+    assert "error" not in outcome, f"run_case raised off the main thread: {outcome.get('error')!r}"
+    assert outcome["result"].output[ALL_PASS_FIELD] == 1.0
+
+
 def _ctx() -> Any:
     from rilixai import DatasetRowContext
 
