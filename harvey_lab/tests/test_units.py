@@ -388,9 +388,7 @@ def test_embedded_documents_roundtrip_and_materialize(tasks_root: Path) -> None:
     assert "$50,000" in workspace.read_document("notes.txt")
 
 
-def test_partial_embed_fetches_missing_documents(
-    tasks_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_partial_embed_fetches_missing_documents(tasks_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A document named in the row but absent from ``document_blobs`` must be
     fetched (not silently skipped). The fetch is stubbed so the test stays
     hermetic; it asserts the exact missing entry is requested and materialized."""
