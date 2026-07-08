@@ -245,9 +245,7 @@ class HarveyLabAgent:
             # cache_on_interrupt=False: the hosted optimizer runs cases in worker
             # threads, where Stirrup's default SIGINT handler raises
             # "signal only works in main thread of the main interpreter".
-            async with agent.session(
-                output_dir=workspace.output_dir, cache_on_interrupt=False
-            ) as session:
+            async with agent.session(output_dir=workspace.output_dir, cache_on_interrupt=False) as session:
                 finish_params, history, _metadata = await session.run(user_prompt)
             deliverables = workspace.collect_deliverables()
             return HarveyLabAgentOutput(

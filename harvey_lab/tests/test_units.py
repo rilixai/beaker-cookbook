@@ -349,9 +349,7 @@ def test_run_case_succeeds_in_worker_thread(tasks_root: Path) -> None:
 
     def _worker() -> None:
         try:
-            outcome["result"] = asyncio.run(
-                spec.run_case(case=case, targets=harvey_lab_seed_targets(), runtime=None)
-            )
+            outcome["result"] = asyncio.run(spec.run_case(case=case, targets=harvey_lab_seed_targets(), runtime=None))
         except BaseException as exc:  # noqa: BLE001 - surface to the assertion below
             outcome["error"] = exc
 
