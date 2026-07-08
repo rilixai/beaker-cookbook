@@ -11,7 +11,7 @@ dependencies = [
   # PyPI at the needed version. Pinned to the same rilixai commit the
   # other cookbook members use. SSH URL (not HTTPS) so CI auth flows
   # through ``RILIXAI_GITHUB_SSH_KEY`` via webfactory's ssh-agent action.
-  "rilixai @ git+ssh://git@github.com/rilixai/rilixai.git@115028b#subdirectory=packages/rilixai",
+  "rilixai @ git+ssh://git@github.com/rilixai/rilixai.git@424a3f0fd1259e25ad4754fde744e653519e54b3#subdirectory=packages/rilixai",
   # Shared, recipe-agnostic helpers (local eval loop + CLI plumbing);
   # resolved from the workspace (see root ``[tool.uv.sources]``).
   "cookbook-common",
@@ -23,6 +23,9 @@ dependencies = [
   # litellm lazy-imports tenacity for its retry wrapper but doesn't declare
   # it; the baked sandbox image has nothing else pulling it in, so pin it.
   "tenacity>=8.0",
+  # The agent's structured verdict models use pydantic directly. rilixai
+  # dropped its transitive pydantic dep at v0.2.2, so declare it explicitly.
+  "pydantic>=2,<3",
   # Heavy document parsers — lazy-imported inside the workspace read surface
   # so hermetic tests (fixture text files) don't pay the import cost.
   "openpyxl>=3.1",
