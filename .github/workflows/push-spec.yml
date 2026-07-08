@@ -76,6 +76,11 @@ jobs:
 
       - name: Select members
         id: select
+        # Each selected entry pairs a workspace member directory (``dir``) with
+        # the rilixai agent key it pushes to (``agent``). The build path runs
+        # ``rilixai push`` / ``rilixai spec promote``, which resolve the agent
+        # from ``$RILIXAI_AGENT_KEY`` (set per entry in the push job), so a
+        # member is always pushed + promoted to *its own* agent.
         env:
           EVENT_NAME: ${{ github.event_name }}
           ROOT_CHANGED: ${{ steps.filter.outputs.root }}
@@ -83,18 +88,20 @@ jobs:
           APEX_CHANGED: ${{ steps.filter.outputs.apex_agents }}
         run: |
           set -euo pipefail
+          HOTPOTQA='{"dir":"hotpotqa","agent":"hotpotqa-agent"}'
+          APEX='{"dir":"apex_agents","agent":"apex-agents"}'
           if [ "${EVENT_NAME}" = "workflow_dispatch" ] || [ "${ROOT_CHANGED}" = "true" ]; then
-            MEMBERS='["hotpotqa","apex_agents"]'
+            MEMBERS=$(jq -c -n --argjson h "$HOTPOTQA" --argjson a "$APEX" '[$h, $a]')
           else
             MEMBERS='[]'
-            [ "${HOTPOTQA_CHANGED}" = "true" ] && MEMBERS=$(echo "$MEMBERS" | jq -c '. + ["hotpotqa"]')
-            [ "${APEX_CHANGED}" = "true" ] && MEMBERS=$(echo "$MEMBERS" | jq -c '. + ["apex_agents"]')
+            [ "${HOTPOTQA_CHANGED}" = "true" ] && MEMBERS=$(echo "$MEMBERS" | jq -c --argjson h "$HOTPOTQA" '. + [$h]')
+            [ "${APEX_CHANGED}" = "true" ] && MEMBERS=$(echo "$MEMBERS" | jq -c --argjson a "$APEX" '. + [$a]')
           fi
           echo "members=$MEMBERS" >> "$GITHUB_OUTPUT"
           echo "selected: $MEMBERS"
 
   push-spec:
-    name: push ${{ matrix.member }}
+    name: push ${{ matrix.entry.dir }}
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.members != '[]' }}
     runs-on: ubuntu-latest
@@ -102,18 +109,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        member: ${{ fromJson(needs.detect-changes.outputs.members) }}
+        entry: ${{ fromJson(needs.detect-changes.outputs.members) }}
     # Serialize per member + ref so two rapid merges don't race the
     # ``rilixai spec promote`` order (which would otherwise leave
     # ``<name>@production`` pointing at whichever ``spec promote`` lost the
     # race rather than the more recent commit). Different members don't
     # block each other.
     concurrency:
-      group: push-spec-${{ matrix.member }}-${{ github.ref }}
+      group: push-spec-${{ matrix.entry.dir }}-${{ github.ref }}
       cancel-in-progress: false
     env:
       RILIXAI_API_BASE_URL: ${{ secrets.RILIXAI_API_BASE_URL }}
       RILIXAI_API_KEY: ${{ secrets.RILIXAI_API_KEY }}
+      # ``rilixai push`` / ``spec promote`` resolve the target agent from this
+      # (flag > $RILIXAI_AGENT_KEY > rilixai.yaml). One agent per member.
+      RILIXAI_AGENT_KEY: ${{ matrix.entry.agent }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -162,7 +172,7 @@ jobs:
             SKIP_PROMOTE_FLAG="--no-promote"
             echo "workflow_dispatch requested --no-promote (build won't flip @production)"
           fi
-          uv run ${{ matrix.member }}/sandbox.py --build --no-trigger ${VERSION_OVERRIDE_FLAG} ${SKIP_PROMOTE_FLAG}
+          uv run ${{ matrix.entry.dir }}/sandbox.py --build --no-trigger ${VERSION_OVERRIDE_FLAG} ${SKIP_PROMOTE_FLAG}
         env:
           VERSION_OVERRIDE: ${{ inputs.version_override }}
           SKIP_PROMOTE: ${{ inputs.skip_promote }}
