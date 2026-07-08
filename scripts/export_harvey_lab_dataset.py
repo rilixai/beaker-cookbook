@@ -27,7 +27,7 @@ import argparse
 import json
 from pathlib import Path
 
-from harvey_lab.data.dataset import load_harvey_lab_records, record_to_row
+from harvey_lab.data.dataset import attach_document_blobs, load_harvey_lab_records, record_to_row
 
 
 def main() -> None:
@@ -43,12 +43,21 @@ def main() -> None:
         default=0,
         help="Number of practice areas to hold out for the optional post-optimization test split (disjoint from train/val).",
     )
+    ap.add_argument(
+        "--embed-documents",
+        action="store_true",
+        help="Base64-embed each task's documents into the JSONL rows so the dataset is "
+        "self-contained (no run-time fetch from raw.githubusercontent.com).",
+    )
     args = ap.parse_args()
 
     areas = [a.strip() for a in args.practice_areas.split(",")] if args.practice_areas else None
     records = load_harvey_lab_records(args.tasks_root, practice_areas=areas, max_per_area=args.max_per_area)
     if not records:
         raise SystemExit(f"No task records found under {args.tasks_root!r}.")
+
+    if args.embed_documents:
+        records = [attach_document_blobs(r, args.tasks_root) for r in records]
 
     present_areas = sorted({r.practice_area for r in records})
     if len(present_areas) <= args.val_areas + args.test_areas:

@@ -42,6 +42,7 @@ TaskSource = Callable[[Any], "TaskWorkspace"]
 __all__ = [
     "TaskSource",
     "TaskWorkspace",
+    "build_bundled_task_source",
     "build_github_task_source",
     "task_source_from_dir",
     "task_source_from_mapping",
@@ -353,6 +354,40 @@ def _fetch_bytes(url: str) -> bytes:
             delay = min(_FETCH_BASE_DELAY * (2**attempt), _FETCH_MAX_DELAY)
         time.sleep(delay + random.uniform(0, 1.0))
     raise RuntimeError(f"Failed to fetch {url} after {_FETCH_MAX_ATTEMPTS} attempts") from last_exc
+
+
+def build_bundled_task_source(
+    *,
+    repo: str,
+    commit: str,
+    max_document_chars: int = 200_000,
+) -> TaskSource:
+    """Build a task source that prefers documents bundled in the dataset row.
+
+    When a record carries ``document_blobs`` (a dataset exported with
+    ``--embed-documents``), the documents are materialized straight from the
+    base64 payload — no network. Records without embedded blobs fall back to
+    fetching from the pinned commit, so the same spec works for either dataset
+    shape.
+    """
+    import base64
+
+    github_fallback = build_github_task_source(repo=repo, commit=commit, max_document_chars=max_document_chars)
+
+    def _factory(record: Any) -> TaskWorkspace:
+        import tempfile
+
+        blobs: Mapping[str, str] = getattr(record, "document_blobs", {}) or {}
+        if not blobs:
+            return github_fallback(record)
+        ws = TaskWorkspace(tempfile.mkdtemp(prefix="harvey_lab_"), max_document_chars=max_document_chars)
+        for name, payload in blobs.items():
+            dest = ws.documents_dir / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(base64.b64decode(payload))
+        return ws
+
+    return _factory
 
 
 def task_source_from_mapping(mapping: Mapping[str, TaskWorkspace]) -> TaskSource:

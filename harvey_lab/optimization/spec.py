@@ -105,11 +105,14 @@ def build_spec(ctx: OptimizationContext) -> Spec:
         max_turns=int(cfg_in["max_turns"]),
         max_output_tokens=int(cfg_in["max_output_tokens"]),
     )
-    from ..agent.workspace import build_github_task_source
+    from ..agent.workspace import build_bundled_task_source
 
+    # Prefer documents bundled in the dataset row (no run-time fetch); fall
+    # back to fetching from the pinned commit for datasets exported without
+    # ``--embed-documents``.
     return build_harvey_lab_spec(
         config=harvey_cfg,
-        task_source=build_github_task_source(
+        task_source=build_bundled_task_source(
             repo=HARVEY_LABS_REPO,
             commit=HARVEY_LABS_COMMIT,
             max_document_chars=harvey_cfg.max_document_chars,

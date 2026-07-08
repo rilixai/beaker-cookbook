@@ -17,10 +17,15 @@ from typing import Any
 import pytest
 
 from harvey_lab.agent.agent import _render_task_template
-from harvey_lab.agent.workspace import TaskWorkspace, task_source_from_dir
+from harvey_lab.agent.workspace import (
+    TaskWorkspace,
+    build_bundled_task_source,
+    task_source_from_dir,
+)
 from harvey_lab.config import HarveyLabConfig
 from harvey_lab.data.dataset import (
     HarveyLabDataLoader,
+    attach_document_blobs,
     cases_from_records,
     load_harvey_lab_records,
     practice_areas_for_cases,
@@ -359,6 +364,28 @@ def test_run_case_succeeds_in_worker_thread(tasks_root: Path) -> None:
 
     assert "error" not in outcome, f"run_case raised off the main thread: {outcome.get('error')!r}"
     assert outcome["result"].output[ALL_PASS_FIELD] == 1.0
+
+
+def test_embedded_documents_roundtrip_and_materialize(tasks_root: Path) -> None:
+    """``--embed-documents`` bundles docs into the row; the bundled task
+    source materializes them from the row with no network access."""
+    record = load_harvey_lab_records(tasks_root, practice_areas=["contracts"], max_per_area=1)[0]
+    embedded = attach_document_blobs(record, tasks_root)
+    assert embedded.document_blobs, "expected at least one embedded document"
+
+    # Row serialization carries the blobs and re-parses to the same payload.
+    row = record_to_row(embedded)
+    assert "document_blobs" in row
+    reparsed = HarveyLabDataLoader().parse_row(row, _ctx())
+    assert reparsed.document_blobs == dict(embedded.document_blobs)
+
+    # The bundled source materializes documents from the row (repo/commit are
+    # bogus — a fetch would fail, proving no network is used).
+    source = build_bundled_task_source(repo="does/not-exist", commit="0" * 40)
+    workspace = source(reparsed)
+    listed = workspace.list_files()
+    assert any("notes.txt" in name for name in listed)
+    assert "$50,000" in workspace.read_document("notes.txt")
 
 
 def _ctx() -> Any:

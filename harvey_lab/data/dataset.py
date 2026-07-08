@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +53,10 @@ HARVEY_LAB_DATASET_SCHEMA = DatasetSchema(
             "instructions": {"type": "string"},
             "deliverables": {"type": "object"},
             "documents": {"type": "array", "items": {"type": "string"}},
+            # Optional: base64-encoded document bytes keyed by the same relative
+            # names as ``documents``. Present when a dataset is exported with
+            # ``--embed-documents`` so a run needs no run-time document fetch.
+            "document_blobs": {"type": "object"},
             "criteria": {
                 "type": "array",
                 "items": {
@@ -88,6 +92,17 @@ class RubricCriterion:
     deliverables: tuple[str, ...]
 
 
+def _coerce_blobs(value: Any) -> dict[str, str]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception:
+            return {}
+    if isinstance(value, Mapping):
+        return {str(k): str(v) for k, v in value.items() if v}
+    return {}
+
+
 @dataclass(frozen=True)
 class HarveyLabRecord:
     """Normalized Harvey LAB task record used by the agent + scorer."""
@@ -101,6 +116,7 @@ class HarveyLabRecord:
     criteria: tuple[RubricCriterion, ...]
     documents: tuple[str, ...]
     raw_task: Mapping[str, Any]
+    document_blobs: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def deliverable_names(self) -> tuple[str, ...]:
@@ -161,6 +177,7 @@ def _normalize_record(raw: Mapping[str, Any], *, index_hint: int) -> HarveyLabRe
         criteria=_coerce_criteria(raw.get("criteria")),
         documents=tuple(str(d) for d in (raw.get("documents") or ()) if d),
         raw_task=dict(raw),
+        document_blobs=_coerce_blobs(raw.get("document_blobs")),
     )
 
 
@@ -174,6 +191,7 @@ def record_to_row(record: HarveyLabRecord) -> dict[str, Any]:
         "instructions": record.instructions,
         "deliverables": dict(record.deliverables),
         "documents": list(record.documents),
+        **({"document_blobs": dict(record.document_blobs)} if record.document_blobs else {}),
         "criteria": [
             {
                 "id": c.id,
@@ -277,6 +295,25 @@ def load_harvey_lab_records(
     return records
 
 
+def attach_document_blobs(record: HarveyLabRecord, tasks_root: str | Path) -> HarveyLabRecord:
+    """Return a copy of ``record`` with each document's bytes base64-embedded.
+
+    Reads the files under ``<tasks_root>/<task_id>/documents/`` named by
+    ``record.documents`` so a dataset exported with ``--embed-documents`` is
+    fully self-contained (no run-time fetch). Missing files are skipped.
+    """
+    import base64
+    from dataclasses import replace
+
+    docs_dir = Path(tasks_root) / record.task_id / "documents"
+    blobs: dict[str, str] = {}
+    for name in record.documents:
+        path = docs_dir / name
+        if path.is_file():
+            blobs[name] = base64.b64encode(path.read_bytes()).decode("ascii")
+    return replace(record, document_blobs=blobs)
+
+
 class HarveyLabDataLoader(CaseDataLoader[HarveyLabRecord]):
     """Typed rilixai data loader over exported Harvey LAB JSONL rows."""
 
@@ -306,6 +343,7 @@ __all__ = [
     "HarveyLabRecord",
     "RubricCriterion",
     "_HARVEY_LAB_GROUND_TRUTH_KEY",
+    "attach_document_blobs",
     "cases_from_records",
     "load_harvey_lab_records",
     "practice_areas_for_cases",

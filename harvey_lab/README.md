@@ -94,7 +94,11 @@ export RILIXAI_AGENT_KEY=harvey-lab   # agent the trigger targets (or pass --age
 git clone https://github.com/harveyai/harvey-labs
 # --test-areas carves a disjoint test.jsonl the optimizer scores the winner on
 # post-optimization (unbiased held-out); omit it for train/val only.
-uv run python scripts/export_harvey_lab_dataset.py --tasks-root harvey-labs/tasks --val-areas 3 --test-areas 3
+# --embed-documents base64-bundles each task's documents into the rows so the
+# run reads them from the artifact (no run-time fetch from raw.githubusercontent
+# and no rate-limit); omit it to keep rows text-only and fetch at run time.
+uv run python scripts/export_harvey_lab_dataset.py --tasks-root harvey-labs/tasks \
+  --val-areas 3 --test-areas 3 --embed-documents
 uv run rilixai dataset upload --name harvey-lab-dataset \
   --split train=883 --split val=123 --split test=126 scripts/_datasets/harvey_lab
 
