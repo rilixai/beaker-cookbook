@@ -66,6 +66,7 @@ trigger:
 ```bash
 export RILIXAI_API_KEY=sk-...
 export RILIXAI_API_BASE_URL=https://<id>.execute-api.<region>.amazonaws.com/prod/
+export RILIXAI_AGENT_KEY=hotpotqa-agent   # agent the trigger targets (or pass --agent)
 
 # One-time (or when the data changes): upload the JSONL split as a dataset.
 uv run rilixai dataset upload --name hotpotqa-agent-dataset path/to/jsonl-dir/

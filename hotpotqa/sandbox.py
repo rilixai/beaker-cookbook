@@ -269,6 +269,15 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--agent",
+        default=os.environ.get("RILIXAI_AGENT_KEY"),
+        help=(
+            "Agent key that owns this spec/scope for the trigger. Defaults to "
+            "$RILIXAI_AGENT_KEY. Mirrors the rilixai CLI's agent resolution — the "
+            "hosted API needs it to know which agent the run belongs to."
+        ),
+    )
+    parser.add_argument(
         "--max-metric-calls",
         type=int,
         default=100,
@@ -297,6 +306,9 @@ def main() -> int:
         if not api_key or not base_url:
             print("error: RILIXAI_API_KEY and RILIXAI_API_BASE_URL must be set.", file=sys.stderr)
             return 2
+        if not args.agent:
+            print("error: --agent or $RILIXAI_AGENT_KEY must be set.", file=sys.stderr)
+            return 2
 
     if args.build:
         version = args.version or f"v{_short_sha()}"
@@ -309,7 +321,7 @@ def main() -> int:
         return 0
 
     assert api_key is not None and base_url is not None  # validated above
-    client = RilixAIClient(base_url=base_url, api_key=api_key)
+    client = RilixAIClient(base_url=base_url, api_key=api_key, agent_key=args.agent)
     run_id = trigger_run(
         client=client,
         spec_reference=args.spec,

@@ -64,6 +64,7 @@ not a per-trigger flag. Upload once, then trigger:
 ```bash
 export RILIXAI_API_KEY=sk-...
 export RILIXAI_API_BASE_URL=https://<id>.execute-api.<region>.amazonaws.com/prod/
+export RILIXAI_AGENT_KEY=apex-agents   # agent the trigger targets (or pass --agent)
 
 # One-time (or when the data changes): upload the JSONL split as a dataset.
 uv run rilixai dataset upload --name apex-agents-dataset path/to/jsonl-dir/
