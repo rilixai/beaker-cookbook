@@ -22,7 +22,7 @@ Env vars (needed for any run that calls a model):
 ```bash
 export HF_TOKEN=hf_...          # private dataset access
 export OPENAI_API_KEY=sk-...    # agent (gpt-4.1-mini default)
-export GOOGLE_API_KEY=...       # judge (gemini-2.5-flash default)
+export GOOGLE_API_KEY=...       # judge (gemini-3.5-flash default)
 ```
 
 ## Run locally

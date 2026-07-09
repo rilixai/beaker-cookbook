@@ -21,7 +21,7 @@ from dataclasses import dataclass
 # :class:`ApexAgentsConfig` from here, so a back-edge to
 # ``optimization.metrics`` would cycle. The canonical definition lives
 # in ``optimization.metrics``; this mirror is kept in lockstep.
-DEFAULT_JUDGE_MODEL = "gemini/gemini-2.5-flash"
+DEFAULT_JUDGE_MODEL = "gemini/gemini-3.5-flash"
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ class ApexAgentsConfig:
 
     ``task_model`` is the LiteLLM model spec for the ReAct agent;
     ``judge_model`` is the LLM-judge model (Mercor default
-    ``gemini/gemini-2.5-flash``). ``max_steps`` / ``cost_limit`` cap
+    ``gemini/gemini-3.5-flash``). ``max_steps`` / ``cost_limit`` cap
     the inner ReAct loop (``max_steps`` defaults to 60 — smaller than
     Archipelago's 250 to bound demo cost).
     """

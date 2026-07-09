@@ -83,7 +83,7 @@ def build_apex_agents_spec(
 _DEFAULT_SANDBOX_CONFIG: dict[str, Any] = {
     "task_model": "openai/gpt-4.1-mini-2025-04-14",
     "task_temperature": 0.0,
-    "judge_model": "gemini/gemini-2.5-flash",
+    "judge_model": "gemini/gemini-3.5-flash",
     "max_steps": 60,
     "cost_limit": 3.0,
 }
