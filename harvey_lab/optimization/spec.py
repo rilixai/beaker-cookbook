@@ -76,7 +76,7 @@ def build_harvey_lab_spec(
 _DEFAULT_SANDBOX_CONFIG: dict[str, Any] = {
     "task_model": "openai/gpt-4.1-mini-2025-04-14",
     "task_temperature": 0.0,
-    "judge_model": "gemini/gemini-2.5-flash",
+    "judge_model": "gemini/gemini-3.5-flash",
     "max_turns": 40,
     "max_output_tokens": 16_000,
 }

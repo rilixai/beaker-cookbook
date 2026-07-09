@@ -44,7 +44,7 @@ CRITERION_PASS_RATE_FIELD = "criterion_pass_rate"
 # gets a usable gradient while the headline metric is still tracked.
 HARVEY_LAB_FIELD_WEIGHTS: dict[str, float] = {CRITERION_PASS_RATE_FIELD: 1.0}
 
-DEFAULT_JUDGE_MODEL = "gemini/gemini-2.5-flash"
+DEFAULT_JUDGE_MODEL = "gemini/gemini-3.5-flash"
 DEFAULT_JUDGE_TIMEOUT_S = 120.0
 DEFAULT_JUDGE_NUM_RETRIES = 2
 DEFAULT_MAX_DELIVERABLE_CHARS = 40_000

@@ -101,7 +101,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0, help="Seed for the area-level validation carve + caps.")
     parser.add_argument("--task-model", type=str, default="openai/gpt-4.1-mini-2025-04-14")
     parser.add_argument("--task-temperature", type=float, default=0.0)
-    parser.add_argument("--judge-model", type=str, default="gemini/gemini-2.5-flash")
+    parser.add_argument("--judge-model", type=str, default="gemini/gemini-3.5-flash")
     parser.add_argument("--max-turns", type=int, default=40)
     parser.add_argument("--llm-timeout", type=float, default=120.0)
     parser.add_argument("--max-concurrency", type=int, default=4)

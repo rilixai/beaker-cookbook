@@ -34,7 +34,7 @@ class HarveyLabConfig:
     # The per-criterion rubric judge. Harvey LAB-AA defaults to
     # ``claude-sonnet``; a cheaper Gemini flash keeps smoke runs affordable
     # and matches the apex recipe's judge default.
-    judge_model: str = "gemini/gemini-2.5-flash"
+    judge_model: str = "gemini/gemini-3.5-flash"
 
     # Cap on the Stirrup agent's tool-use loop per task. LAB tasks are long
     # (dozens of documents, ~60 rubric criteria) but a smoke budget stays low.
