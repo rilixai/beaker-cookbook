@@ -366,6 +366,81 @@ def test_run_case_succeeds_in_worker_thread(tasks_root: Path) -> None:
     assert outcome["result"].output[ALL_PASS_FIELD] == 1.0
 
 
+def test_resolve_components_prefers_passed_candidate_over_shared_buffer(tasks_root: Path) -> None:
+    """``forward(components=...)`` must read the passed candidate, never the
+    shared ``apply_candidate`` buffer, so parallel rollouts of different
+    candidates on the reused agent stay isolated. Missing components fall back
+    to the immutable seed, not the buffer."""
+    from harvey_lab.agent.agent import HarveyLabAgent
+    from harvey_lab.agent.prompts import (
+        SYSTEM_PROMPT_COMPONENT,
+        TASK_TEMPLATE_COMPONENT,
+        load_harvey_lab_seed_prompts,
+    )
+
+    agent = HarveyLabAgent(config=HarveyLabConfig(), task_source=task_source_from_dir(tasks_root))
+    # Simulate a concurrent case swapping a *different* candidate into the buffer.
+    agent.apply_candidate({SYSTEM_PROMPT_COMPONENT: "OTHER-SYS", TASK_TEMPLATE_COMPONENT: "OTHER-TASK"})
+
+    sys_p, task_t = agent._resolve_components(  # noqa: SLF001 - invariant under test
+        {SYSTEM_PROMPT_COMPONENT: "MY-SYS", TASK_TEMPLATE_COMPONENT: "MY-TASK"}
+    )
+    assert (sys_p, task_t) == ("MY-SYS", "MY-TASK")
+
+    seed_system, seed_task = load_harvey_lab_seed_prompts()
+    assert agent._resolve_components({}) == (seed_system, seed_task)  # noqa: SLF001
+
+
+def test_forward_wires_passed_candidate_prompt_to_llm(tasks_root: Path) -> None:
+    """End-to-end: the system prompt the LLM sees comes from the candidate
+    passed into ``forward``, even when a different candidate was applied to the
+    shared buffer (the worker-thread race the per-op lock alone can't close)."""
+    from harvey_lab.agent.agent import HarveyLabAgent
+    from harvey_lab.agent.prompts import SYSTEM_PROMPT_COMPONENT, TASK_TEMPLATE_COMPONENT
+
+    captured: dict[str, str] = {}
+
+    class _CapturingClient:
+        @property
+        def model_slug(self) -> str:
+            return "scripted/test"
+
+        @property
+        def max_tokens(self) -> int:
+            return 100_000
+
+        async def generate(self, messages: list[Any], tools: dict[str, Any]) -> Any:
+            from stirrup.core.models import AssistantMessage, ToolCall
+
+            if "system" not in captured and messages:
+                captured["system"] = str(getattr(messages[0], "content", ""))
+            return AssistantMessage(
+                content="",
+                tool_calls=[ToolCall(name="finish", arguments=json.dumps({"reason": "done"}), tool_call_id="tc-1")],
+            )
+
+    agent = HarveyLabAgent(
+        config=HarveyLabConfig(max_turns=3),
+        task_source=task_source_from_dir(tasks_root),
+        model_factory=lambda *_: _CapturingClient(),
+    )
+    agent.apply_candidate(
+        {SYSTEM_PROMPT_COMPONENT: "OTHER-CANDIDATE-SYSTEM", TASK_TEMPLATE_COMPONENT: "OTHER {{instructions}}"}
+    )
+    record = load_harvey_lab_records(tasks_root, practice_areas=["contracts"], max_per_area=1)[0]
+    asyncio.run(
+        agent.forward(
+            record=record,
+            components={
+                SYSTEM_PROMPT_COMPONENT: "MY-CANDIDATE-SYSTEM",
+                TASK_TEMPLATE_COMPONENT: "MY {{instructions}}",
+            },
+        )
+    )
+    assert "MY-CANDIDATE-SYSTEM" in captured.get("system", "")
+    assert "OTHER-CANDIDATE-SYSTEM" not in captured.get("system", "")
+
+
 def test_embedded_documents_roundtrip_and_materialize(tasks_root: Path) -> None:
     """``--embed-documents`` bundles docs into the row; the bundled task
     source materializes them from the row with no network access."""

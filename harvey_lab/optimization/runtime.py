@@ -78,8 +78,13 @@ def build_harvey_lab_run_case(
     async def _run_case(*, case: Case, targets: OptimizationTargets, runtime: Any = None) -> CaseResult:
         del runtime
         record = _record_from_case(case)
-        resolved_agent.apply_candidate(targets.to_dict())
-        output = await resolved_agent.forward(record=record)
+        # Pass the candidate's prompt components straight into ``forward`` rather
+        # than mutating shared agent state first. The optimizer runs cases on
+        # worker threads, so an ``apply_candidate``-then-``forward`` split on the
+        # reused agent is racy: a concurrent case evaluating a *different*
+        # candidate could swap the shared prompts between the two calls. Threading
+        # the candidate through keeps each rollout isolated.
+        output = await resolved_agent.forward(record=record, components=targets.to_dict())
 
         criteria_payload = [
             {"id": c.id, "title": c.title, "match_criteria": c.match_criteria, "deliverables": list(c.deliverables)}

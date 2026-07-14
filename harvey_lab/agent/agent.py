@@ -192,12 +192,20 @@ class HarveyLabAgent:
         self._task_source = task_source
         self._model_factory = model_factory or _default_model_factory
         seed_system, seed_task = load_harvey_lab_seed_prompts()
+        # Immutable seed defaults — the fallback when a caller does not pass
+        # explicit candidate ``components`` into ``forward`` (never mutated).
+        self._seed_system_prompt = seed_system
+        self._seed_task_template = seed_task
+        # Legacy shared prompt buffer for the ``apply_candidate``-then-``forward``
+        # path. A single agent instance is reused across concurrent ``run_case``
+        # calls on worker *threads*, so this is shared mutable state: the per-op
+        # lock stops a ``forward`` snapshot reading a half-written pair, but not
+        # a concurrent case swapping in a *different* candidate between another
+        # case's ``apply_candidate`` and its ``forward``. The production path
+        # passes the candidate straight into ``forward`` instead (race-free); the
+        # buffer is kept lock-guarded only for the legacy ``components=None`` path.
         self._system_prompt = seed_system
         self._task_template = seed_task
-        # A single agent instance is reused across concurrent ``run_case``
-        # calls on worker threads. Guard the stashed components so an
-        # ``apply_candidate`` can't interleave with a ``forward`` snapshot and
-        # mix prompts from two candidates (mirrors ``ApexReActAgent``).
         self._build_lock = threading.Lock()
 
     def apply_candidate(self, components: Mapping[str, str]) -> None:
@@ -214,6 +222,24 @@ class HarveyLabAgent:
         with self._build_lock:
             return self._system_prompt, self._task_template
 
+    def _resolve_components(self, components: Mapping[str, str] | None) -> tuple[str, str]:
+        """Resolve the prompts for one run.
+
+        When ``components`` is supplied (production path) they are read directly
+        — no shared state — so parallel rollouts of different candidates on the
+        reused agent stay isolated. A component absent from the candidate falls
+        back to the immutable seed default, not the shared buffer.
+        ``components=None`` uses the lock-guarded legacy buffer.
+        """
+        if components is None:
+            return self._snapshot_components()
+        system = components.get(SYSTEM_PROMPT_COMPONENT)
+        task = components.get(TASK_TEMPLATE_COMPONENT)
+        return (
+            system if system is not None else self._seed_system_prompt,
+            task if task is not None else self._seed_task_template,
+        )
+
     @property
     def current_system_prompt(self) -> str:
         with self._build_lock:
@@ -224,13 +250,15 @@ class HarveyLabAgent:
         with self._build_lock:
             return self._task_template
 
-    async def forward(self, *, record: Any) -> HarveyLabAgentOutput:
+    async def forward(self, *, record: Any, components: Mapping[str, str] | None = None) -> HarveyLabAgentOutput:
         from stirrup import Agent
 
-        # Snapshot the components under the build lock so a concurrent
-        # ``apply_candidate`` can't swap them mid-run (mirrors the apex
-        # agent's lock-guarded copy-then-run).
-        system_prompt, task_template = self._snapshot_components()
+        # Resolve the candidate prompts for THIS run. Passing ``components``
+        # (production path) reads them directly with no shared mutable state, so
+        # concurrent cases evaluating different candidates on the reused agent
+        # can't cross-contaminate. ``components=None`` falls back to the
+        # lock-guarded legacy ``apply_candidate`` buffer.
+        system_prompt, task_template = self._resolve_components(components)
 
         deliverable_lines = "\n".join(f"- `{name}`" for name in getattr(record, "deliverable_names", ()))
         user_prompt = _render_task_template(
