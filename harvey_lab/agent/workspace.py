@@ -278,8 +278,14 @@ def task_source_from_dir(tasks_root: str | Path, *, max_document_chars: int = 20
         task_id = str(getattr(record, "task_id", "") or "")
         src_docs = base / task_id / "documents"
         ws = TaskWorkspace(tempfile.mkdtemp(prefix="harvey_lab_"), max_document_chars=max_document_chars)
-        if src_docs.is_dir():
-            shutil.copytree(src_docs, ws.documents_dir, dirs_exist_ok=True)
+        # Clean up the temp tree if the copy fails partway (don't leak on error),
+        # mirroring the github/bundled factories.
+        try:
+            if src_docs.is_dir():
+                shutil.copytree(src_docs, ws.documents_dir, dirs_exist_ok=True)
+        except BaseException:
+            ws.close()
+            raise
         return ws
 
     return _factory
