@@ -250,7 +250,13 @@ class HarveyLabAgent:
         with self._build_lock:
             return self._task_template
 
-    async def forward(self, *, record: Any, components: Mapping[str, str] | None = None) -> HarveyLabAgentOutput:
+    async def forward(
+        self,
+        *,
+        record: Any,
+        components: Mapping[str, str] | None = None,
+        model: str | None = None,
+    ) -> HarveyLabAgentOutput:
         from stirrup import Agent
 
         # Resolve the candidate prompts for THIS run. Passing ``components``
@@ -259,6 +265,11 @@ class HarveyLabAgent:
         # can't cross-contaminate. ``components=None`` falls back to the
         # lock-guarded legacy ``apply_candidate`` buffer.
         system_prompt, task_template = self._resolve_components(components)
+
+        # Optional rilixai model-selection seam: when the optimizer hands a model
+        # in for this rollout (e.g. a multi-model benchmark) use it for this run
+        # only; otherwise fall back to the recipe's own production task model.
+        task_model = model or self._config.task_model
 
         deliverable_lines = "\n".join(f"- `{name}`" for name in getattr(record, "deliverable_names", ()))
         user_prompt = _render_task_template(
@@ -271,7 +282,7 @@ class HarveyLabAgent:
         started = time.monotonic()
         try:
             client = self._model_factory(
-                self._config.task_model,
+                task_model,
                 self._config.task_temperature,
                 self._config.max_output_tokens,
             )

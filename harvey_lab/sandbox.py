@@ -75,12 +75,11 @@ def _short_sha() -> str:
 
 
 _BUNDLE_PROVIDED_PREFIXES = ("rilixai",)
-_BUNDLE_PROVIDED_NAMES = ("cookbook-common",)
 
 
 def _is_bundle_provided(dep: str) -> bool:
     name = re.split(r"[<>=!~;\[ ]", dep.strip(), maxsplit=1)[0].strip().lower().replace("_", "-")
-    return name.startswith(_BUNDLE_PROVIDED_PREFIXES) or name in _BUNDLE_PROVIDED_NAMES
+    return name.startswith(_BUNDLE_PROVIDED_PREFIXES)
 
 
 def _member_pip_deps() -> list[str]:
@@ -88,8 +87,7 @@ def _member_pip_deps() -> list[str]:
 
     The rilixai build worker only sees the bundle-root pyproject when it runs
     ``pip install /spec``, so the member's deps are shoveled in via
-    ``--pip-install``. ``rilixai`` (baked in) and ``cookbook-common`` (a
-    workspace member installed by the bundle root) are stripped.
+    ``--pip-install``. ``rilixai`` (baked into the image) is stripped.
     """
     data = tomllib.loads(MEMBER_PYPROJECT.read_text())
     deps = data["project"]["dependencies"]
@@ -144,17 +142,19 @@ def trigger_run(
         scope_key=SCOPE_KEY,
         dataset_ref=dataset_reference,
         config={
-            # GEPA per-run knobs (consumed by rilixai's sandbox runtime).
+            # Launch contract: the top level holds only optimizer-owned settings
+            # (rilixai rejects unknown keys). ``max_metric_calls`` is the primary
+            # budget knob; the reflection model / minibatch / seed are chosen by
+            # the server-side recipe preset and are no longer set from here.
             "max_metric_calls": max_metric_calls,
-            "reflection_minibatch_size": 3,
-            "reflection_model": "openai/gpt-4.1",
-            "seed": 0,
-            # Harvey LAB cookbook knobs (consumed by build_spec in spec.py).
-            "task_model": "openai/gpt-4.1-mini-2025-04-14",
-            "task_temperature": 0.0,
-            "judge_model": "gemini/gemini-3.5-flash",
-            "max_turns": 40,
-            "max_output_tokens": 16_000,
+            # Everything the recipe's ``build_spec`` needs travels under ``extra``.
+            "extra": {
+                "task_model": "openai/gpt-4.1-mini-2025-04-14",
+                "task_temperature": 0.0,
+                "judge_model": "gemini/gemini-3.5-flash",
+                "max_turns": 40,
+                "max_output_tokens": 16_000,
+            },
         },
     )
     return str(response["id"])
