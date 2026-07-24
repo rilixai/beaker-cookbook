@@ -113,8 +113,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--judge-model",
         type=str,
-        default="gemini/gemini-2.5-flash",
-        help="LiteLLM model spec for the rubric judge. Mercor default gemini/gemini-2.5-flash.",
+        default="gemini/gemini-3.5-flash",
+        help="LiteLLM model spec for the rubric judge (default gemini/gemini-3.5-flash).",
     )
     parser.add_argument(
         "--max-steps",

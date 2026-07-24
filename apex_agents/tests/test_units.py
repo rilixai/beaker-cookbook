@@ -677,7 +677,7 @@ def test_parse_verdict_is_robust_to_verbose_reasoning_judges() -> None:
     'MET — the figure is correct and there are no errors' to Not-met
     because it matched the 'no' in 'no errors' (NOT-MET checked first).
     That systematically depressed scores for reasoning/'thinking'
-    judges (gemini-2.5-flash) vs terse ones (gpt-4.1).
+    judges (gemini-3.5-flash) vs terse ones (gpt-4.1).
     """
     from apex_agents.optimization.metrics import _parse_verdict
 

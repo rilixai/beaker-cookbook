@@ -3,7 +3,7 @@
 A single optimization field, ``rubric_pass_rate``, scores the agent's
 final answer against the task's rubric. Each rubric criterion is
 graded binary Met / Not-met by an LLM judge (Mercor's Archipelago
-default is ``gemini/gemini-2.5-flash`` — the "output_llm" verifier).
+default is ``gemini/gemini-3.5-flash`` — the "output_llm" verifier).
 The task score is the fraction of criteria Met; the benchmark metric
 is the mean task score over the evaluated tasks.
 
@@ -51,7 +51,7 @@ APEX_AGENTS_FIELD_WEIGHTS: dict[str, float] = {
     RUBRIC_FIELD: 1.0,
 }
 
-DEFAULT_JUDGE_MODEL = "gemini/gemini-2.5-flash"
+DEFAULT_JUDGE_MODEL = "gemini/gemini-3.5-flash"
 # Bound each judge call so a hung provider request fails the criterion
 # (conservatively Not-met) fast instead of stalling the whole run.
 DEFAULT_JUDGE_TIMEOUT_S = 120.0
@@ -83,7 +83,7 @@ def _coerce_pass_rate(value: Any) -> float:
 
 # Primary signal: an explicit, labeled verdict line the judge is asked
 # to emit *after* any reasoning. Anchoring on a label makes the parse
-# immune to verbose / "thinking" judges (e.g. gemini-2.5-flash) whose
+# immune to verbose / "thinking" judges (e.g. gemini-3.5-flash) whose
 # free-text reasoning otherwise trips a bare-substring scan ("...there
 # are no errors" → matched "no" → wrongly Not-met). We take the LAST
 # tag so a verdict stated after the reasoning wins.
