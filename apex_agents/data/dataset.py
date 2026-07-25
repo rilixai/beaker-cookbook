@@ -1,4 +1,4 @@
-"""APEX-Agents dataset loading and conversion to optimizer cases.
+"""APEX-Agents dataset loading into plain typed records.
 
 The benchmark is hosted on the HuggingFace dataset ``mercor/apex-agents``.
 We focus on the **investment-banking** subset (``domain ==
@@ -30,22 +30,12 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from rilixai import Case, CaseDataLoader, DatasetRowContext, DatasetSchema
-
 
 logger = logging.getLogger(__name__)
 
 
-# Ground-truth key the APEX-Agents metrics calculator points its single
-# field config at. The per-case comparator reads back the precomputed
-# ``rubric_pass_rate`` float (the runtime ran the LLM judge), but we
-# still bundle the rubric + prompt + world/task ids here so the
-# feedback strings / judge have access to the criteria.
-_APEX_AGENTS_GROUND_TRUTH_KEY = "__apex_agents_rubric__"
-
-
 # The investment-banking subset is the one we calibrate to. Override
-# via ``domain`` on the loaders for other professional-knowledge-work
+# via ``domain`` on the loader for other professional-knowledge-work
 # subsets.
 DEFAULT_DOMAIN = "Investment Banking"
 
@@ -54,36 +44,6 @@ DEFAULT_DOMAIN = "Investment Banking"
 APEX_AGENTS_HF_REPO = "mercor/apex-agents"
 _TASKS_FILE = "tasks_and_rubrics.json"
 _WORLDS_FILE = "world_descriptions.json"
-
-
-# Dataset row schema for the ``mercor/apex-agents`` task objects. Declared
-# on :class:`ApexAgentsDataLoader` so rilixai's upload surfaces can
-# validate JSONL rows before a hosted run. Each row is one HF task dict.
-APEX_AGENTS_DATASET_SCHEMA = DatasetSchema(
-    json_schema={
-        "type": "object",
-        "required": ["task_id", "prompt", "world_id", "rubric"],
-        "properties": {
-            "task_id": {"type": "string", "minLength": 1},
-            "task_name": {"type": "string"},
-            "domain": {"type": "string"},
-            "prompt": {"type": "string"},
-            "world_id": {"type": "string"},
-            "task_input_files": {"type": "array", "items": {"type": "string"}},
-            "rubric": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "verifier_id": {"type": "string"},
-                        "criteria": {"type": "string"},
-                    },
-                },
-            },
-        },
-        "additionalProperties": True,
-    },
-)
 
 
 @dataclass(frozen=True)
@@ -101,10 +61,10 @@ class RubricCriterion:
 
 @dataclass(frozen=True)
 class ApexAgentsRecord:
-    """Normalized APEX-Agents record used by the runtime and metrics.
+    """Normalized APEX-Agents record used by the agent and the evaluator.
 
     ``raw_task`` is the full HF task dict — downstream code uses it for
-    debugging / feedback. ``rubric`` is the ordered list of criteria;
+    debugging. ``rubric`` is the ordered list of criteria;
     the first entry is the primary objective.
     """
 
@@ -209,63 +169,21 @@ def _normalize_record(
     )
 
 
-def record_to_case(record: ApexAgentsRecord, *, group_key: str | None = None) -> Case:
-    """Convert a normalized APEX-Agents record into a rilixai :class:`Case`.
-
-    The ground-truth bundle stashes the rubric + prompt + world/task
-    ids the runtime needs to run the LLM judge after the agent
-    finishes. Group key defaults to ``world_id`` so failure-focused
-    samplers (and the world-level k-fold splitter) can stratify by
-    world.
-    """
-    resolved_group = group_key or (record.world_id or "apex_agents")
-    rubric_payload = [{"verifier_id": c.verifier_id, "criteria": c.criteria} for c in record.rubric]
-    bundle = {
-        "task_id": record.task_id,
-        "world_id": record.world_id,
-        "prompt": record.prompt,
-        "rubric": rubric_payload,
-    }
-    ground_truth = {
-        "task_id": record.task_id,
-        "world_id": record.world_id,
-        "prompt": record.prompt,
-        "rubric": rubric_payload,
-        _APEX_AGENTS_GROUND_TRUTH_KEY: bundle,
-    }
-    return Case(
-        input=record,
-        case_id=record.task_id,
-        ground_truth=ground_truth,
-        group_key=resolved_group,
-        metadata={
-            "domain": record.domain,
-            "world_id": record.world_id,
-            "world_name": record.world_name,
-            "task_name": record.task_name,
-            "num_rubric_criteria": len(record.rubric),
-        },
-    )
-
-
-def cases_from_records(
-    records: Iterable[Mapping[str, Any] | ApexAgentsRecord],
-    *,
-    group_key: str | None = None,
-) -> list[Case]:
-    """Build a list of optimizer cases from raw or normalized records."""
-    cases: list[Case] = []
-    for idx, raw in enumerate(records):
+def records_from_rows(
+    rows: Iterable[Mapping[str, Any] | ApexAgentsRecord],
+) -> list[ApexAgentsRecord]:
+    """Normalize raw HF task dicts (or already-normalized records) into records."""
+    out: list[ApexAgentsRecord] = []
+    for idx, raw in enumerate(rows):
         if isinstance(raw, ApexAgentsRecord):
-            record = raw
+            out.append(raw)
         elif isinstance(raw, Mapping):
-            record = _normalize_record(raw, index_hint=idx)
+            out.append(_normalize_record(raw, index_hint=idx))
         else:
             raise TypeError(
-                f"cases_from_records expected Mapping or ApexAgentsRecord at position {idx}, got {type(raw).__name__}."
+                f"records_from_rows expected Mapping or ApexAgentsRecord at position {idx}, got {type(raw).__name__}."
             )
-        cases.append(record_to_case(record, group_key=group_key))
-    return cases
+    return out
 
 
 def filter_investment_banking(
@@ -275,7 +193,7 @@ def filter_investment_banking(
 ) -> list[ApexAgentsRecord]:
     """Return only the records whose ``domain`` matches (case-insensitive).
 
-    Underscores are normalized to spaces so CLI/sandbox tokens like
+    Underscores are normalized to spaces so CLI tokens like
     ``"investment_banking"`` match the dataset's ``"Investment Banking"``
     (the choice values are slug-style; the HF ``domain`` field is title-cased
     with a space). Without this, ``--domain investment_banking`` matched zero
@@ -359,65 +277,18 @@ def load_apex_agents_records(
     return records
 
 
-def load_apex_agents_cases(
-    *,
-    domain: str | None = DEFAULT_DOMAIN,
-    max_records: int | None = None,
-    cache_dir: str | None = None,
-    repo_id: str = APEX_AGENTS_HF_REPO,
-) -> list[Case]:
-    """Load the APEX-Agents records and convert them to optimizer cases."""
-    records = load_apex_agents_records(
-        domain=domain,
-        max_records=max_records,
-        cache_dir=cache_dir,
-        repo_id=repo_id,
-    )
-    return cases_from_records(records)
-
-
-class ApexAgentsDataLoader(CaseDataLoader[ApexAgentsRecord]):
-    """Typed rilixai data loader over the ``mercor/apex-agents`` task rows.
-
-    Maps each raw HF task dict to a normalized :class:`ApexAgentsRecord`
-    (``parse_row``) and emits exactly one :class:`Case` per record
-    (``iter_cases``). The rubric + prompt + world/task ids are bundled
-    onto the case's ground truth so the runtime's LLM judge and the
-    per-component feedback have everything they need after the agent runs.
-    """
-
-    dataset_schema = APEX_AGENTS_DATASET_SCHEMA
-
-    def parse_row(self, raw: Mapping[str, Any], context: DatasetRowContext) -> ApexAgentsRecord:
-        return _normalize_record(raw, index_hint=context.line_number or 0)
-
-    def iter_cases(self, row: ApexAgentsRecord, context: DatasetRowContext) -> Iterable[Case]:
-        del context
-        yield record_to_case(row)
-
-
-def world_ids_for_cases(cases: Iterable[Case]) -> list[str]:
-    """Return the sorted distinct ``world_id`` group keys across cases."""
-    seen: set[str] = set()
-    for case in cases:
-        wid = str(case.metadata.get("world_id") or case.group_key or "")
-        if wid:
-            seen.add(wid)
-    return sorted(seen)
+def world_ids_for_records(records: Iterable[ApexAgentsRecord]) -> list[str]:
+    """Return the sorted distinct ``world_id`` values across records."""
+    return sorted({r.world_id for r in records if r.world_id})
 
 
 __all__ = [
-    "APEX_AGENTS_DATASET_SCHEMA",
     "APEX_AGENTS_HF_REPO",
     "DEFAULT_DOMAIN",
-    "ApexAgentsDataLoader",
     "ApexAgentsRecord",
     "RubricCriterion",
-    "_APEX_AGENTS_GROUND_TRUTH_KEY",
-    "cases_from_records",
     "filter_investment_banking",
-    "load_apex_agents_cases",
     "load_apex_agents_records",
-    "record_to_case",
-    "world_ids_for_cases",
+    "records_from_rows",
+    "world_ids_for_records",
 ]

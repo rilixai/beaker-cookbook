@@ -22,10 +22,8 @@ matches. The loop structure mirrors Archipelago's reference:
   replaced with the summary and the last ``KEEP_RECENT_MESSAGES`` are
   kept verbatim (faithful to Archipelago resum.py constants).
 
-The two/three optimizable components are stashed under a
-:class:`threading.Lock`; the next :meth:`forward` snapshots them inside
-the lock and builds fresh agent state (mirrors ``SWEBenchAgent``
-exactly — per-case agent build, lock-guarded snapshot). The model
+The three prompts are fixed for the lifetime of the agent; every case
+builds fresh loop state (its own world + message history). The model
 factory is injectable so tests pass a scripted deterministic model and
 no real API call fires.
 """
@@ -35,27 +33,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import threading
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from .prompts import (
-    RESUM_SUMMARY_PROMPT_COMPONENT,
-    SYSTEM_PROMPT_COMPONENT,
-    TASK_TEMPLATE_COMPONENT,
-)
+from ..data.dataset import ApexAgentsRecord
+from .prompts import RESUM_SUMMARY_PROMPT, SYSTEM_PROMPT, TASK_TEMPLATE
 from .types import AgentToolCall, ApexAgentsAgentOutput
+from .world.world import WorldFactory, WorldFiles
 
 
 logger = logging.getLogger(__name__)
 
 
-# Component names the agent reads off the rilixai OptimizationTargets bundle.
 __all__ = [
-    "RESUM_SUMMARY_PROMPT_COMPONENT",
-    "SYSTEM_PROMPT_COMPONENT",
-    "TASK_TEMPLATE_COMPONENT",
     "ApexReActAgent",
     "ModelFactory",
     "WorldFactory",
@@ -111,9 +102,6 @@ def _is_todo_closed(status: Any) -> bool:
     return str(status or "").strip().lower() in _CLOSED_TODO_STATUSES
 
 
-# Per-case world factory: ``(record) -> WorldFiles``-like. Tests inject
-# a closure yielding a :class:`FakeWorld`.
-WorldFactory = Callable[[Any], Any]
 # Per-case model factory: ``(model_name, temperature) -> ChatModel``.
 # A ChatModel is any object with ``complete(messages, tools) -> dict``
 # returning ``{"content": str, "tool_calls": [...], "cost": float}``.
@@ -320,10 +308,9 @@ def _domain_tool_schema(name: str) -> dict[str, Any]:
 class ApexReActAgent:
     """Faithful async ReAct toolbelt agent for one APEX-Agents task.
 
-    ``apply_candidate`` updates the stashed component strings under a
-    build lock; the next :meth:`forward` snapshots them inside the lock
-    and runs a fresh loop. The wrapper does NOT keep long-lived loop
-    state — every case needs its own world + message history.
+    The three prompts are set at construction. The wrapper does NOT keep
+    long-lived loop state — every case needs its own world + message
+    history.
     """
 
     def __init__(
@@ -335,10 +322,10 @@ class ApexReActAgent:
         cost_limit: float = 3.0,
         max_toolbelt_size: int = 80,
         max_context_tokens: int = 120_000,
-        default_system_prompt: str,
-        default_task_template: str,
-        default_resum_summary_prompt: str,
         world_factory: WorldFactory,
+        system_prompt: str = SYSTEM_PROMPT,
+        task_template: str = TASK_TEMPLATE,
+        resum_summary_prompt: str = RESUM_SUMMARY_PROMPT,
         model_factory: ModelFactory | None = None,
         llm_timeout: float = _DEFAULT_LLM_TIMEOUT_S,
     ) -> None:
@@ -348,87 +335,48 @@ class ApexReActAgent:
         self._cost_limit = cost_limit
         self._max_toolbelt_size = max_toolbelt_size
         self._max_context_tokens = max_context_tokens
-        self._current_system_prompt = default_system_prompt
-        self._current_task_template = default_task_template
-        self._current_resum_summary_prompt = default_resum_summary_prompt
+        self._system_prompt = system_prompt
+        self._task_template = task_template
+        self._resum_summary_prompt = resum_summary_prompt
         self._world_factory = world_factory
         self._model_factory: ModelFactory = model_factory or build_litellm_model_factory(timeout=llm_timeout)
-        self._build_lock = threading.Lock()
-
-    # ─── candidate application (mirrors SWEBenchAgent) ────────────────
-
-    def apply_candidate(self, components: Mapping[str, str]) -> None:
-        """Stash new component strings under the build lock.
-
-        Only known components are read; unknown keys are ignored (a
-        candidate may carry a richer vocabulary). The lock prevents a
-        concurrent :meth:`forward` mid-snapshot from reading half of
-        one candidate's prompts and half of another's.
-        """
-        sys_p = components.get(SYSTEM_PROMPT_COMPONENT)
-        task_t = components.get(TASK_TEMPLATE_COMPONENT)
-        resum_p = components.get(RESUM_SUMMARY_PROMPT_COMPONENT)
-        with self._build_lock:
-            if sys_p is not None and sys_p != self._current_system_prompt:
-                self._current_system_prompt = sys_p
-            if task_t is not None and task_t != self._current_task_template:
-                self._current_task_template = task_t
-            if resum_p is not None and resum_p != self._current_resum_summary_prompt:
-                self._current_resum_summary_prompt = resum_p
 
     @property
-    def current_system_prompt(self) -> str:
-        return self._current_system_prompt
+    def system_prompt(self) -> str:
+        return self._system_prompt
 
     @property
-    def current_task_template(self) -> str:
-        return self._current_task_template
+    def task_template(self) -> str:
+        return self._task_template
 
     @property
-    def current_resum_summary_prompt(self) -> str:
-        return self._current_resum_summary_prompt
-
-    def _snapshot_components(self) -> tuple[str, str, str]:
-        with self._build_lock:
-            return (
-                self._current_system_prompt,
-                self._current_task_template,
-                self._current_resum_summary_prompt,
-            )
+    def resum_summary_prompt(self) -> str:
+        return self._resum_summary_prompt
 
     # ─── main entrypoint ──────────────────────────────────────────────
 
-    async def forward(self, *, record: Any) -> ApexAgentsAgentOutput:
+    async def forward(self, *, record: ApexAgentsRecord) -> ApexAgentsAgentOutput:
         """Run one APEX-Agents task through the ReAct loop end-to-end.
 
         The world factory may block (zip extraction / HF download), so
         it runs in :func:`asyncio.to_thread`; the sync ReAct loop is
-        likewise offloaded so rilixai's async runtime can drive many
-        cases concurrently without blocking the event loop.
+        likewise offloaded so the batch evaluator can drive many cases
+        concurrently without blocking the event loop.
         """
         started = time.monotonic()
-        world: Any = None
+        world: WorldFiles | None = None
         try:
-            # Snapshot the prompts BEFORE the first ``await``. The caller does
-            # ``apply_candidate(c); await forward(...)`` with no await in
-            # between, and asyncio only yields at an await — so taking the
-            # snapshot as forward's first action keeps apply→snapshot atomic.
-            # Snapshotting *after* the world-build await (as before) opened a
-            # window where a concurrent case's ``apply_candidate`` could swap
-            # the shared agent's prompts and this case would snapshot the wrong
-            # candidate.
-            sys_p, task_t, resum_p = self._snapshot_components()
             world = await asyncio.to_thread(self._world_factory, record)
             output = await asyncio.to_thread(
                 self._run_loop,
                 record=record,
                 world=world,
-                system_prompt=sys_p,
-                task_template=task_t,
-                resum_summary_prompt=resum_p,
+                system_prompt=self._system_prompt,
+                task_template=self._task_template,
+                resum_summary_prompt=self._resum_summary_prompt,
             )
         except Exception as exc:  # pragma: no cover - defensive top-level guard
-            logger.exception("APEX-Agents agent failed for task %s", getattr(record, "task_id", "?"))
+            logger.exception("APEX-Agents agent failed for task %s", record.task_id)
             output = ApexAgentsAgentOutput(
                 final_answer="",
                 status=type(exc).__name__,
@@ -436,12 +384,10 @@ class ApexReActAgent:
             )
         finally:
             if world is not None:
-                close = getattr(world, "close", None)
-                if callable(close):
-                    try:
-                        await asyncio.to_thread(close)
-                    except Exception:  # pragma: no cover - defensive
-                        logger.debug("world.close() raised", exc_info=True)
+                try:
+                    await asyncio.to_thread(world.close)
+                except Exception:  # pragma: no cover - defensive
+                    logger.debug("world.close() raised", exc_info=True)
         output.wall_seconds = time.monotonic() - started
         return output
 
@@ -450,14 +396,14 @@ class ApexReActAgent:
     def _run_loop(
         self,
         *,
-        record: Any,
-        world: Any,
+        record: ApexAgentsRecord,
+        world: WorldFiles,
         system_prompt: str,
         task_template: str,
         resum_summary_prompt: str,
     ) -> ApexAgentsAgentOutput:
         model = self._model_factory(self._model_name, self._model_temperature)
-        task_prompt = str(getattr(record, "prompt", "") or "")
+        task_prompt = record.prompt
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": _render_task_template(task_template, task_prompt)},
@@ -675,7 +621,7 @@ class ApexReActAgent:
         return f"Todos updated ({len(todos)} total): {todos}"
 
     @staticmethod
-    def _dispatch_domain_tool(*, name: str, args: Mapping[str, Any], world: Any) -> str:
+    def _dispatch_domain_tool(*, name: str, args: Mapping[str, Any], world: WorldFiles) -> str:
         if name == "list_files":
             files = world.list_files(str(args.get("subdir") or ""))
             return "Files:\n" + "\n".join(files) if files else "(no files)"

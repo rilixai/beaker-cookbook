@@ -1,7 +1,7 @@
 """Shared dataclasses for the APEX-Agents agent benchmark.
 
-Framework-neutral so the rilixai trajectory translation + feedback
-functions don't need to import litellm just to type-check.
+Framework-neutral so downstream code doesn't need to import litellm
+just to type-check.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any
 
 @dataclass
 class AgentToolCall:
-    """One step of the ReAct toolbelt loop, normalized for rilixai.
+    """One step of the ReAct toolbelt loop, normalized for reporting.
 
     * ``role`` — the message role (``"system"``, ``"user"``,
       ``"assistant"``, or ``"tool"``).
@@ -38,8 +38,8 @@ class ApexAgentsAgentOutput:
 
     Empty / missing data is represented with empty strings / lists so
     downstream code never has to ``None``-check. The rubric score is
-    NOT computed here — the runtime runs the LLM judge after the agent
-    terminates and stashes ``rubric_pass_rate`` on the run result.
+    NOT computed here — :mod:`apex_agents.evaluation` runs the LLM judge
+    after the agent terminates.
     """
 
     final_answer: str

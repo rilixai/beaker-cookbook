@@ -1,36 +1,27 @@
-"""Seed prompts for the APEX-Agents ReAct toolbelt agent.
+"""Prompts for the APEX-Agents ReAct toolbelt agent.
 
-Three optimizable components:
+Three of them, all overridable on :class:`~apex_agents.agent.agent.ApexReActAgent`:
 
 * ``system_prompt`` — the agent's system message (think-before-acting
   policy + tool catalogue + workflow + rules).
-* ``task_template`` — the first user message. A Jinja2 ``{{task}}``
+* ``task_template`` — the first user message. A Jinja2-style ``{{task}}``
   variable is substituted with the raw task prompt. Archipelago passes
-  the raw task prompt verbatim, so the seed is just ``{{task}}``; GEPA
-  may rewrite the framing but ``{{task}}`` must survive (the feedback
-  module enforces this, mirroring SWE-bench's ``{{task}}`` check).
+  the raw task prompt verbatim, so the default is just ``{{task}}``; a
+  custom template must keep ``{{task}}`` for the task to reach the model.
 * ``resum_summary_prompt`` — the conversation-compaction prompt used
   when the agent's context grows past the ReSum trigger. Keeps a
   literal ``{conversation}`` ``str.format`` placeholder.
 
-The system_prompt + resum_summary_prompt seeds are copied VERBATIM
-from Archipelago's ``react_toolbelt_agent`` reference prompts so our
-faithful agent's behavior matches Mercor's reference harness. Any
-drift would shift the GEPA optimization curve off the paper baseline.
+The system_prompt + resum_summary_prompt defaults are copied VERBATIM
+from Archipelago's ``react_toolbelt_agent`` reference prompts so this
+agent's behavior matches Mercor's reference harness.
 """
 
 from __future__ import annotations
 
-from rilixai import OptimizationTargets, optimization_targets_from_prompts
-
-
-SYSTEM_PROMPT_COMPONENT = "system_prompt"
-TASK_TEMPLATE_COMPONENT = "task_template"
-RESUM_SUMMARY_PROMPT_COMPONENT = "resum_summary_prompt"
-
 
 # ─── VERBATIM Archipelago react_toolbelt_agent system prompt ──────────
-SYSTEM_PROMPT_SEED = """You are an AI assistant that completes tasks by reasoning and using tools.
+SYSTEM_PROMPT = """You are an AI assistant that completes tasks by reasoning and using tools.
 
 ## Think Before Acting
 
@@ -64,7 +55,7 @@ Don't over-explain. Be concise but show your thinking.
 
 
 # ─── VERBATIM Archipelago SUMMARY_PROMPT (keep {conversation}) ─────────
-RESUM_SUMMARY_PROMPT_SEED = """Summarize this AI agent's work session into a compact reasoning state.
+RESUM_SUMMARY_PROMPT = """Summarize this AI agent's work session into a compact reasoning state.
 
 {conversation}
 
@@ -90,33 +81,18 @@ Be specific. Include concrete values needed to continue."""
 
 
 # Archipelago passes the raw task prompt as the user message; the seed
-# task_template is just the Jinja2 substitution of the task prompt.
-TASK_TEMPLATE_SEED = "{{task}}"
+# task_template default is just the substitution of the task prompt.
+TASK_TEMPLATE = "{{task}}"
 
 
-def apex_agents_seed_targets() -> OptimizationTargets:
-    """Return the seed :class:`OptimizationTargets` for the APEX-Agents agent."""
-    return optimization_targets_from_prompts(
-        {
-            SYSTEM_PROMPT_COMPONENT: SYSTEM_PROMPT_SEED,
-            TASK_TEMPLATE_COMPONENT: TASK_TEMPLATE_SEED,
-            RESUM_SUMMARY_PROMPT_COMPONENT: RESUM_SUMMARY_PROMPT_SEED,
-        }
-    )
-
-
-def load_apex_agents_seed_prompts() -> tuple[str, str, str]:
-    """Return ``(system_prompt, task_template, resum_summary_prompt)`` seeds."""
-    return SYSTEM_PROMPT_SEED, TASK_TEMPLATE_SEED, RESUM_SUMMARY_PROMPT_SEED
+def load_apex_agents_prompts() -> tuple[str, str, str]:
+    """Return the default ``(system_prompt, task_template, resum_summary_prompt)``."""
+    return SYSTEM_PROMPT, TASK_TEMPLATE, RESUM_SUMMARY_PROMPT
 
 
 __all__ = [
-    "RESUM_SUMMARY_PROMPT_COMPONENT",
-    "RESUM_SUMMARY_PROMPT_SEED",
-    "SYSTEM_PROMPT_COMPONENT",
-    "SYSTEM_PROMPT_SEED",
-    "TASK_TEMPLATE_COMPONENT",
-    "TASK_TEMPLATE_SEED",
-    "apex_agents_seed_targets",
-    "load_apex_agents_seed_prompts",
+    "RESUM_SUMMARY_PROMPT",
+    "SYSTEM_PROMPT",
+    "TASK_TEMPLATE",
+    "load_apex_agents_prompts",
 ]

@@ -1,21 +1,19 @@
-"""Field configs, scoring, and the rilixai ``CaseScorer`` for APEX-Agents.
+"""Rubric scoring for APEX-Agents: per-criterion LLM judge + pass rate.
 
-A single optimization field, ``rubric_pass_rate``, scores the agent's
-final answer against the task's rubric. Each rubric criterion is
-graded binary Met / Not-met by an LLM judge (Mercor's Archipelago
-default is ``gemini/gemini-3.5-flash`` — the "output_llm" verifier).
-The task score is the fraction of criteria Met; the benchmark metric
-is the mean task score over the evaluated tasks.
+Each APEX-Agents task ships a rubric of free-text criteria. An LLM judge
+(Mercor's Archipelago default is ``gemini/gemini-3.5-flash`` — the
+"output_llm" verifier) grades every criterion binary Met / Not-met against
+the agent's final answer. One number comes out per task:
 
-The runtime owns the judge call (it has the agent's final answer +
-the task prompt + the rubric), so by the time scoring runs the per-case
-``rubric_pass_rate`` float is already on the result. This module just
-plumbs the precomputed value through the rilixai metrics protocol —
-mirroring SWE-bench's ``_coerce_resolved`` / precomputed pattern.
+* ``rubric_pass_rate`` — the fraction of criteria marked Met.
 
-:func:`build_rubric_judge` returns the callable the runtime uses; its
-``llm`` is injectable so tests stub the verdicts and zero network
-fires.
+The benchmark metric is the mean task pass rate over the evaluated tasks
+(:mod:`apex_agents.evaluation.local_eval` does the aggregation). A task
+whose rubric has no non-blank criteria is unscoreable and is excluded from
+the mean rather than counted as a zero.
+
+:func:`build_rubric_judge` returns the judge callable; its ``llm`` is
+injectable so tests stub the verdicts and zero network fires.
 """
 
 from __future__ import annotations
@@ -25,17 +23,13 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from rilixai import Case, CaseResult, CaseScore, objective_score
-
 
 logger = logging.getLogger(__name__)
 
 
 __all__ = [
-    "APEX_AGENTS_FIELD_WEIGHTS",
     "DEFAULT_JUDGE_MODEL",
     "RUBRIC_FIELD",
-    "ApexAgentsScorer",
     "RubricJudge",
     "build_rubric_judge",
     "score_rubric",
@@ -43,13 +37,6 @@ __all__ = [
 
 
 RUBRIC_FIELD = "rubric_pass_rate"
-
-APEX_AGENTS_FIELD_WEIGHTS: dict[str, float] = {
-    # Single continuous field in [0, 1]: the fraction of rubric
-    # criteria the LLM judge marked Met. The optimizer's weighted
-    # objective collapses to the mean rubric pass rate.
-    RUBRIC_FIELD: 1.0,
-}
 
 DEFAULT_JUDGE_MODEL = "gemini/gemini-3.5-flash"
 # Bound each judge call so a hung provider request fails the criterion
@@ -60,25 +47,6 @@ DEFAULT_JUDGE_NUM_RETRIES = 2
 
 # Callable contract: ``judge(criterion, answer, task_prompt) -> bool``.
 RubricJudge = Callable[[str, str, str], bool]
-
-
-def _coerce_pass_rate(value: Any) -> float:
-    """Coerce a ``rubric_pass_rate`` field value into a [0, 1] float."""
-    if isinstance(value, bool):
-        return 1.0 if value else 0.0
-    if isinstance(value, (int, float)):
-        score = float(value)
-        if score < 0.0:
-            return 0.0
-        if score > 1.0:
-            return 1.0
-        return score
-    if isinstance(value, str):
-        try:
-            return _coerce_pass_rate(float(value))
-        except ValueError:
-            return 0.0
-    return 0.0
 
 
 # Primary signal: an explicit, labeled verdict line the judge is asked
@@ -210,8 +178,8 @@ def score_rubric(
 ) -> float:
     """Return the fraction of rubric criteria the judge marked Met.
 
-    An empty rubric yields ``0.0`` (an unscoreable task). The runtime
-    calls this once per case and stashes the float on the result.
+    An empty rubric yields ``0.0``; such a task is unscoreable and the
+    batch evaluator keeps it out of the aggregate entirely.
     """
     criteria = [str(c.get("criteria") or "") for c in rubric if str(c.get("criteria") or "").strip()]
     if not criteria:
@@ -224,37 +192,3 @@ def score_rubric(
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("Rubric judge raised on a criterion: %s", exc)
     return met / len(criteria)
-
-
-class ApexAgentsScorer:
-    """rilixai :class:`CaseScorer` for the single ``rubric_pass_rate`` field.
-
-    The runtime owns the LLM-judge call (it has the agent's final answer
-    + the task prompt + the rubric), so by the time scoring runs the
-    per-case ``rubric_pass_rate`` float is already on ``result.output``.
-    This scorer just reads it back, clamps to ``[0, 1]``, and collapses
-    the single weighted field to the objective — mirroring the old
-    precomputed-metric pattern under the SDK ``CaseScorer`` protocol.
-    """
-
-    def __init__(self, field_weights: Mapping[str, float] | None = None) -> None:
-        self.field_weights: dict[str, float] = dict(field_weights or APEX_AGENTS_FIELD_WEIGHTS)
-
-    async def score_case(self, *, case: Case, result: CaseResult) -> CaseScore:
-        del case
-        output = result.output if isinstance(result.output, Mapping) else {}
-        if RUBRIC_FIELD in output and output[RUBRIC_FIELD] is None:
-            # An explicit ``None`` marks an unscoreable case (empty/blank
-            # rubric): omit the field entirely so it is excluded from the
-            # aggregate ``rubric_pass_rate`` accuracy (per the SDK ``CaseScore``
-            # contract) instead of counting as a real ``0.0`` and deflating the
-            # benchmark metric. A *missing* key is a malformed result and still
-            # coerces to a conservative ``0.0`` below.
-            return CaseScore(field_scores={}, objective=0.0, key=RUBRIC_FIELD)
-        rate = _coerce_pass_rate(output.get(RUBRIC_FIELD))
-        field_scores = {RUBRIC_FIELD: rate}
-        return CaseScore(
-            field_scores=field_scores,
-            objective=objective_score(field_scores, field_weights=self.field_weights),
-            key=RUBRIC_FIELD,
-        )

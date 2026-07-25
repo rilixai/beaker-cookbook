@@ -1,14 +1,9 @@
-"""Raw APEX-Agents primitives — no GEPA dependency.
+"""Raw APEX-Agents dataset primitives.
 
-* :mod:`.dataset` — HuggingFace loader (``mercor/apex-agents``), record
-  + rubric dataclasses, ``Case`` conversion.
-* :mod:`.world_splits` — the world-level cross-world validation split
-  plus the stratified case cap used to hold train width constant
-  across train-size points.
-
-A reader writing a new benchmark looks here to see what the underlying
-dataset surface looks like, then goes to :mod:`apex_agents.optimization`
-to see how it gets wired into GEPA.
+* :mod:`.dataset` — HuggingFace loader (``mercor/apex-agents``) producing
+  plain typed records + rubric dataclasses.
+* :mod:`.world_splits` — the world-level cross-world validation split plus
+  the stratified record cap used to hold world width constant.
 """
 
 from .dataset import (
@@ -16,12 +11,10 @@ from .dataset import (
     DEFAULT_DOMAIN,
     ApexAgentsRecord,
     RubricCriterion,
-    cases_from_records,
     filter_investment_banking,
-    load_apex_agents_cases,
     load_apex_agents_records,
-    record_to_case,
-    world_ids_for_cases,
+    records_from_rows,
+    world_ids_for_records,
 )
 from .world_splits import (
     fixed_val_split,
@@ -34,12 +27,10 @@ __all__ = [
     "DEFAULT_DOMAIN",
     "ApexAgentsRecord",
     "RubricCriterion",
-    "cases_from_records",
     "filter_investment_banking",
     "fixed_val_split",
-    "load_apex_agents_cases",
     "load_apex_agents_records",
-    "record_to_case",
+    "records_from_rows",
     "stratified_case_cap",
-    "world_ids_for_cases",
+    "world_ids_for_records",
 ]
