@@ -23,20 +23,20 @@ Version strategy (mirrors rilix/rilix PR #1381):
 Typical workflows:
 
     # Build + promote + trigger in one shot (canonical local dev flow):
-    uv run hotpotqa/sandbox.py --build
+    uv run sandbox.py --build
 
     # Build + promote only, no trigger (the CI ``push-spec.yml`` flow —
     # ships the image and flips @production without spending LLM tokens):
-    uv run hotpotqa/sandbox.py --build --no-trigger
+    uv run sandbox.py --build --no-trigger
 
     # Trigger only (uses whatever's currently @production):
-    uv run hotpotqa/sandbox.py
+    uv run sandbox.py
 
     # Pin a specific version (smoke / regression):
-    uv run hotpotqa/sandbox.py --spec hotpotqa-agent@v1a2b3c4
+    uv run sandbox.py --spec hotpotqa-agent@v1a2b3c4
 
     # Push without promoting (lets you smoke-test a new build before flipping prod):
-    uv run hotpotqa/sandbox.py --build --no-promote --spec hotpotqa-agent@v1a2b3c4
+    uv run sandbox.py --build --no-promote --spec hotpotqa-agent@v1a2b3c4
 
 Required env vars (load via .env or export):
     RILIXAI_API_BASE_URL   — API Gateway URL from the RilixaiApiStack CDK output
@@ -103,11 +103,10 @@ def _short_sha() -> str:
 
 
 # Requirements the sandbox image already provides without an index install:
-# ``rilixai`` (baked in by the build worker) and ``cookbook-common`` (a
-# workspace member installed by the bundle-root ``pip install /spec``). Both
-# are matched by normalized distribution name (``_`` / ``-`` insensitive).
+# ``rilixai`` is baked into every spec image by the build worker. Matched by
+# normalized distribution name (``_`` / ``-`` insensitive).
 _BUNDLE_PROVIDED_PREFIXES = ("rilixai",)
-_BUNDLE_PROVIDED_NAMES = ("cookbook-common",)
+_BUNDLE_PROVIDED_NAMES: tuple[str, ...] = ()
 
 
 def _is_bundle_provided(dep: str) -> bool:
@@ -117,22 +116,19 @@ def _is_bundle_provided(dep: str) -> bool:
 
 
 def _member_pip_deps() -> list[str]:
-    """Read the hotpotqa workspace member's runtime deps from its pyproject.
+    """Read this recipe's runtime deps from its pyproject.
 
-    The rilixai build worker only sees the *bundle root* pyproject when it
-    runs ``pip install /spec``; the workspace member's pyproject is
-    invisible to it. So we shovel the member's deps in via ``--pip-install``
-    explicitly. Reading them here keeps the dep list from drifting between
-    ``hotpotqa/pyproject.toml`` and the push invocation.
+    The repo-root bundle is uploaded source-only (there is no root pyproject),
+    so the build worker never ``pip install``s the recipe's own pyproject deps
+    — it just places the source on ``sys.path``. We therefore shovel the
+    recipe's runtime deps in via ``--pip-install`` explicitly. Reading them
+    here keeps the dep list from drifting between ``hotpotqa/pyproject.toml``
+    and the push invocation.
 
     ``rilixai`` is stripped because rilixai's build worker bakes its own
     pinned wheel into every spec image (see ``RESERVED_PIP_INSTALL_NAMES``
     in ``rilixai/_image_install_validation.py``) — customer pins for
-    rilixai are rejected. ``cookbook-common`` is stripped because it is a
-    workspace member with no index release: the bundle-root ``pip install
-    /spec`` already installs it (the root pyproject's setuptools package
-    list includes ``cookbook_common*``), so passing it to ``--pip-install``
-    would send the build worker looking for a nonexistent PyPI release.
+    rilixai are rejected.
     """
     data = tomllib.loads(MEMBER_PYPROJECT.read_text())
     deps = data["project"]["dependencies"]

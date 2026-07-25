@@ -1,7 +1,7 @@
 """CLI entrypoint for HotpotQA benchmarking (SDK-only / Shape B).
 
-Run as ``python -m hotpotqa.cli ...`` after installing the cookbook's
-``hotpotqa`` workspace member (``uv sync --all-packages --group dev``).
+Run as ``python -m hotpotqa.cli ...`` after installing this recipe from its
+directory (``cd hotpotqa && uv sync --group dev``).
 
 Subcommands:
 * ``validate`` — build the spec + run ``validate_spec`` (fully offline; no
@@ -38,12 +38,11 @@ from typing import Any
 
 from rilixai import Case, OptimizationTargets
 
-from cookbook_common.cli_support import load_targets_from_json, validate_and_log, write_eval_report
-from cookbook_common.local_eval import run_local_evaluation
-
 from .agent.prompts import hotpotqa_pydantic_agent_seed_targets
 from .config import HotpotQAConfig
 from .data.dataset import load_hotpotqa_paper_split
+from .optimization.cli_support import load_targets_from_json, validate_and_log, write_eval_report
+from .optimization.local_eval import run_local_evaluation
 from .optimization.metrics import ANSWER_FIELD
 from .optimization.spec import build_hotpotqa_spec
 

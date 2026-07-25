@@ -39,6 +39,10 @@ build-backend = "hatchling.build"
 # everything under "." installs at the top-level ``harvey_lab`` import
 # path; exclude dev/test/script assets from the wheel.
 sources = { "." = "harvey_lab" }
+# Editable installs add the repo root (not this dir) to sys.path so the
+# package resolves under its ``harvey_lab`` import name from anywhere,
+# including a ``cd harvey_lab`` shell.
+dev-mode-dirs = [".."]
 include = [
   "__init__.py",
   "*.py",
@@ -57,3 +61,68 @@ exclude = [
 # Allow the ``rilixai @ git+ssh://...`` direct reference in
 # ``project.dependencies`` until the cookbook can swap to a PyPI version pin.
 allow-direct-references = true
+
+# Dev tooling + lint/type/test config live in this recipe's own pyproject so
+# the folder is a self-contained project (no root workspace pyproject).
+
+[dependency-groups]
+dev = [
+  "ruff",
+  "mypy",
+  "pytest",
+  "pytest-asyncio>=0.23",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# ``importlib`` import mode + the repo root on ``sys.path`` (``..``) so the
+# recipe imports as the top-level ``harvey_lab`` package (how the tests
+# reference it) regardless of how pytest is launched.
+addopts = "--import-mode=importlib"
+pythonpath = [".."]
+
+[tool.ruff]
+line-length = 119
+
+[tool.ruff.lint]
+ignore = ["C901", "E501", "E721", "E741", "F402", "F823"]
+select = ["C", "E", "F", "I", "W", "UP006", "UP007", "UP045"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402", "F401", "F403", "F811"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["harvey_lab"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+show_error_codes = true
+# Flat layout: the package dir IS this recipe folder. Point mypy at it via the
+# parent so modules resolve as ``harvey_lab.…`` and intra-package imports
+# type-check. Tests + scripts are excluded (fixture-shaped types).
+files = ["../harvey_lab"]
+exclude = ["(^|/)tests/", "(^|/)scripts/"]
+
+# ``ignore_missing_imports`` for the scientific/agent deps that ship without
+# ``py.typed`` markers (mirrors the rilixai-side overrides).
+[[tool.mypy.overrides]]
+module = [
+  "stirrup",
+  "stirrup.*",
+  "litellm",
+  "openpyxl",
+  "docx",
+]
+ignore_missing_imports = true

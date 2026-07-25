@@ -9,13 +9,13 @@ push``), optionally promotes the freshly-pushed row to
 Typical workflows:
 
     # Build + promote + trigger in one shot (canonical local dev flow):
-    uv run harvey_lab/sandbox.py --build
+    uv run sandbox.py --build
 
     # Build + promote only, no trigger (the CI ``push-spec.yml`` flow):
-    uv run harvey_lab/sandbox.py --build --no-trigger
+    uv run sandbox.py --build --no-trigger
 
     # Trigger only (uses whatever's currently @production):
-    uv run harvey_lab/sandbox.py
+    uv run sandbox.py
 
 Required env vars (load via .env or export):
     RILIXAI_API_BASE_URL   — API Gateway URL from the RilixaiApiStack CDK output
@@ -111,10 +111,11 @@ def push_image(version: str) -> None:
         "--version",
         version,
         # Exported datasets (incl. base64-embedded documents) live under
-        # scripts/_datasets/; they belong in uploaded datasets, not the spec
-        # image, so keep them out of the bundle.
+        # harvey_lab/scripts/_datasets/ (relative to --source-dir, the repo
+        # root); they belong in uploaded datasets, not the spec image, so keep
+        # them out of the bundle.
         "--exclude",
-        "scripts/_datasets/*",
+        "harvey_lab/scripts/_datasets/*",
         *pip_install_args,
         str(SPEC_TARGET),
     ]

@@ -1,10 +1,8 @@
-"""Shared ``cli.py`` plumbing for the cookbook recipes.
+"""Local ``cli.py`` plumbing for the HotpotQA recipe.
 
-Both recipes' local CLIs (``validate`` / ``evaluate``) need the same
-candidate-JSON loading, spec-validation logging, and eval-report serialization.
-This module holds that recipe-agnostic glue so the two CLIs don't copy it
-verbatim; the only recipe-specific inputs are passed in as arguments (the seed
-targets and the spec/logger).
+Candidate-JSON loading, spec-validation logging, and eval-report serialization
+for the local ``validate`` / ``evaluate`` CLI. Kept inside the recipe so the
+folder is self-contained (no shared cookbook package).
 """
 
 from __future__ import annotations
@@ -30,8 +28,8 @@ def load_targets_from_json(path: Path | None, *, seed_targets: OptimizationTarge
 
     Returns ``seed_targets`` unchanged when ``path`` is ``None``. Otherwise
     accepts the ``OptimizationTargets`` wire shape (``{"prompts": {...}}``), the
-    legacy ``PromptCandidate`` shape (``{"components": {...}}``) written by the
-    pre-migration optimizer, or a bare ``{name: text}`` mapping.
+    legacy ``PromptCandidate`` shape (``{"components": {...}}``), or a bare
+    ``{name: text}`` mapping.
     """
     if path is None:
         return seed_targets
@@ -46,9 +44,8 @@ def load_targets_from_json(path: Path | None, *, seed_targets: OptimizationTarge
         raise ValueError(f"Candidate JSON at {path} must be an object of prompt name → text.")
     parsed = {str(k): str(v) for k, v in prompts.items()}
     # Guard against a mis-shaped/typo'd file being read as a bare name→text map:
-    # ``apply_candidate`` silently ignores unknown component names, so without
-    # this a candidate whose keys match nothing would evaluate the *seed*
-    # prompts and report that score as the candidate's.
+    # a candidate whose keys match no known prompt would otherwise silently
+    # evaluate the *seed* prompts and report that score as the candidate's.
     known = set(seed_targets.to_dict())
     if not (parsed.keys() & known):
         raise ValueError(

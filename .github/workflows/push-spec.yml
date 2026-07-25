@@ -12,14 +12,13 @@ name: Push specs to rilixai
 # (default version: ``v<short_sha>`` from git; promote: on; trigger: skipped
 # — CI never spends LLM tokens on a smoke run).
 #
-# Per-member triggering: ``dorny/paths-filter`` decides which workspace
-# member's tree changed and the matrix only runs that member's push. A change
-# under ``hotpotqa/**`` only rebuilds ``hotpotqa-agent``; a change under
-# ``apex_agents/**`` only rebuilds ``apex-agents``. Root-level edits
-# (workspace ``pyproject.toml``, ``uv.lock``, this workflow) affect every
-# member's image, so they fan out to all of them. ``fail-fast: false`` keeps
-# one member's build failure from cancelling the others. Manual
-# ``workflow_dispatch`` always fans out to every member (override the
+# Per-recipe triggering: ``dorny/paths-filter`` decides which recipe's tree
+# changed and the matrix only runs that recipe's push. A change under
+# ``hotpotqa/**`` only rebuilds ``hotpotqa-agent``; a change under
+# ``apex_agents/**`` only rebuilds ``apex-agents``. An edit to this workflow
+# affects every recipe's push, so it fans out to all of them. ``fail-fast:
+# false`` keeps one recipe's build failure from cancelling the others. Manual
+# ``workflow_dispatch`` always fans out to every recipe (override the
 # version label or skip the promote step for hot-fix re-pushes).
 
 on:
@@ -29,8 +28,6 @@ on:
       - 'hotpotqa/**'
       - 'apex_agents/**'
       - 'harvey_lab/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
       - '.github/workflows/push-spec.yml'
   workflow_dispatch:
     inputs:
@@ -48,12 +45,11 @@ permissions:
   contents: read
 
 jobs:
-  # Detect which workspace members changed so the matrix only runs the ones
-  # that need a fresh image. Root-level edits (workspace pyproject, uv.lock,
-  # this workflow) cascade to every member; manual dispatch always fans out
-  # to every member.
+  # Detect which recipes changed so the matrix only runs the ones that need a
+  # fresh image. An edit to this workflow cascades to every recipe; manual
+  # dispatch always fans out to every recipe.
   detect-changes:
-    name: Detect changed members
+    name: Detect changed recipes
     runs-on: ubuntu-latest
     outputs:
       members: ${{ steps.select.outputs.members }}
@@ -73,13 +69,11 @@ jobs:
             harvey_lab:
               - 'harvey_lab/**'
             root:
-              - 'pyproject.toml'
-              - 'uv.lock'
               - '.github/workflows/push-spec.yml'
 
       - name: Select members
         id: select
-        # Each selected entry pairs a workspace member directory (``dir``) with
+        # Each selected entry pairs a recipe directory (``dir``) with
         # the rilixai agent key it pushes to (``agent``). The build path runs
         # ``rilixai push`` / ``rilixai spec promote``, which resolve the agent
         # from ``$RILIXAI_AGENT_KEY`` (set per entry in the push job), so a
@@ -124,6 +118,10 @@ jobs:
     concurrency:
       group: push-spec-${{ matrix.entry.dir }}-${{ github.ref }}
       cancel-in-progress: false
+    # Each recipe is a standalone uv project; run ``uv`` from its directory.
+    defaults:
+      run:
+        working-directory: ${{ matrix.entry.dir }}
     env:
       RILIXAI_API_BASE_URL: ${{ secrets.RILIXAI_API_BASE_URL }}
       RILIXAI_API_KEY: ${{ secrets.RILIXAI_API_KEY }}
@@ -156,15 +154,17 @@ jobs:
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
       - name: uv sync (locked)
-        run: uv sync --all-packages --group dev --locked
+        run: uv sync --group dev --locked
 
       - name: Push + promote spec
-        # ``<member>/sandbox.py --build --no-trigger`` runs ``rilixai push``
-        # with the deps from that member's pyproject and then ``rilixai spec
-        # promote`` to point ``<name>@production`` at the fresh row.
-        # ``--no-trigger`` keeps CI build-only — optimization runs are
-        # initiated explicitly by humans (or downstream services) against
-        # ``<name>@production``, never auto-fired on every merge.
+        # ``sandbox.py --build --no-trigger`` runs ``rilixai push`` with the
+        # deps from this recipe's pyproject and then ``rilixai spec promote``
+        # to point ``<name>@production`` at the fresh row. ``--no-trigger``
+        # keeps CI build-only — optimization runs are initiated explicitly by
+        # humans (or downstream services) against ``<name>@production``, never
+        # auto-fired on every merge. Runs from the recipe dir (see the job's
+        # ``working-directory`` default) so ``uv run`` uses this recipe's
+        # standalone project.
         run: |
           VERSION_OVERRIDE_FLAG=""
           if [ -n "${VERSION_OVERRIDE}" ]; then
@@ -178,7 +178,7 @@ jobs:
             SKIP_PROMOTE_FLAG="--no-promote"
             echo "workflow_dispatch requested --no-promote (build won't flip @production)"
           fi
-          uv run ${{ matrix.entry.dir }}/sandbox.py --build --no-trigger ${VERSION_OVERRIDE_FLAG} ${SKIP_PROMOTE_FLAG}
+          uv run sandbox.py --build --no-trigger ${VERSION_OVERRIDE_FLAG} ${SKIP_PROMOTE_FLAG}
         env:
           VERSION_OVERRIDE: ${{ inputs.version_override }}
           SKIP_PROMOTE: ${{ inputs.skip_promote }}

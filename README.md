@@ -27,16 +27,15 @@ spending anything on LLM calls.
 
 ## Quick start
 
-Requires Python 3.12+ and [`uv`](https://docs.astral.sh/uv/). The
-cookbook is a uv workspace, so a single command installs every recipe
-together:
+Requires Python 3.12+ and [`uv`](https://docs.astral.sh/uv/). Each recipe is
+a self-contained, standalone uv project (its own `pyproject.toml` +
+`uv.lock`) — there is no root workspace. Pick a recipe, install it, and
+follow the commands in its README:
 
 ```bash
-uv sync --all-packages --group dev
+cd harvey_lab        # or hotpotqa / apex_agents
+uv sync --group dev
 ```
-
-From there each recipe is independently runnable — pick one and
-follow the commands in its README.
 
 ## Configuration
 
@@ -80,9 +79,13 @@ fetch them at runtime.
 
 ## Development
 
+Run the checks from inside a recipe directory — each recipe carries its own
+lint/type/test config:
+
 ```bash
-uv sync --all-packages --group dev
-uv run python -m pytest -q     # all recipes' tests
+cd harvey_lab        # or hotpotqa / apex_agents
+uv sync --group dev
+uv run python -m pytest -q
 uv run ruff check
 uv run ruff format --check
 uv run python -m mypy

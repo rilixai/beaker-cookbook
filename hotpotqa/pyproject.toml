@@ -17,9 +17,6 @@ dependencies = [
   # ``RILIXAI_GITHUB_SSH_KEY`` via webfactory's ssh-agent action —
   # matches the rilix repo's auth pattern.
   "rilixai @ git+ssh://git@github.com/rilixai/rilixai.git@28ea6f1380b30e65a85232c312fed9ac088baa86#subdirectory=packages/rilixai",
-  # Shared, recipe-agnostic helpers (local eval loop + CLI plumbing);
-  # resolved from the workspace (see root ``[tool.uv.sources]``).
-  "cookbook-common",
   "pydantic-ai>=0.0.20",
   "rank-bm25>=0.2",
   "datasets>=2.14",
@@ -38,6 +35,10 @@ build-backend = "hatchling.build"
 # everything under "." installs at the top-level ``hotpotqa`` import
 # path; exclude dev/test/script assets from the wheel.
 sources = { "." = "hotpotqa" }
+# Editable installs add the repo root (not this dir) to sys.path so the
+# package resolves under its ``hotpotqa`` import name from anywhere,
+# including a ``cd hotpotqa`` shell.
+dev-mode-dirs = [".."]
 include = [
   "__init__.py",
   "*.py",
@@ -57,3 +58,67 @@ exclude = [
 # ``project.dependencies`` until the cookbook can swap to a PyPI
 # version pin.
 allow-direct-references = true
+
+# Dev tooling + lint/type/test config live in this recipe's own pyproject so
+# the folder is a self-contained project (no root workspace pyproject).
+
+[dependency-groups]
+dev = [
+  "ruff",
+  "mypy",
+  "pytest",
+  "pytest-asyncio>=0.23",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# ``importlib`` import mode + the repo root on ``sys.path`` (``..``) so the
+# recipe imports as the top-level ``hotpotqa`` package (how the tests
+# reference it) regardless of how pytest is launched.
+addopts = "--import-mode=importlib"
+pythonpath = [".."]
+
+[tool.ruff]
+line-length = 119
+
+[tool.ruff.lint]
+ignore = ["C901", "E501", "E721", "E741", "F402", "F823"]
+select = ["C", "E", "F", "I", "W", "UP006", "UP007", "UP045"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402", "F401", "F403", "F811"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["hotpotqa"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+show_error_codes = true
+# Flat layout: the package dir IS this recipe folder. Point mypy at it via the
+# parent so modules resolve as ``hotpotqa.…`` and intra-package imports
+# type-check. Tests + scripts are excluded (fixture-shaped types).
+files = ["../hotpotqa"]
+exclude = ["(^|/)tests/", "(^|/)scripts/"]
+
+# ``ignore_missing_imports`` for the scientific deps that ship without
+# ``py.typed`` markers (mirrors the rilixai-side overrides).
+[[tool.mypy.overrides]]
+module = [
+  "rank_bm25",
+  "datasets",
+  "bm25s",
+  "Stemmer",
+]
+ignore_missing_imports = true

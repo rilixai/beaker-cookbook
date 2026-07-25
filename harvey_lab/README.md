@@ -94,8 +94,11 @@ runner does). The full GEPA optimize loop runs server-side via `rilixai run`;
 
 ## Install
 
+This recipe is a standalone uv project; run all commands from this directory:
+
 ```bash
-uv sync --all-packages --group dev
+cd harvey_lab
+uv sync --group dev
 ```
 
 Env vars (needed for any run that calls a model):
@@ -151,8 +154,8 @@ uv run python scripts/export_harvey_lab_dataset.py --tasks-root harvey-labs/task
 uv run rilixai dataset upload --name harvey-lab-dataset \
   --split train=883 --split val=123 --split test=126 scripts/_datasets/harvey_lab
 
-uv run harvey_lab/sandbox.py --build   # build + promote + trigger
-uv run harvey_lab/sandbox.py           # trigger only (current @production)
+uv run sandbox.py --build   # build + promote + trigger
+uv run sandbox.py           # trigger only (current @production)
 ```
 
 The trigger defaults to `--dataset harvey-lab-dataset@production` and

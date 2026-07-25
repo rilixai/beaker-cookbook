@@ -13,8 +13,11 @@ Cases come from the private HF dataset `mercor/apex-agents`.
 
 ## Install
 
+This recipe is a standalone uv project; run all commands from this directory:
+
 ```bash
-uv sync --all-packages --group dev
+cd apex_agents
+uv sync --group dev
 ```
 
 Env vars (needed for any run that calls a model):
@@ -69,8 +72,8 @@ export RILIXAI_AGENT_KEY=apex-agents   # agent the trigger targets (or pass --ag
 # One-time (or when the data changes): upload the JSONL split as a dataset.
 uv run rilixai dataset upload --name apex-agents-dataset path/to/jsonl-dir/
 
-uv run apex_agents/sandbox.py --build   # build + promote + trigger
-uv run apex_agents/sandbox.py           # trigger only (current @production)
+uv run sandbox.py --build   # build + promote + trigger
+uv run sandbox.py           # trigger only (current @production)
 ```
 
 The trigger defaults to `--dataset apex-agents-dataset@production` and
