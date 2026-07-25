@@ -5,8 +5,8 @@
 </div>
 
 
-*A collection of [rilixai](https://github.com/rilixai/rilixai) recipes
-that demonstrate rilixai's continual learning capabilities across different agent shapes, tasks, and
+*A collection of standalone agent recipes — each one a runnable agent
+plus a local evaluation — across different agent shapes, tasks, and
 production setups.*
 
 
@@ -14,16 +14,16 @@ production setups.*
 ## Recipes
 
 ```
+harvey_lab/       Legal-research agent over the Harvey/LegalBench-style corpus
 hotpotqa/         Multi-hop QA — PydanticAI tool-using agent (retrieve_k + summarize)
-apex_agents/      (planned follow-up)
+apex_agents/      Professional knowledge-work tasks — ReAct toolbelt agent, LLM rubric judge
 ```
 
 Each folder contains everything you need to reproduce the recipe: a
 README with the canonical reproduce commands and expected scores, a
-local CLI (`cli.py`) for fast iteration on your laptop, an optional
-Modal sandbox path (`sandbox.py`) for hosted runs at scale, and a
-hermetic test suite so you can verify the harness end-to-end before
-spending anything on LLM calls.
+CLI (`cli.py`) exposing `run` and `evaluate`, and a hermetic test
+suite so you can verify the harness end-to-end before spending
+anything on LLM calls.
 
 ## Quick start
 
@@ -39,22 +39,17 @@ uv sync --group dev
 
 ## Configuration
 
-The recipes need credentials for the LLM provider and, if you're
-using the hosted path, for the rilixai control plane. The easiest
-setup is a `.env` file at the cookbook root with the variables below;
-they'll be picked up automatically by both the local CLIs and the
-sandbox scripts.
+The recipes need credentials for the LLM providers they call. The
+easiest setup is a `.env` file at the cookbook root; it is picked up
+automatically by the CLIs.
 
 | Variable | Required for | Where to get it |
 |---|---|---|
-| `OPENAI_API_KEY` | Local runs (every recipe's `cli.py`) | [OpenAI dashboard](https://platform.openai.com/api-keys) |
-| `RILIXAI_API_KEY` | Hosted runs (every recipe's `sandbox.py`) | rilixai dashboard |
-| `RILIXAI_API_BASE_URL` | Hosted runs | rilixai dashboard — looks like `https://<id>.execute-api.us-east-2.amazonaws.com/prod/` |
+| `OPENAI_API_KEY` | Every recipe's `cli.py` | [OpenAI dashboard](https://platform.openai.com/api-keys) |
 
-For hosted runs you don't need `OPENAI_API_KEY` on your machine — it's
-bound at the rilixai *project* level, and each sandbox container that
-spawns inherits it as an env var. Set it once in the rilixai dashboard
-and forget about it locally.
+Some recipes need extra credentials — a judge model's provider key, or
+a HuggingFace token for a gated dataset. Each recipe's README lists
+what it needs.
 
 Per-recipe knobs like model choice, dataset size, and retrieval mode
 are documented in each recipe's README and surfaced as CLI flags, so
@@ -63,19 +58,11 @@ run" without touching code.
 
 ## What runs where
 
-Each recipe ships two entry points so you can pick the right tool for
-the job:
-
-| Path | Where it runs | When to use |
-|---|---|---|
-| `<recipe>/cli.py` | Your laptop | Fast iteration, local debugging, no rilixai account needed |
-| `<recipe>/sandbox.py` | rilixai hosted Modal sandbox | Real optimization runs at scale, scheduled retraining, sharing optimized prompts across teams |
-
-The local CLI uses your `OPENAI_API_KEY` directly and writes results
-to local files. The hosted path packages the recipe into a Modal
-image, queues the run through rilixai's API, and writes the optimized
-prompts back to your rilixai project so any service of yours can
-fetch them at runtime.
+Everything runs locally. `<recipe>/cli.py` exposes two commands:
+`run` executes the agent over the selected cases and dumps its
+outputs, `evaluate` also scores them and writes a summary. Both read
+your provider keys from the environment and write results to a local
+`--output-dir`.
 
 ## Development
 
@@ -91,8 +78,3 @@ uv run ruff format --check
 uv run python -m mypy
 ```
 
-## rilixai dependency
-
-Pinned via `git+ssh` at a specific main-branch SHA until a fresh
-rilixai is published to PyPI. See each recipe's `pyproject.toml`
-for the current pin.
