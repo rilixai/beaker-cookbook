@@ -76,7 +76,6 @@ def build_harvey_lab_run_case(
     )
 
     async def _run_case(*, case: Case, targets: OptimizationTargets, runtime: Any = None) -> CaseResult:
-        del runtime
         record = _record_from_case(case)
         # Pass the candidate's prompt components straight into ``forward`` rather
         # than mutating shared agent state first. The optimizer runs cases on
@@ -84,7 +83,14 @@ def build_harvey_lab_run_case(
         # reused agent is racy: a concurrent case evaluating a *different*
         # candidate could swap the shared prompts between the two calls. Threading
         # the candidate through keeps each rollout isolated.
-        output = await resolved_agent.forward(record=record, components=targets.to_dict())
+        output = await resolved_agent.forward(
+            record=record,
+            components=targets.to_dict(),
+            # Optional model-selection seam: the optimizer sets ``runtime.model``
+            # (and ``.provider``) when it drives a specific model for this
+            # rollout; absent that, the agent uses its own production task model.
+            model=_selected_model(runtime),
+        )
 
         criteria_payload = [
             {"id": c.id, "title": c.title, "match_criteria": c.match_criteria, "deliverables": list(c.deliverables)}
@@ -118,6 +124,23 @@ def build_harvey_lab_run_case(
         )
 
     return _run_case
+
+
+def _selected_model(runtime: Any) -> str | None:
+    """Resolve the LiteLLM model string the optimizer selected for a rollout.
+
+    ``runtime`` is the SDK ``RolloutContext`` (``None`` for local eval / tests).
+    Returns ``None`` when no model was selected, so the agent keeps its own
+    production model. When a bare model id arrives with a separate ``provider``,
+    they are joined into the ``provider/model`` slug LiteLLM routes on.
+    """
+    model: str | None = getattr(runtime, "model", None)
+    if not model:
+        return None
+    provider: str | None = getattr(runtime, "provider", None)
+    if provider and "/" not in model:
+        return f"{provider}/{model}"
+    return model
 
 
 def _task_description(record: HarveyLabRecord) -> str:

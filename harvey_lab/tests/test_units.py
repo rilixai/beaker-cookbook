@@ -441,6 +441,70 @@ def test_forward_wires_passed_candidate_prompt_to_llm(tasks_root: Path) -> None:
     assert "OTHER-CANDIDATE-SYSTEM" not in captured.get("system", "")
 
 
+def test_selected_model_joins_provider_and_falls_back() -> None:
+    """The run_case model seam: a bare ``runtime.model`` with a separate
+    ``provider`` is joined into a ``provider/model`` slug; an already-qualified
+    slug is left alone; no model means no override (agent keeps its default)."""
+    from types import SimpleNamespace
+
+    from harvey_lab.optimization.runtime import _selected_model
+
+    assert _selected_model(None) is None
+    assert _selected_model(SimpleNamespace(model=None, provider="openai")) is None
+    assert _selected_model(SimpleNamespace(model="gpt-4.1", provider="openai")) == "openai/gpt-4.1"
+    assert _selected_model(SimpleNamespace(model="openai/gpt-4.1", provider="openai")) == "openai/gpt-4.1"
+    assert _selected_model(SimpleNamespace(model="gpt-4.1", provider=None)) == "gpt-4.1"
+
+
+def test_forward_uses_selected_model_else_config_default(tasks_root: Path) -> None:
+    """``forward(model=...)`` routes the Stirrup client to the selected model
+    for that rollout only; ``model=None`` falls back to the config task model."""
+    from harvey_lab.agent.agent import HarveyLabAgent
+
+    seen: list[str] = []
+
+    def _capturing_factory(model: str, _temp: float, _max_tokens: int) -> Any:
+        seen.append(model)
+        return _ScriptedClient(deliverable_body="body")
+
+    agent = HarveyLabAgent(
+        config=HarveyLabConfig(task_model="openai/gpt-4.1-mini-2025-04-14", max_turns=3),
+        task_source=task_source_from_dir(tasks_root),
+        model_factory=_capturing_factory,
+    )
+    record = load_harvey_lab_records(tasks_root, practice_areas=["contracts"], max_per_area=1)[0]
+    asyncio.run(agent.forward(record=record, model="anthropic/claude-sonnet"))
+    asyncio.run(agent.forward(record=record, model=None))
+    assert seen == ["anthropic/claude-sonnet", "openai/gpt-4.1-mini-2025-04-14"]
+
+
+def test_build_spec_reads_extra_config_and_model_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sandbox ``build_spec`` reads recipe knobs from ``ctx.config['extra']``
+    (the launch contract rejects unknown top-level keys) and lets an optimizer-
+    selected ``ctx.model`` override the task model."""
+    from rilixai import OptimizationContext
+
+    from harvey_lab.config import HarveyLabConfig as _Cfg
+    from harvey_lab.optimization import spec as spec_mod
+
+    captured: dict[str, Any] = {}
+
+    def _fake_build(*, config: _Cfg, task_source: Any) -> Any:  # noqa: ANN401
+        captured["config"] = config
+        return object()
+
+    monkeypatch.setattr(spec_mod, "build_harvey_lab_spec", _fake_build)
+
+    extra = {"task_model": "openai/gpt-4.1", "judge_model": "anthropic/claude", "max_turns": 7}
+    spec_mod.build_spec(OptimizationContext(config={"max_metric_calls": 50, "extra": extra}))
+    cfg = captured["config"]
+    assert (cfg.task_model, cfg.judge_model, cfg.max_turns) == ("openai/gpt-4.1", "anthropic/claude", 7)
+
+    # An optimizer-selected rollout model overrides the extra task_model.
+    spec_mod.build_spec(OptimizationContext(model="google/gemini-3-pro", config={"extra": extra}))
+    assert captured["config"].task_model == "google/gemini-3-pro"
+
+
 def test_embedded_documents_roundtrip_and_materialize(tasks_root: Path) -> None:
     """``--embed-documents`` bundles docs into the row; the bundled task
     source materializes them from the row with no network access."""

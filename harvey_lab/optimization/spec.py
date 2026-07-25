@@ -92,14 +92,18 @@ def build_spec(ctx: OptimizationContext) -> Spec:
     """Spec factory for the rilixai sandbox path. See README for usage.
 
     Under the SDK-only shape the optimizer sources cases from the uploaded
-    JSONL dataset via :class:`HarveyLabDataLoader`; the agent knobs come from
-    ``ctx.config`` (merged over :data:`_DEFAULT_SANDBOX_CONFIG`). The task
-    documents are fetched per case from the pinned ``harveyai/harvey-labs``
-    commit — network is available inside the sandbox container.
+    JSONL dataset via :class:`HarveyLabDataLoader`. The recipe-specific agent
+    knobs are read from ``ctx.config["extra"]`` — the launch contract reserves
+    the top level for optimizer settings (``max_metric_calls`` etc.) and rejects
+    unknown keys, so every recipe-owned setting travels under ``extra``. When
+    the optimizer selects a rollout model (``ctx.model``), it overrides the
+    recipe's default task model. Task documents are fetched per case from the
+    pinned ``harveyai/harvey-labs`` commit (network is available in the sandbox).
     """
-    cfg_in: dict[str, Any] = {**_DEFAULT_SANDBOX_CONFIG, **dict(ctx.config or {})}
+    extra = dict(ctx.config.get("extra") or {}) if ctx.config else {}
+    cfg_in: dict[str, Any] = {**_DEFAULT_SANDBOX_CONFIG, **extra}
     harvey_cfg = HarveyLabConfig(
-        task_model=str(cfg_in["task_model"]),
+        task_model=str(ctx.model) if ctx.model else str(cfg_in["task_model"]),
         task_temperature=float(cfg_in["task_temperature"]),
         judge_model=str(cfg_in["judge_model"]),
         max_turns=int(cfg_in["max_turns"]),

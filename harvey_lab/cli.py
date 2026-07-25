@@ -27,14 +27,13 @@ from typing import Any
 
 from rilixai import OptimizationTargets
 
-from cookbook_common.cli_support import eval_summary, load_targets_from_json, validate_and_log, write_json
-from cookbook_common.local_eval import run_local_evaluation
-
 from .agent.prompts import harvey_lab_seed_targets
 from .agent.workspace import task_source_from_dir
 from .config import HarveyLabConfig
 from .data.dataset import cases_from_records, load_harvey_lab_records
 from .data.task_splits import fixed_val_split, stratified_case_cap
+from .optimization.cli_support import eval_summary, load_targets_from_json, validate_and_log, write_json
+from .optimization.local_eval import run_local_evaluation
 from .optimization.scoring import ALL_PASS_FIELD, CRITERION_PASS_RATE_FIELD
 from .optimization.spec import build_harvey_lab_spec
 
