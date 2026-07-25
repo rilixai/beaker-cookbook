@@ -1,7 +1,7 @@
-"""HotpotQA dataset loading and conversion to optimizer cases.
+"""HotpotQA dataset loading.
 
-The HuggingFace ``hotpot_qa`` dataset (config ``distractor``) is the source of
-truth. Each raw record has these fields:
+The HuggingFace ``hotpot_qa`` dataset is the source of truth. Each raw record
+has these fields:
 
 * ``id`` — case id
 * ``question`` — natural-language question
@@ -11,44 +11,17 @@ truth. Each raw record has these fields:
 * ``supporting_facts`` — ``{"title": list[str], "sent_id": list[int]}``
 * ``context`` — ``{"title": list[str], "sentences": list[list[str]]}`` (10 paragraphs)
 
-The HF ``datasets`` library is imported lazily so this module remains testable
-without it; pre-loaded dict records can be passed directly to
-:func:`cases_from_records` for fixtures.
+Raw rows are normalized into :class:`HotpotQARecord` — the plain typed record
+the agent runs on and the evaluation scores against. The HF ``datasets``
+library is imported lazily so this module stays testable without it; pre-loaded
+dict records can be passed straight to :func:`records_from_raw` for fixtures.
 """
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
-
-from rilixai import Case, CaseDataLoader, DatasetRowContext, DatasetSchema
-
-
-logger = logging.getLogger(__name__)
-
-
-# Dataset row schema for the ``hotpotqa/hotpot_qa`` task objects. Declared
-# on :class:`HotpotQADataLoader` so rilixai's upload surfaces can validate
-# JSONL rows before a hosted run. Each row is one raw HF HotpotQA record.
-HOTPOTQA_DATASET_SCHEMA = DatasetSchema(
-    json_schema={
-        "type": "object",
-        "required": ["question", "answer"],
-        "properties": {
-            "id": {"type": "string"},
-            "_id": {"type": "string"},
-            "question": {"type": "string", "minLength": 1},
-            "answer": {"type": "string"},
-            "type": {"type": "string"},
-            "level": {"type": "string"},
-            "supporting_facts": {"type": "object"},
-            "context": {"type": "object"},
-        },
-        "additionalProperties": True,
-    },
-)
 
 
 @dataclass(frozen=True)
@@ -154,48 +127,19 @@ def _normalize_record(raw: Mapping[str, Any], *, index_hint: int) -> HotpotQARec
     )
 
 
-def record_to_case(record: HotpotQARecord, *, group_key: str | None = None) -> Case:
-    """Convert a normalized HotpotQA record into a rilixai :class:`Case`.
-
-    The ``input`` payload is the entire record (the pipeline reads question
-    plus distractor paragraphs from it). ``ground_truth`` stores the keys the
-    metrics calculator scores against.
-    """
-    resolved_group = group_key or record.question_type or "hotpotqa"
-    return Case(
-        input=record,
-        case_id=record.case_id,
-        ground_truth={
-            "answer": record.answer,
-            "supporting_titles": list(record.supporting_titles),
-        },
-        group_key=resolved_group,
-        metadata={
-            "level": record.level,
-            "question_type": record.question_type,
-            "num_paragraphs": len(record.paragraphs),
-        },
-    )
-
-
-def cases_from_records(
-    records: Iterable[Mapping[str, Any] | HotpotQARecord],
-    *,
-    group_key: str | None = None,
-) -> list[Case]:
-    """Build a list of optimizer cases from raw or normalized records."""
-    cases: list[Case] = []
+def records_from_raw(records: Iterable[Mapping[str, Any] | HotpotQARecord]) -> list[HotpotQARecord]:
+    """Normalize raw HF rows (or already-normalized records) into records."""
+    normalized: list[HotpotQARecord] = []
     for idx, raw in enumerate(records):
         if isinstance(raw, HotpotQARecord):
-            record = raw
+            normalized.append(raw)
         elif isinstance(raw, Mapping):
-            record = _normalize_record(raw, index_hint=idx)
+            normalized.append(_normalize_record(raw, index_hint=idx))
         else:
             raise TypeError(
-                f"cases_from_records expected Mapping or HotpotQARecord at position {idx}, got {type(raw).__name__}."
+                f"records_from_raw expected Mapping or HotpotQARecord at position {idx}, got {type(raw).__name__}."
             )
-        cases.append(record_to_case(record, group_key=group_key))
-    return cases
+    return normalized
 
 
 def load_hotpotqa_split(
@@ -206,8 +150,8 @@ def load_hotpotqa_split(
     cache_dir: str | None = None,
     shuffle_seed: int | None = None,
     skip: int = 0,
-) -> list[Case]:
-    """Load a HotpotQA split from HuggingFace and convert it to optimizer cases.
+) -> list[HotpotQARecord]:
+    """Load a HotpotQA split from HuggingFace and normalize it into records.
 
     ``shuffle_seed`` controls the partitioning. When set, all examples in
     the HF split are shuffled with a fixed-seed RNG *before* ``skip`` /
@@ -224,7 +168,7 @@ def load_hotpotqa_split(
 
     The ``datasets`` library is imported lazily so the rest of the
     benchmark can be exercised in unit tests without network access.
-    Pass pre-built records to :func:`cases_from_records` for offline
+    Pass pre-built records to :func:`records_from_raw` for offline
     fixtures.
     """
     try:
@@ -253,7 +197,7 @@ def load_hotpotqa_split(
         if max_cases is not None:
             indices = indices[:max_cases]
         records: list[Mapping[str, Any]] = [dataset[i] for i in indices]
-        return cases_from_records(records)
+        return records_from_raw(records)
 
     records = []
     for idx, raw in enumerate(dataset):
@@ -262,12 +206,12 @@ def load_hotpotqa_split(
         records.append(raw)
         if max_cases is not None and len(records) >= max_cases:
             break
-    return cases_from_records(records)
+    return records_from_raw(records)
 
 
-# Partition boundaries the GEPA artifact's ``Benchmark`` base class uses
-# when it slices the HotpotQA train split into test/val/train portions
-# before downsampling. See
+# Partition boundaries the reference HotpotQA benchmark harness uses when
+# it slices the HotpotQA train split into test/val/train portions before
+# downsampling. See
 # https://github.com/gepa-ai/gepa-artifact/blob/main/gepa_artifact/benchmarks/benchmark.py
 _PAPER_PARTITION_BOUNDS: Mapping[str, tuple[float, float]] = {
     "test": (0.0, 0.4),
@@ -275,7 +219,7 @@ _PAPER_PARTITION_BOUNDS: Mapping[str, tuple[float, float]] = {
     "train": (0.8, 1.0),
 }
 
-# Fixed sampling seed the artifact uses in ``trim_dataset``:
+# Fixed sampling seed the reference harness uses in ``trim_dataset``:
 #     rng = random.Random(); rng.seed(1); return rng.sample(dataset, size)
 # Bound to a constant so the case selection within each partition is
 # bit-stable across runs and matches the paper's exact 300/300/150 picks.
@@ -288,26 +232,26 @@ def load_hotpotqa_paper_split(
     max_cases: int,
     config: str = "fullwiki",
     cache_dir: str | None = None,
-) -> list[Case]:
-    """Load one of the GEPA paper's 150/300/300 splits, bit-identical to the artifact.
+) -> list[HotpotQARecord]:
+    """Load one of the standard HotpotQA 150/300/300 benchmark splits.
 
-    Reproduces the artifact's data pipeline from
-    :class:`gepa_artifact.benchmarks.benchmark.Benchmark`:
+    Reproduces the widely used reference data pipeline so numbers stay
+    comparable with published results:
 
-    1. Load HF ``hotpot_qa`` with the ``fullwiki`` config (paper-matching
-       — both ``fullwiki`` and ``distractor`` configs share the same 90k
-       train questions, only the per-case ``context`` paragraph shape
-       differs, and we retrieve from the wiki dump anyway).
-    2. Take HotpotQA's ``train`` split as the *source* (the artifact's
-       ``Benchmark`` derives all three of its splits from the train pool
+    1. Load HF ``hotpot_qa`` with the ``fullwiki`` config (both
+       ``fullwiki`` and ``distractor`` configs share the same 90k train
+       questions, only the per-case ``context`` paragraph shape differs,
+       and we retrieve from the wiki dump anyway).
+    2. Take HotpotQA's ``train`` split as the *source* (the reference
+       harness derives all three of its splits from the train pool
        — *not* from HotpotQA's dev set).
-    3. Slice the source by the artifact's fixed fractions:
+    3. Slice the source by its fixed fractions:
        ``test = [0, 40%)``, ``validation = [40%, 80%)``, ``train = [80%, 100%)``.
     4. Subsample with ``random.Random(1).sample(slice, max_cases)`` —
-       the artifact's fixed sampling seed.
+       the reference fixed sampling seed.
 
     ``partition`` must be one of ``"train"`` / ``"validation"`` / ``"test"``.
-    ``max_cases`` matches the artifact's per-partition defaults
+    ``max_cases`` matches the reference per-partition defaults
     (``150`` train, ``300`` val, ``300`` test) but can be reduced for
     quicker dry runs.
 
@@ -350,43 +294,20 @@ def load_hotpotqa_paper_split(
     # ``random.Random(seed).sample(range(n), k)`` picks the same *positions*
     # as ``random.Random(seed).sample(list_of_items, k)`` would pick
     # *items* — so sampling local indices then mapping back to global
-    # row IDs reproduces the artifact's selection without materializing
+    # row IDs reproduces the reference selection without materializing
     # the 36k-row slice as a Python list.
     import random as _random
 
     local_indices = _random.Random(_PAPER_SAMPLE_SEED).sample(range(slice_size), take)
     global_indices = [start + i for i in local_indices]
     records: list[Mapping[str, Any]] = [dataset[i] for i in global_indices]
-    return cases_from_records(records)
-
-
-class HotpotQADataLoader(CaseDataLoader[HotpotQARecord]):
-    """Typed rilixai data loader over raw ``hotpotqa/hotpot_qa`` rows.
-
-    Maps each raw HF record to a normalized :class:`HotpotQARecord`
-    (``parse_row``) and emits exactly one :class:`Case` per record
-    (``iter_cases``). The gold answer + supporting titles are bundled onto
-    the case's ground truth so :class:`HotpotQAScorer` can score EM / F1 /
-    supporting-title recall after the agent runs.
-    """
-
-    dataset_schema = HOTPOTQA_DATASET_SCHEMA
-
-    def parse_row(self, raw: Mapping[str, Any], context: DatasetRowContext) -> HotpotQARecord:
-        return _normalize_record(raw, index_hint=context.line_number or 0)
-
-    def iter_cases(self, row: HotpotQARecord, context: DatasetRowContext) -> Iterable[Case]:
-        del context
-        yield record_to_case(row)
+    return records_from_raw(records)
 
 
 __all__ = [
-    "HOTPOTQA_DATASET_SCHEMA",
-    "HotpotQADataLoader",
     "HotpotQAParagraph",
     "HotpotQARecord",
-    "cases_from_records",
     "load_hotpotqa_paper_split",
     "load_hotpotqa_split",
-    "record_to_case",
+    "records_from_raw",
 ]

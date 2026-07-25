@@ -14,7 +14,6 @@ name: Push specs to rilixai
 #
 # Per-recipe triggering: ``dorny/paths-filter`` decides which recipe's tree
 # changed and the matrix only runs that recipe's push. A change under
-# ``hotpotqa/**`` only rebuilds ``hotpotqa-agent``; a change under
 # ``apex_agents/**`` only rebuilds ``apex-agents``. An edit to this workflow
 # affects every recipe's push, so it fans out to all of them. ``fail-fast:
 # false`` keeps one recipe's build failure from cancelling the others. Manual
@@ -25,7 +24,6 @@ on:
   push:
     branches: [main]
     paths:
-      - 'hotpotqa/**'
       - 'apex_agents/**'
       - '.github/workflows/push-spec.yml'
   workflow_dispatch:
@@ -61,8 +59,6 @@ jobs:
         id: filter
         with:
           filters: |
-            hotpotqa:
-              - 'hotpotqa/**'
             apex_agents:
               - 'apex_agents/**'
             root:
@@ -78,17 +74,14 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           ROOT_CHANGED: ${{ steps.filter.outputs.root }}
-          HOTPOTQA_CHANGED: ${{ steps.filter.outputs.hotpotqa }}
           APEX_CHANGED: ${{ steps.filter.outputs.apex_agents }}
         run: |
           set -euo pipefail
-          HOTPOTQA='{"dir":"hotpotqa","agent":"hotpotqa-agent"}'
           APEX='{"dir":"apex_agents","agent":"apex-agents"}'
           if [ "${EVENT_NAME}" = "workflow_dispatch" ] || [ "${ROOT_CHANGED}" = "true" ]; then
-            MEMBERS=$(jq -c -n --argjson h "$HOTPOTQA" --argjson a "$APEX" '[$h, $a]')
+            MEMBERS=$(jq -c -n --argjson a "$APEX" '[$a]')
           else
             MEMBERS='[]'
-            [ "${HOTPOTQA_CHANGED}" = "true" ] && MEMBERS=$(echo "$MEMBERS" | jq -c --argjson h "$HOTPOTQA" '. + [$h]')
             [ "${APEX_CHANGED}" = "true" ] && MEMBERS=$(echo "$MEMBERS" | jq -c --argjson a "$APEX" '. + [$a]')
           fi
           echo "members=$MEMBERS" >> "$GITHUB_OUTPUT"

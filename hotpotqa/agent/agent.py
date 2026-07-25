@@ -1,8 +1,8 @@
 """PydanticAI HotpotQA agent — an idiomatic tool-using agent.
 
-Shipped as the kind of agent a customer would actually write in
-PydanticAI to answer multi-hop Wikipedia questions: two tools, a
-structured output type, two optimizable prompts.
+Shipped as the kind of agent you'd actually write in PydanticAI to
+answer multi-hop Wikipedia questions: two tools, a structured output
+type, two prompts.
 
 * **Tools**
   * ``retrieve_k(query)`` — deterministic BM25 / fullwiki paragraph
@@ -11,12 +11,12 @@ structured output type, two optimizable prompts.
     summarization. The agent decides whether to call it (and whether
     to pass a previous summary as ``context``).
 
-* **Optimizable components** (2 — matches the rilixai OptimizationTargets dict)
+* **Prompts** (2, both overridable at construction)
   * ``policy_prompt`` → the agent's ``system_prompt`` (tool-use
     policy).
   * ``summarize_prompt`` → injected as the ``system`` message in the
-    summarize tool's direct ``chat.completions`` call. The optimization
-    target is visible at the call site — no hidden sub-agent.
+    summarize tool's direct ``chat.completions`` call — visible at the
+    call site, no hidden sub-agent.
 
 * **Terminator** — a Pydantic output type
   (:class:`HotpotQAOutput.answer`). PydanticAI's built-in
@@ -24,10 +24,10 @@ structured output type, two optimizable prompts.
   output; there's no ``finish`` tool.
 
 The summarize tool deliberately uses a raw ``AsyncOpenAI`` call rather
-than a sub-``pydantic_ai.Agent`` so the optimization story stays
-transparent: the ``system_prompt`` GEPA rewrites is right there in the
-``messages=[...]`` list. Callers wanting a different provider inject a
-``summarize_llm_call`` closure; tests inject a scripted stand-in.
+than a sub-``pydantic_ai.Agent`` so nothing is hidden: the summarize
+system prompt is right there in the ``messages=[...]`` list. Callers
+wanting a different provider inject a ``summarize_llm_call`` closure;
+tests inject a scripted stand-in.
 """
 
 from __future__ import annotations
@@ -44,25 +44,17 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models import Model
 from pydantic_ai.settings import ModelSettings
 
-from ..data.dataset import HotpotQAParagraph
+from ..data.dataset import HotpotQAParagraph, HotpotQARecord
 from ..data.gold import remaining_gold_titles
 from .prompts import (
     DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
     DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
 )
 from .retrieval import RetrieveKFn, bm25_top_k
-from .types import POLICY_COMPONENT, SUMMARIZE_COMPONENT, AgentToolCall, HotpotQAAgentOutput
+from .types import AgentToolCall, HotpotQAAgentOutput
 
 
 logger = logging.getLogger(__name__)
-
-
-# Component names live in ``agent.types`` so the framework-neutral
-# feedback module can import them without dragging in PydanticAI. Keep
-# the legacy ``PYDANTIC_AGENT_*`` aliases for backward-compat with any
-# external consumer that imports them from ``agent.agent``.
-PYDANTIC_AGENT_POLICY_COMPONENT = POLICY_COMPONENT
-PYDANTIC_AGENT_SUMMARIZE_COMPONENT = SUMMARIZE_COMPONENT
 
 
 SummarizeLLMCall = Callable[[str, str], Awaitable[str]]
@@ -98,22 +90,6 @@ class HotpotQADeps:
     # itself caring about modes. The agent still applies its own
     # cross-call dedup against ``retrieved_titles_seen``.
     retrieve_k_fn: RetrieveKFn | None = None
-    # Snapshotted summarize prompt for this case. ``forward`` captures
-    # ``self._current_summarize_prompt`` here at the start of the run
-    # so a concurrent ``apply_candidate`` on another thread can't swap
-    # the prompt mid-call (matching the existing ``self._agent``
-    # snapshot in ``forward``). ``_do_summarize`` prefers this when
-    # set; direct test callers that build their own ``HotpotQADeps``
-    # can leave it ``None`` and fall back to instance state.
-    summarize_prompt_override: str | None = None
-
-
-# Fallbacks the agent uses when ``apply_candidate`` is never called or
-# called with missing keys. Aliased to the canonical seed prompts in
-# ``prompts.py`` so the two can't drift — same single-source-of-truth
-# pattern used for the component-name constants in ``types.py``.
-_FALLBACK_POLICY_PROMPT = DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT
-_FALLBACK_SUMMARIZE_PROMPT = DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT
 
 
 class HotpotQAPydanticAgent:
@@ -138,6 +114,8 @@ class HotpotQAPydanticAgent:
         summarize_model: str = "gpt-4.1-mini",
         summarize_llm_call: SummarizeLLMCall | None = None,
         openai_client: AsyncOpenAI | None = None,
+        policy_prompt: str = DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
+        summarize_prompt: str = DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
     ) -> None:
         self._model = model
         # ``top_k`` rather than ``retrieve_k`` to avoid shadowing the
@@ -157,43 +135,34 @@ class HotpotQAPydanticAgent:
         self._openai_client: AsyncOpenAI | None = openai_client
         self._summarize_llm_call: SummarizeLLMCall = summarize_llm_call or self._default_summarize_llm_call
 
-        self._current_policy_prompt: str = _FALLBACK_POLICY_PROMPT
-        self._current_summarize_prompt: str = _FALLBACK_SUMMARIZE_PROMPT
-        # ``apply_candidate`` rebuilds the inner Agent when the policy
-        # prompt changes (see _build_agent for why); concurrent rilixai
-        # runtime calls inside one GEPA evaluate() batch all carry the
-        # same candidate, so this lock prevents repeated work, not
-        # correctness corruption.
+        self.policy_prompt = policy_prompt
+        self.summarize_prompt = summarize_prompt
+        # Guards the lazy build so concurrent cases in one batch build the
+        # inner Agent once rather than racing to build several.
         self._build_lock = threading.Lock()
 
-        # Built lazily on first ``apply_candidate``/``forward``. Constructing a
+        # Built lazily on first ``forward``. Constructing a
         # ``pydantic_ai.Agent`` from a model string eagerly infers the provider
         # and instantiates its client (e.g. ``AsyncOpenAI()``), which raises
-        # without ``OPENAI_API_KEY``. Deferring the build keeps spec
-        # construction — and the offline ``cli.py validate`` path that builds a
-        # spec but never runs a case — network- and key-free.
+        # without ``OPENAI_API_KEY``. Deferring the build keeps constructing an
+        # agent — which every offline code path does — network- and key-free.
         self._agent: Agent[HotpotQADeps, HotpotQAOutput] | None = None
 
     def _build_agent(self) -> Agent[HotpotQADeps, HotpotQAOutput]:
-        """Construct a fresh inner ``pydantic_ai.Agent`` with the current policy prompt.
+        """Construct the inner ``pydantic_ai.Agent`` with the policy prompt.
 
         PydanticAI bakes ``system_prompt`` into the agent at construction
         time. We verified empirically that ``Agent.iter(instructions=...)``
         does NOT replace the constructor-bound ``system_prompt`` — the
         ``instructions`` argument is silently dropped, only the original
-        ``system_prompt`` reaches the model. So when ``apply_candidate``
-        updates the policy prompt, the only correct way to surface that
-        change is to rebuild the Agent.
-
-        Tool registration is cheap (a few Python objects) — done on every
-        rebuild but never on every ``forward`` call, since rebuilds
-        happen at most once per candidate proposal.
+        ``system_prompt`` reaches the model. Hence the policy prompt is a
+        constructor argument on this class too.
         """
         agent: Agent[HotpotQADeps, HotpotQAOutput] = Agent(
             self._model,
             output_type=HotpotQAOutput,
             deps_type=HotpotQADeps,
-            system_prompt=self._current_policy_prompt,
+            system_prompt=self.policy_prompt,
             model_settings=ModelSettings(temperature=self.temperature),
         )
 
@@ -226,80 +195,44 @@ class HotpotQAPydanticAgent:
                 self._agent = self._build_agent()
             return self._agent
 
-    def apply_candidate(self, components: Mapping[str, str]) -> None:
-        """Apply a new candidate's components.
-
-        The policy prompt is baked into the inner ``pydantic_ai.Agent``
-        at construction time (PydanticAI's ``Agent.iter(instructions=)``
-        is dropped silently in our pinned version), so a candidate
-        change for ``policy_prompt`` triggers an Agent rebuild. The
-        summarize prompt is read at tool-call time from instance
-        state, so no rebuild needed.
-
-        The build lock makes repeated apply_candidate calls with the
-        same policy prompt a no-op (the rilixai runtime calls this once
-        per case in a batch, all with the same candidate). A concurrent
-        ``forward`` snapshots ``self._agent`` at the start of the call,
-        so swapping the reference mid-batch can't corrupt an in-flight
-        run.
-        """
-        policy_prompt = components.get(PYDANTIC_AGENT_POLICY_COMPONENT)
-        summarize_prompt = components.get(PYDANTIC_AGENT_SUMMARIZE_COMPONENT)
-        with self._build_lock:
-            if policy_prompt is not None and policy_prompt != self._current_policy_prompt:
-                self._current_policy_prompt = policy_prompt
-                # Only rebuild if the Agent already exists; otherwise the new
-                # policy prompt is picked up when it is lazily built.
-                if self._agent is not None:
-                    self._agent = self._build_agent()
-            if summarize_prompt is not None:
-                self._current_summarize_prompt = summarize_prompt
-
     async def forward(
         self,
         *,
-        question: str,
-        paragraphs: Sequence[HotpotQAParagraph],
-        gold_supporting_titles: Sequence[str] | None = None,
+        record: HotpotQARecord,
         retrieve_k_fn: RetrieveKFn | None = None,
     ) -> HotpotQAAgentOutput:
-        """Run one case through the agent.
+        """Run one HotpotQA case through the agent.
 
-        ``retrieve_k_fn`` is the mode-dispatched retriever the runtime
-        builds from ``cfg.retrieval_mode``. When omitted (e.g. direct
-        test callers), ``_do_retrieve`` falls back to running bm25 over
-        ``paragraphs`` — the legacy local-context path.
+        ``retrieve_k_fn`` is the corpus-dispatched retriever the
+        evaluation builds from ``cfg.retrieval_mode``. When omitted, the
+        agent falls back to running bm25 over the record's own
+        (distractor) paragraphs.
+
+        A failed run is reported as an output carrying ``error`` rather
+        than raised, so one bad case never aborts a batch; the evaluation
+        turns such an output into an errored (never scored) case.
         """
         from pydantic_ai.usage import UsageLimits
 
-        # Snapshot the Agent reference AND the summarize prompt: if
-        # ``apply_candidate`` runs on another thread mid-call and
-        # rebuilds ``self._agent`` or rewrites
-        # ``self._current_summarize_prompt``, this in-flight run keeps
-        # a consistent agent + consistent summarize prompt until
-        # completion. The summarize snapshot rides through ``deps`` so
-        # ``_do_summarize`` (invoked indirectly via PydanticAI's tool
-        # dispatch) reads the same value the case started with.
         agent = self._ensure_agent()
-        summarize_prompt_snapshot = self._current_summarize_prompt
+        question = record.question
 
         deps = HotpotQADeps(
-            paragraphs=list(paragraphs),
+            paragraphs=list(record.paragraphs),
             retrieve_k=self.top_k,
-            gold_supporting_titles=list(gold_supporting_titles or []),
+            gold_supporting_titles=list(record.supporting_titles),
             retrieve_k_fn=retrieve_k_fn,
-            summarize_prompt_override=summarize_prompt_snapshot,
         )
 
         answer = ""
+        error = ""
         messages: list[Any] = []
         try:
             # NOTE: do NOT pass ``instructions=`` here. PydanticAI's
             # ``Agent.iter(instructions=...)`` is silently dropped in the
             # pinned version (verified empirically); only the
-            # constructor-bound ``system_prompt`` reaches the model. The
-            # current policy prompt is therefore baked into ``agent`` by
-            # ``_build_agent``, triggered from ``apply_candidate``.
+            # constructor-bound ``system_prompt`` reaches the model, which
+            # ``_build_agent`` bakes in.
             async with agent.iter(
                 question,
                 deps=deps,
@@ -312,8 +245,9 @@ class HotpotQAPydanticAgent:
                     output = result.output
                     answer = str(getattr(output, "answer", "") or "").strip()
                     messages = list(result.all_messages())
-        except Exception:
+        except Exception as exc:
             logger.exception("HotpotQA PydanticAI agent failed for question %r", question[:80])
+            error = f"{type(exc).__name__}: {exc}"
 
         tool_calls = _build_agent_tool_calls(
             messages=messages,
@@ -324,6 +258,7 @@ class HotpotQAPydanticAgent:
             answer=answer,
             retrieved_paragraphs=list(deps.retrieved),
             tool_calls=tool_calls,
+            error=error,
         )
 
     # ─── Tool implementations ────────────────────────────────────────────
@@ -331,18 +266,18 @@ class HotpotQAPydanticAgent:
     def _do_retrieve(self, deps: HotpotQADeps, query: str) -> str:
         remaining_before = remaining_gold_titles(deps.gold_supporting_titles, deps.retrieved_titles_seen)
         if deps.retrieve_k_fn is not None:
-            # Runtime-injected retriever — currently distractor-over-bm25
-            # or fullwiki-bm25s, dispatched by ``cfg.retrieval_mode`` in
-            # ``build_pydantic_agent_runtime``. The injected fn dedupes
+            # Injected retriever — distractor-over-bm25 or fullwiki-bm25s,
+            # dispatched by ``cfg.retrieval_mode`` in
+            # ``build_retrieve_k_fn_for_case``. The injected fn dedupes
             # within a single call; apply the agent's cross-call dedup
             # post-hoc so already-retrieved titles aren't re-shown to
             # the agent.
             candidates = deps.retrieve_k_fn(query, deps.retrieve_k)
             hits = [p for p in candidates if p.title not in deps.retrieved_titles_seen]
         else:
-            # Legacy local-context path (used by direct test callers
-            # that don't go through the runtime). Filters candidates
-            # against already-retrieved titles via ``bm25_top_k``.
+            # Fallback local-context path (used when no retriever is
+            # injected). Filters candidates against already-retrieved
+            # titles via ``bm25_top_k``.
             hits = bm25_top_k(
                 query=query,
                 paragraphs=deps.paragraphs,
@@ -376,17 +311,7 @@ class HotpotQAPydanticAgent:
         context: str | None,
     ) -> str:
         user_prompt = _build_summarize_user_prompt(question=question, passages=passages, context=context)
-        # Prefer the per-case snapshot ``forward`` captured at the
-        # start of the run so a concurrent ``apply_candidate`` can't
-        # swap the prompt mid-tool-call. Fall back to instance state
-        # for direct test callers that build ``HotpotQADeps`` by hand
-        # without going through ``forward``.
-        summarize_prompt = (
-            deps.summarize_prompt_override
-            if deps.summarize_prompt_override is not None
-            else self._current_summarize_prompt
-        )
-        summary = await self._summarize_llm_call(summarize_prompt, user_prompt)
+        summary = await self._summarize_llm_call(self.summarize_prompt, user_prompt)
         deps.tool_invocations.append(
             {
                 "tool": "summarize",
@@ -409,10 +334,9 @@ class HotpotQAPydanticAgent:
     async def _default_summarize_llm_call(self, system_prompt: str, user_prompt: str) -> str:
         """Default summarize implementation: a direct OpenAI chat call.
 
-        The optimizable ``system_prompt`` is right there in ``messages``
-        — that's the whole point of bypassing a sub-Agent. The reader
-        scanning this function can see exactly what GEPA optimizes and
-        how it lands in the API call.
+        The summarize system prompt is right there in ``messages`` —
+        that's the whole point of bypassing a sub-Agent: a reader
+        scanning this function sees exactly what lands in the API call.
         """
         if self._openai_client is None:
             self._openai_client = AsyncOpenAI()
@@ -452,8 +376,8 @@ def _build_agent_tool_calls(
     gold-title bookkeeping the trajectory dict doesn't know about.
     PydanticAI's structured-output termination surfaces as a
     ``final_result`` tool call carrying the ``HotpotQAOutput``; we map
-    that to a synthetic ``finish`` step so the rilixai trajectory
-    schema is uniform.
+    that to a synthetic ``finish`` step so every trajectory ends the
+    same way.
     """
     tool_returns_by_id: dict[str, Any] = {}
     for message in messages:

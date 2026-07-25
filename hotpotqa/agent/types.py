@@ -1,8 +1,7 @@
 """Shared dataclasses for the HotpotQA PydanticAI agent.
 
-Framework-neutral so the rilixai trajectory translation and the
-feedback functions don't need to import ``pydantic_ai`` just to
-type-check.
+Framework-neutral so the evaluation layer can read an agent trajectory
+without importing ``pydantic_ai`` just to type-check.
 """
 
 from __future__ import annotations
@@ -11,16 +10,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..data.dataset import HotpotQAParagraph
-
-
-# Component names the agent attaches to the rilixai OptimizationTargets.
-# Defined in this framework-neutral module so the agent runtime
-# (``agent.py``, which imports PydanticAI) and the GEPA-facing
-# feedback functions (``optimization/feedback.py``) can both import
-# them without dragging in either layer's heavy deps. Single source
-# of truth — no aliases — so they can't drift.
-POLICY_COMPONENT = "policy_prompt"
-SUMMARIZE_COMPONENT = "summarize_prompt"
 
 
 @dataclass
@@ -34,7 +23,7 @@ class AgentToolCall:
     thought: str
     # Gold supporting titles not yet retrieved *before* this step ran and
     # *after* it completed. Populated for retrieval steps; copy-through for
-    # non-retrieval steps. Drives the paper-style per-step textual feedback.
+    # non-retrieval steps, so a trace shows hop-by-hop retrieval progress.
     gold_titles_remaining_before: list[str] = field(default_factory=list)
     gold_titles_remaining_after: list[str] = field(default_factory=list)
 
@@ -50,8 +39,13 @@ class HotpotQAAgentOutput:
     so there's no top-level ``summary_1`` / ``summary_2`` slot — that
     would imply a workflow-shaped fixed-hop pattern this agent doesn't
     have.
+
+    ``error`` is non-empty when the run failed: the agent reports a crash
+    as an output rather than raising, so callers can tell a genuine empty
+    answer apart from one produced by a failed run.
     """
 
     answer: str
     retrieved_paragraphs: list[HotpotQAParagraph]
     tool_calls: list[AgentToolCall]
+    error: str = ""

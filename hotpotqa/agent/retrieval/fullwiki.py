@@ -79,17 +79,17 @@ def _download_to(url: str, dest: Path) -> None:
 def _default_cache_dir() -> Path:
     """Cache directory the bm25s index and the abstracts dump live under.
 
-    Defaults to ``$XDG_CACHE_HOME/rilixai/hotpotqa/fullwiki`` (or
+    Defaults to ``$XDG_CACHE_HOME/hotpotqa/fullwiki`` (or
     ``~/.cache/...``). The cache is reused across runs once built, so the
     first run pays the ~few-minutes index cost and subsequent runs load
     from disk in seconds.
     """
-    override = os.environ.get("RILIXAI_HOTPOTQA_FULLWIKI_CACHE_DIR")
+    override = os.environ.get("HOTPOTQA_FULLWIKI_CACHE_DIR")
     if override:
         return Path(override)
     xdg = os.environ.get("XDG_CACHE_HOME")
     base = Path(xdg) if xdg else Path.home() / ".cache"
-    return base / "rilixai" / "hotpotqa" / "fullwiki"
+    return base / "hotpotqa" / "fullwiki"
 
 
 def _ensure_initialized(cache_dir: Path | None = None) -> None:

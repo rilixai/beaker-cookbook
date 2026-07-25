@@ -1,27 +1,23 @@
-"""HotpotQA unit tests: dataset normalization + metrics scoring."""
+"""HotpotQA unit tests: dataset normalization, splits, and scoring."""
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-
 import pytest
-from rilixai import Case, CaseResult
 
 from hotpotqa.data.dataset import (
     HotpotQAParagraph,
     HotpotQARecord,
-    cases_from_records,
-    record_to_case,
+    records_from_raw,
 )
-from hotpotqa.optimization.metrics import (
+from hotpotqa.evaluation.scoring import (
     ANSWER_F1_FIELD,
     ANSWER_FIELD,
-    RETRIEVED_TITLES_KEY,
+    HOTPOTQA_FIELD_WEIGHTS,
     SUPPORTING_TITLES_RECALL_FIELD,
-    HotpotQAScorer,
     f1_score,
     normalize_answer,
+    objective_score,
+    score_prediction,
 )
 
 
@@ -46,14 +42,12 @@ _HF_RECORD = {
 }
 
 
-def test_cases_from_records_normalizes_hf_shape() -> None:
-    cases = cases_from_records([_HF_RECORD])
-    assert len(cases) == 1
-    case = cases[0]
-    assert isinstance(case, Case)
-    assert case.case_id == "case-1"
-    record = case.input
+def test_records_from_raw_normalizes_hf_shape() -> None:
+    records = records_from_raw([_HF_RECORD])
+    assert len(records) == 1
+    record = records[0]
     assert isinstance(record, HotpotQARecord)
+    assert record.case_id == "case-1"
     assert record.question == "Which city has the Eiffel Tower?"
     assert record.answer == "Paris"
     assert record.question_type == "bridge"
@@ -64,19 +58,7 @@ def test_cases_from_records_normalizes_hf_shape() -> None:
     assert record.supporting_sentence_ids == {"Eiffel Tower": (0,), "Paris": (2,)}
 
 
-def test_record_to_case_exposes_ground_truth_fields_for_metrics() -> None:
-    cases = cases_from_records([_HF_RECORD])
-    case = cases[0]
-    assert case.ground_truth["answer"] == "Paris"
-    assert case.ground_truth["supporting_titles"] == ["Eiffel Tower", "Paris"]
-    assert case.metadata["question_type"] == "bridge"
-    assert case.metadata["num_paragraphs"] == 3
-    # The group key should reflect the question type so the failure-focused
-    # sampler can stratify if needed.
-    assert case.group_key == "bridge"
-
-
-def test_cases_from_records_accepts_pre_normalized_records() -> None:
+def test_records_from_raw_accepts_pre_normalized_records() -> None:
     record = HotpotQARecord(
         case_id="rec-7",
         question="Q?",
@@ -86,23 +68,20 @@ def test_cases_from_records_accepts_pre_normalized_records() -> None:
         paragraphs=(HotpotQAParagraph(title="T", sentences=("S1",)),),
         supporting_titles=("T",),
     )
-    cases = cases_from_records([record])
-    assert cases[0].case_id == "rec-7"
-    assert cases[0].input is record
-    assert cases[0].group_key == "comparison"
+    assert records_from_raw([record])[0] is record
 
 
-def test_cases_from_records_rejects_unsupported_items() -> None:
+def test_records_from_raw_rejects_unsupported_items() -> None:
     with pytest.raises(TypeError):
-        cases_from_records([object()])  # type: ignore[list-item]
+        records_from_raw([object()])  # type: ignore[list-item]
 
 
 class _FakeHFDataset:
     """Tiny stand-in for an HF ``Dataset`` — just ``len`` + integer indexing.
 
-    The paper-faithful loader needs ``len(dataset)`` to compute the
-    partition slice boundaries and ``dataset[i]`` to materialize sampled
-    rows. Both are 1-line on a list-backed wrapper.
+    The split loader needs ``len(dataset)`` to compute the partition slice
+    boundaries and ``dataset[i]`` to materialize sampled rows. Both are
+    1-line on a list-backed wrapper.
     """
 
     def __init__(self, records: list[dict]) -> None:
@@ -116,7 +95,7 @@ class _FakeHFDataset:
 
 
 def _synthetic_record(idx: int) -> dict:
-    """Minimal HF-shaped HotpotQA record so cases_from_records is happy."""
+    """Minimal HF-shaped HotpotQA record so records_from_raw is happy."""
     return {
         "id": f"row-{idx:05d}",
         "question": f"Q{idx}?",
@@ -128,14 +107,14 @@ def _synthetic_record(idx: int) -> dict:
     }
 
 
-def test_load_hotpotqa_paper_split_matches_artifact_slicing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Bit-faithful reproduction of the artifact's data pipeline.
+def test_load_hotpotqa_paper_split_matches_reference_slicing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bit-faithful reproduction of the reference data pipeline.
 
-    The artifact takes the HotpotQA train split, slices fractionally
-    (test = [0, 40%), val = [40%, 80%), train = [80%, 100%)), then
-    samples each slice with ``random.Random(1).sample(slice, size)``.
-    Verifies that ``load_hotpotqa_paper_split`` returns exactly the rows
-    a hand-rolled emulation of that pipeline returns.
+    It takes the HotpotQA train split, slices fractionally (test = [0, 40%),
+    val = [40%, 80%), train = [80%, 100%)), then samples each slice with
+    ``random.Random(1).sample(slice, size)``. Verifies that
+    ``load_hotpotqa_paper_split`` returns exactly the rows a hand-rolled
+    emulation of that pipeline returns.
     """
     import random as _random
 
@@ -157,11 +136,10 @@ def test_load_hotpotqa_paper_split_matches_artifact_slicing(monkeypatch: pytest.
     fake_module.load_dataset = _fake_load_dataset  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "datasets", fake_module)
 
-    # Reproduce the artifact's selection by hand for each partition.
-    # Slice fractions match `_PAPER_PARTITION_BOUNDS`; seed=1 matches
-    # `_PAPER_SAMPLE_SEED`. The artifact uses
-    # `random.Random(1).sample(slice_items, k)`, which under fixed seed
-    # picks the same *positions* as `random.Random(1).sample(range(n), k)`.
+    # Reproduce the selection by hand for each partition. Slice fractions
+    # match `_PAPER_PARTITION_BOUNDS`; seed=1 matches `_PAPER_SAMPLE_SEED`.
+    # ``random.Random(1).sample(slice_items, k)`` under a fixed seed picks
+    # the same *positions* as ``random.Random(1).sample(range(n), k)``.
     def _expected(partition: str, size: int) -> list[str]:
         bounds = {"test": (0, 40), "validation": (40, 80), "train": (80, 100)}
         lo, hi = bounds[partition]
@@ -170,14 +148,13 @@ def test_load_hotpotqa_paper_split_matches_artifact_slicing(monkeypatch: pytest.
         return [fake_records[lo + i]["id"] for i in local]
 
     for partition, size in (("test", 12), ("validation", 12), ("train", 8)):
-        cases = dataset_module.load_hotpotqa_paper_split(
+        records = dataset_module.load_hotpotqa_paper_split(
             partition,
             max_cases=size,
             config="fullwiki",
         )
-        assert [c.case_id for c in cases] == _expected(partition, size), (
-            f"Partition {partition!r} disagrees with the artifact's "
-            f"`Benchmark.trim_dataset` selection — split logic has drifted."
+        assert [r.case_id for r in records] == _expected(partition, size), (
+            f"Partition {partition!r} disagrees with the reference selection — split logic has drifted."
         )
 
 
@@ -188,21 +165,7 @@ def test_load_hotpotqa_paper_split_rejects_unknown_partition() -> None:
         load_hotpotqa_paper_split("dev", max_cases=10)
 
 
-def test_record_to_case_explicit_group_key_wins() -> None:
-    record = HotpotQARecord(
-        case_id="rec-2",
-        question="Q?",
-        answer="A",
-        question_type="bridge",
-        level="easy",
-        paragraphs=(),
-        supporting_titles=(),
-    )
-    case = record_to_case(record, group_key="train-split")
-    assert case.group_key == "train-split"
-
-
-# ─── metrics ────────────────────────────────────────────────────────────
+# ─── scoring ────────────────────────────────────────────────────────────
 
 
 def test_normalize_answer_strips_articles_punctuation_case() -> None:
@@ -232,14 +195,8 @@ def test_f1_score_yes_no_short_circuits_to_exact_match() -> None:
     assert f1_score("noanswer", "noanswer") == 1.0
 
 
-def _gt_case(*, answer: str, titles: list[str]) -> Case:
-    """Build a Case whose ground_truth carries the gold answer + titles.
-
-    ``record_to_case`` bundles ``answer`` + ``supporting_titles`` onto
-    ``case.ground_truth`` — exactly the keys :class:`HotpotQAScorer`
-    scores against.
-    """
-    record = HotpotQARecord(
+def _record(*, answer: str, titles: list[str]) -> HotpotQARecord:
+    return HotpotQARecord(
         case_id="case",
         question="q?",
         answer=answer,
@@ -248,87 +205,58 @@ def _gt_case(*, answer: str, titles: list[str]) -> Case:
         paragraphs=(),
         supporting_titles=tuple(titles),
     )
-    return record_to_case(record)
 
 
-def _score(*, output: dict, answer: str, titles: list[str]) -> Any:
-    """Score one run_case ``output`` dict via :class:`HotpotQAScorer`."""
-    scorer = HotpotQAScorer()
-    return asyncio.run(
-        scorer.score_case(case=_gt_case(answer=answer, titles=titles), result=CaseResult(output=output))
-    )
-
-
-def test_scorer_scores_em_f1_and_recall_per_case() -> None:
+def test_score_prediction_scores_em_f1_and_recall_per_case() -> None:
     # Case A: perfect answer + both gold titles retrieved.
-    score_a = _score(
-        output={ANSWER_FIELD: "Eiffel Tower", RETRIEVED_TITLES_KEY: ["Eiffel Tower", "Paris"]},
+    scores_a = score_prediction(
+        record=_record(answer="Eiffel Tower", titles=["Eiffel Tower", "Paris"]),
         answer="Eiffel Tower",
-        titles=["Eiffel Tower", "Paris"],
+        retrieved_titles=["Eiffel Tower", "Paris"],
     )
-    assert score_a.field_scores[ANSWER_FIELD] == pytest.approx(1.0)
-    assert score_a.field_scores[ANSWER_F1_FIELD] == pytest.approx(1.0)
-    assert score_a.field_scores[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(1.0)
-    # Objective collapses to pure EM (default field weights).
-    assert score_a.objective == pytest.approx(1.0)
+    assert scores_a[ANSWER_FIELD] == pytest.approx(1.0)
+    assert scores_a[ANSWER_F1_FIELD] == pytest.approx(1.0)
+    assert scores_a[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(1.0)
+    # The objective collapses to pure EM under the default field weights.
+    assert objective_score(scores_a, HOTPOTQA_FIELD_WEIGHTS) == pytest.approx(1.0)
 
     # Case B: wrong answer (no token overlap) + zero gold titles retrieved.
-    score_b = _score(
-        output={ANSWER_FIELD: "wrong answer", RETRIEVED_TITLES_KEY: ["Some Other Page"]},
-        answer="Statue of Liberty",
-        titles=["Statue of Liberty"],
+    scores_b = score_prediction(
+        record=_record(answer="Statue of Liberty", titles=["Statue of Liberty"]),
+        answer="wrong answer",
+        retrieved_titles=["Some Other Page"],
     )
-    assert score_b.field_scores[ANSWER_FIELD] == pytest.approx(0.0)
-    assert score_b.field_scores[ANSWER_F1_FIELD] == pytest.approx(0.0)
-    assert score_b.field_scores[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(0.0)
-    assert score_b.objective == pytest.approx(0.0)
+    assert scores_b[ANSWER_FIELD] == pytest.approx(0.0)
+    assert scores_b[ANSWER_F1_FIELD] == pytest.approx(0.0)
+    assert scores_b[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(0.0)
+    assert objective_score(scores_b, HOTPOTQA_FIELD_WEIGHTS) == pytest.approx(0.0)
 
 
-def test_scorer_skips_fields_without_supervised_signal() -> None:
-    score = _score(
-        output={ANSWER_FIELD: "anything", RETRIEVED_TITLES_KEY: []},
-        answer="",
-        titles=[],
+def test_score_prediction_skips_fields_without_supervised_signal() -> None:
+    scores = score_prediction(
+        record=_record(answer="", titles=[]),
+        answer="anything",
+        retrieved_titles=[],
     )
-    assert ANSWER_FIELD not in score.field_scores
-    assert ANSWER_F1_FIELD not in score.field_scores
-    assert SUPPORTING_TITLES_RECALL_FIELD not in score.field_scores
+    assert scores == {}
 
 
 def test_supporting_titles_recall_is_case_insensitive() -> None:
-    score = _score(
-        output={ANSWER_FIELD: "x", RETRIEVED_TITLES_KEY: ["EIFFEL TOWER", "paris"]},
+    scores = score_prediction(
+        record=_record(answer="x", titles=["Eiffel Tower", "Paris"]),
         answer="x",
-        titles=["Eiffel Tower", "Paris"],
+        retrieved_titles=["EIFFEL TOWER", "paris"],
     )
-    assert score.field_scores[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(1.0)
+    assert scores[SUPPORTING_TITLES_RECALL_FIELD] == pytest.approx(1.0)
 
 
-# ─── rilixai Modal sandbox @spec wiring ─────────────────────────────────
-
-
-def test_sandbox_spec_factory_is_registered() -> None:
-    """Lock the @spec(...) registration contract so ``rilixai push`` discovery can't silently break.
-
-    ``rilixai push --target hotpotqa/optimization/spec.py --name hotpotqa-agent``
-    enumerates ``@spec``-decorated factories via the ``__rilixai_spec__``
-    attribute the decorator stamps. If anyone renames ``build_spec`` or
-    drops the decorator, this test fails loudly before a stale-image
-    push reaches the build worker.
-    """
-    from rilixai.spec import get_registration
-
-    from hotpotqa.optimization.spec import build_spec
-
-    reg = get_registration(build_spec)
-    assert reg is not None, "build_spec must carry @spec registration"
-    assert reg.name == "hotpotqa-agent"
-    assert reg.entrypoint == "hotpotqa.optimization.spec:build_spec"
-    assert reg.metadata.get("benchmark") == "hotpotqa"
-    assert reg.metadata.get("agent_kind") == "pydantic_ai"
-    # Intentionally no version assertion: ``@spec`` doesn't pin a version.
-    # ``sandbox.py --build`` supplies ``v<short_sha>`` at push time and
-    # promotes to ``@production``. ``reg.version`` will be whatever
-    # rilixai's ``DEFAULT_SPEC_VERSION`` constant is (currently ``"v1"``),
-    # but that value never reaches the spec_versions table for normal
-    # ``--build`` flows because the CLI ``--version`` flag overrides it.
+def test_objective_score_weighting() -> None:
+    scores = {ANSWER_FIELD: 0.0, ANSWER_F1_FIELD: 1.0}
+    # Unweighted: every scored field counts equally.
+    assert objective_score(scores) == pytest.approx(0.5)
+    # A weighted field the case did not score counts as zero.
+    assert objective_score({ANSWER_F1_FIELD: 1.0}, HOTPOTQA_FIELD_WEIGHTS) == pytest.approx(0.0)
+    # Weights are normalized, so they need not sum to 1.
+    assert objective_score(scores, {ANSWER_FIELD: 2.0, ANSWER_F1_FIELD: 2.0}) == pytest.approx(0.5)
+    # All-zero weights leave nothing measurable.
+    assert objective_score(scores, {ANSWER_FIELD: 0.0}) == pytest.approx(0.0)
