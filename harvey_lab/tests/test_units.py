@@ -21,6 +21,7 @@ from harvey_lab.config import HarveyLabConfig
 from harvey_lab.data.dataset import load_harvey_lab_records, practice_areas_for_records
 from harvey_lab.data.task_splits import fixed_val_split, stratified_case_cap
 from harvey_lab.evaluation.local_eval import evaluate_agent_on_records, evaluate_record
+from harvey_lab.evaluation.report import heldout_subset_summary
 from harvey_lab.evaluation.scoring import (
     ALL_PASS_FIELD,
     CRITERION_PASS_RATE_FIELD,
@@ -379,3 +380,19 @@ def test_evaluate_agent_contains_errors_and_excludes_unscoreable(tasks_root: Pat
     assert report.num_scored == 4
     # denominator = scored (4) + errored (1) = 5; the errored case scores 0.
     assert report.all_pass == pytest.approx(4 / 5)
+
+
+def test_heldout_subset_summary_counts_errors_and_drops_unscoreable() -> None:
+    """The held-out mean mirrors the headline rule: scored + errored cases are
+    measurable (errors count as 0), unscoreable cases and excluded areas drop."""
+    per_case = [
+        {"kind": "scored", "practice_area": "contracts", ALL_PASS_FIELD: 1.0},
+        {"kind": "error", "practice_area": "contracts", "error": "boom"},
+        {"kind": "unscoreable", "practice_area": "contracts"},
+        {"kind": "scored", "practice_area": "tax", ALL_PASS_FIELD: 1.0},
+    ]
+    summary = heldout_subset_summary(per_case, excluded_area_ids={"tax"})
+    # contracts only: 1 scored (1.0) + 1 errored (0.0); unscoreable excluded.
+    assert summary["num_heldout_cases"] == 2
+    assert summary[f"{ALL_PASS_FIELD}_heldout"] == pytest.approx(0.5)
+    assert summary["excluded_practice_areas"] == ["tax"]

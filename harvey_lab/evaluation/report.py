@@ -30,23 +30,29 @@ def eval_summary(report: EvalReport, *, split: str) -> dict[str, Any]:
 
 
 def heldout_subset_summary(per_case: list[dict[str, Any]], excluded_area_ids: set[str]) -> dict[str, Any]:
-    """Summarize the scored cases whose practice area is outside ``excluded_area_ids``.
+    """Summarize the measurable cases whose practice area is outside ``excluded_area_ids``.
 
     ``excluded_area_ids`` are the practice areas reserved for the validation
     pool; the held-out subset drops them so the mean is over disjoint domains.
+    Mirrors the headline aggregation: scored + errored cases are measurable
+    (an errored case counts as ``0``), while unscoreable (empty-rubric) cases
+    are excluded entirely.
     """
     held = [
-        r for r in per_case if r.get("kind") == "scored" and str(r.get("practice_area") or "") not in excluded_area_ids
+        r
+        for r in per_case
+        if r.get("kind") in ("scored", "error") and str(r.get("practice_area") or "") not in excluded_area_ids
     ]
-    scores = [float(r[ALL_PASS_FIELD]) for r in held if ALL_PASS_FIELD in r]
+    # Errored held-out cases contribute 0 (a real failure must deflate).
+    scores = [float(r.get(ALL_PASS_FIELD, 0.0)) for r in held]
     return {
         "excluded_practice_areas": sorted(excluded_area_ids),
         "num_heldout_cases": len(held),
         f"{ALL_PASS_FIELD}_heldout": (sum(scores) / len(scores)) if scores else None,
         "note": (
-            f"{ALL_PASS_FIELD} is over ALL scored cases incl. the reserved cross-area "
-            f"validation pool; {ALL_PASS_FIELD}_heldout is the subset whose practice "
-            f"areas fall outside that pool."
+            f"{ALL_PASS_FIELD} is over ALL measurable cases (scored + errored) incl. the "
+            f"reserved cross-area validation pool; {ALL_PASS_FIELD}_heldout is the subset "
+            f"whose practice areas fall outside that pool."
         ),
     }
 
