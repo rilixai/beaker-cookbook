@@ -472,10 +472,15 @@ def test_evaluate_agent_treats_a_failed_agent_run_as_an_error() -> None:
     def _judge(criterion: str, answer: str, task_prompt: str) -> bool:
         raise AssertionError("a failed agent run must never be graded")
 
-    records = [_eval_record("ib-1", "world-a", rubric=(RubricCriterion("output_llm", "States an EV."),))]
+    records = [
+        _eval_record("ib-1", "world-a", rubric=(RubricCriterion("output_llm", "States an EV."),)),
+        # An empty rubric must not mask the failure as "unscoreable".
+        _eval_record("ib-2", "world-a", rubric=()),
+    ]
     report = asyncio.run(evaluate_agent_on_records(agent=agent, records=records, judge=_judge, max_concurrency=1))
-    assert report.num_errored == 1
+    assert report.num_errored == 2
     assert report.num_scored == 0
+    assert report.num_unscoreable == 0
     assert report.rubric_pass_rate == 0.0
     assert report.per_case[0]["kind"] == "error"
     assert "provider timed out" in report.per_case[0]["error"]
