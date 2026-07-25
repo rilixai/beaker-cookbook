@@ -39,8 +39,13 @@ class HotpotQAAgentOutput:
     so there's no top-level ``summary_1`` / ``summary_2`` slot — that
     would imply a workflow-shaped fixed-hop pattern this agent doesn't
     have.
+
+    ``error`` is non-empty when the run failed: the agent reports a crash
+    as an output rather than raising, so callers can tell a genuine empty
+    answer apart from one produced by a failed run.
     """
 
     answer: str
     retrieved_paragraphs: list[HotpotQAParagraph]
     tool_calls: list[AgentToolCall]
+    error: str = ""

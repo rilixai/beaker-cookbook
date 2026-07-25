@@ -217,6 +217,13 @@ def _run_run(args: argparse.Namespace) -> int:
                         "question": record.question,
                         "error": f"{type(exc).__name__}: {exc}",
                     }
+                if output.error:
+                    # The agent reports a failed run instead of raising.
+                    return {
+                        "case_id": record.case_id,
+                        "question": record.question,
+                        "error": output.error,
+                    }
                 return {
                     "case_id": record.case_id,
                     "question": record.question,

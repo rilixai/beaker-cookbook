@@ -73,11 +73,22 @@ async def evaluate_record(
     """Run the agent on ``record`` and score it, returning a per-case result.
 
     The returned dict always carries ``case_id`` + ``question_type`` and a
-    ``kind`` in ``{"scored", "unscoreable"}``. A ``scored`` result also carries
-    the ``objective``, the per-field ``field_scores``, and the agent's answer +
-    retrieved titles.
+    ``kind`` in ``{"scored", "error", "unscoreable"}``. The agent reports a
+    failed run as an output carrying ``error`` rather than raising, so that
+    case becomes an ``error`` row here and is never scored. A ``scored``
+    result also carries the ``objective``, the per-field ``field_scores``,
+    and the agent's answer + retrieved titles.
     """
     output = await run_agent_on_record(agent=agent, record=record, config=config)
+    if output.error:
+        return {
+            "case_id": record.case_id,
+            "question_type": record.question_type,
+            "kind": "error",
+            "objective": 0.0,
+            "field_scores": {},
+            "error": output.error,
+        }
     retrieved_titles = [p.title for p in output.retrieved_paragraphs]
     field_scores = score_prediction(record=record, answer=output.answer, retrieved_titles=retrieved_titles)
     base: dict[str, Any] = {

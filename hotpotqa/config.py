@@ -68,7 +68,6 @@ class HotpotQAConfig:
 
     retrieval_mode: RetrievalMode = "fullwiki"
     retrieve_k: int = 7
-    max_paragraph_chars: int = 1_500
     max_iters: int = 8
     pydantic_agent_model: str | None = None
     # Pinned at ``0.0`` for reproducibility — used by the PydanticAI

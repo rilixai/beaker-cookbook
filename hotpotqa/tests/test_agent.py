@@ -9,13 +9,17 @@ scripts each turn.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
+from hotpotqa import cli as hotpotqa_cli
 from hotpotqa.agent.agent import HotpotQAPydanticAgent
 from hotpotqa.config import HotpotQAConfig, bare_openai_model, to_pydantic_ai_model
 from hotpotqa.data.dataset import HotpotQAParagraph, HotpotQARecord
@@ -261,6 +265,28 @@ def test_agent_retrieval_prefers_the_injected_retriever() -> None:
     assert all(p.title in {"Eiffel Tower", "Paris", "Berlin"} for p in deps_legacy.retrieved)
 
 
+def test_agent_reports_a_failed_run_as_an_error_output() -> None:
+    """A crash inside the loop surfaces as ``output.error``, not as an empty answer.
+
+    ``forward`` deliberately does not raise (one bad case must never abort a
+    batch), so the failure has to be visible on the output — otherwise a
+    crashed run is indistinguishable from an honest "I don't know".
+    """
+
+    def _exploding_model(_messages: list[object], _info: AgentInfo) -> ModelResponse:
+        raise TimeoutError("provider timed out")
+
+    agent = HotpotQAPydanticAgent(
+        model=FunctionModel(_exploding_model),
+        top_k=2,
+        max_iters=4,
+        summarize_llm_call=lambda _s, _u: asyncio.sleep(0, result=""),
+    )
+    output = asyncio.run(agent.forward(record=_record()))
+    assert output.answer == ""
+    assert "provider timed out" in output.error
+
+
 def test_model_name_normalization_is_centralized_in_config() -> None:
     """Slash- and colon-form model specs both canonicalize to the PydanticAI
     colon form on the config (the single normalization layer), and the bare
@@ -384,3 +410,83 @@ def test_evaluate_agent_contains_errors_and_excludes_unscoreable() -> None:
     errored = next(r for r in report.per_case if r["case_id"] == "case-boom")
     assert errored["kind"] == "error"
     assert "RuntimeError: boom" in errored["error"]
+
+
+def test_evaluate_agent_treats_a_failed_agent_run_as_an_error() -> None:
+    """The agent reports a crash as an output carrying ``error`` rather than
+    raising; that must land as an errored (0-scoring) case, never a scored one
+    whose empty answer happens to earn retrieval credit."""
+
+    def _exploding_model(_messages: list[object], _info: AgentInfo) -> ModelResponse:
+        raise TimeoutError("provider timed out")
+
+    agent = HotpotQAPydanticAgent(
+        model=FunctionModel(_exploding_model),
+        top_k=2,
+        max_iters=4,
+        summarize_llm_call=lambda _s, _u: asyncio.sleep(0, result=""),
+    )
+    report = asyncio.run(
+        evaluate_agent_on_records(agent=agent, records=[_record()], config=_distractor_config(), max_concurrency=1)
+    )
+    assert report.num_errored == 1
+    assert report.num_scored == 0
+    assert report.objective == pytest.approx(0.0)
+    assert report.field_accuracies == {}
+    assert "provider timed out" in report.per_case[0]["error"]
+
+
+def test_cli_run_contains_failures_and_reports_them(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """``run``'s fan-out records an error row — for a raising case and for a
+    case the agent failed without raising — instead of aborting the batch or
+    writing an empty answer as if it were a real one."""
+    records = [_record(case_id="case-ok"), _record(case_id="case-boom"), _record(case_id="case-timeout")]
+    monkeypatch.setattr(hotpotqa_cli, "_load_records", lambda _args: records)
+
+    def _exploding_model(_messages: list[object], _info: AgentInfo) -> ModelResponse:
+        raise TimeoutError("provider timed out")
+
+    scripted, _ = _make_scripted_summarize()
+
+    class _FlakyAgent(HotpotQAPydanticAgent):
+        async def forward(self, *, record: HotpotQARecord, retrieve_k_fn: Any = None) -> Any:
+            if record.case_id == "case-boom":
+                raise RuntimeError("boom")
+            if record.case_id == "case-timeout":
+                broken = HotpotQAPydanticAgent(
+                    model=FunctionModel(_exploding_model),
+                    top_k=2,
+                    max_iters=10,
+                    summarize_llm_call=scripted,
+                )
+                return await broken.forward(record=record, retrieve_k_fn=retrieve_k_fn)
+            return await super().forward(record=record, retrieve_k_fn=retrieve_k_fn)
+
+    monkeypatch.setattr(
+        hotpotqa_cli,
+        "_build_agent",
+        lambda _config: _FlakyAgent(
+            model=_scripted_outer_model(),
+            top_k=2,
+            max_iters=10,
+            summarize_llm_call=scripted,
+        ),
+    )
+
+    args = argparse.Namespace(
+        split="test",
+        retrieval="distractor",
+        retrieve_k=2,
+        max_iters=10,
+        pydantic_agent_model=None,
+        task_model="openai/gpt-4.1-mini",
+        task_temperature=0.0,
+        max_concurrency=2,
+        output_dir=tmp_path,
+    )
+    assert hotpotqa_cli._run_run(args) == 0
+    by_id = {r["case_id"]: r for r in json.loads((tmp_path / "run_outputs.json").read_text())}
+    assert by_id["case-ok"]["answer"] == "Paris"
+    assert "RuntimeError: boom" in by_id["case-boom"]["error"]
+    assert "provider timed out" in by_id["case-timeout"]["error"]
+    assert "answer" not in by_id["case-timeout"]

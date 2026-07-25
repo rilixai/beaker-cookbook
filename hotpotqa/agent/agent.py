@@ -207,6 +207,10 @@ class HotpotQAPydanticAgent:
         evaluation builds from ``cfg.retrieval_mode``. When omitted, the
         agent falls back to running bm25 over the record's own
         (distractor) paragraphs.
+
+        A failed run is reported as an output carrying ``error`` rather
+        than raised, so one bad case never aborts a batch; the evaluation
+        turns such an output into an errored (never scored) case.
         """
         from pydantic_ai.usage import UsageLimits
 
@@ -221,6 +225,7 @@ class HotpotQAPydanticAgent:
         )
 
         answer = ""
+        error = ""
         messages: list[Any] = []
         try:
             # NOTE: do NOT pass ``instructions=`` here. PydanticAI's
@@ -240,8 +245,9 @@ class HotpotQAPydanticAgent:
                     output = result.output
                     answer = str(getattr(output, "answer", "") or "").strip()
                     messages = list(result.all_messages())
-        except Exception:
+        except Exception as exc:
             logger.exception("HotpotQA PydanticAI agent failed for question %r", question[:80])
+            error = f"{type(exc).__name__}: {exc}"
 
         tool_calls = _build_agent_tool_calls(
             messages=messages,
@@ -252,6 +258,7 @@ class HotpotQAPydanticAgent:
             answer=answer,
             retrieved_paragraphs=list(deps.retrieved),
             tool_calls=tool_calls,
+            error=error,
         )
 
     # ─── Tool implementations ────────────────────────────────────────────
