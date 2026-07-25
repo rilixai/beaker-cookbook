@@ -158,7 +158,17 @@ def _run_run(args: argparse.Namespace) -> int:
 
         async def _one(record: HarveyLabRecord) -> dict[str, object]:
             async with semaphore:
-                output = await agent.forward(record=record)
+                # Contain per-task failures so one erroring task does not
+                # cancel the batch (mirrors evaluate_agent_on_records).
+                try:
+                    output = await agent.forward(record=record)
+                except Exception as exc:  # noqa: BLE001 - report, don't abort
+                    logger.warning("Task %s failed: %s", record.task_id, exc)
+                    return {
+                        "task_id": record.task_id,
+                        "practice_area": record.practice_area,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
                 out_dir = args.output_dir / record.task_id
                 for name, text in output.deliverables.items():
                     dest = out_dir / name
@@ -177,7 +187,14 @@ def _run_run(args: argparse.Namespace) -> int:
     logger.info("Running the agent on %d task(s)...", len(records))
     results = asyncio.run(_run_all())
     write_json(args.output_dir / "run_outputs.json", results)
-    logger.info("Wrote deliverables for %d task(s) under %s", len(results), args.output_dir)
+    num_errored = sum(1 for r in results if "error" in r)
+    logger.info(
+        "Wrote outputs for %d task(s) under %s (%d succeeded, %d errored)",
+        len(results),
+        args.output_dir,
+        len(results) - num_errored,
+        num_errored,
+    )
     return 0
 
 
