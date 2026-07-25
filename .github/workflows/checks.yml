@@ -9,14 +9,23 @@ permissions:
   contents: read
 
 jobs:
-  # Lint, format, type-check, and verify the hotpotqa workspace member
-  # builds cleanly. Split from the pytest job so a lint regression
-  # fails fast without waiting for pytest, and vice versa (mirrors
-  # rilixai's split between ``checks.yml`` and ``tests.yml``).
+  # Lint, format, type-check, and verify each recipe builds cleanly. Each
+  # recipe is its own standalone uv project (its own pyproject + uv.lock), so
+  # the matrix runs the checks independently per recipe directory. Split from
+  # the pytest job so a lint regression fails fast without waiting for pytest,
+  # and vice versa (mirrors rilixai's split between ``checks.yml`` and
+  # ``tests.yml``).
   checks:
-    name: Lint, type-check, and build
+    name: Lint, type-check, and build (${{ matrix.recipe }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: [harvey_lab, hotpotqa, apex_agents]
+    defaults:
+      run:
+        working-directory: ${{ matrix.recipe }}
     steps:
       - uses: actions/checkout@v4
 
@@ -42,11 +51,11 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-      # ``--locked`` fails the job if uv.lock is stale vs pyproject —
-      # catches "forgot to ``uv lock`` after editing pyproject" before
-      # it bites downstream consumers of the cookbook template.
+      # ``--locked`` fails the job if this recipe's uv.lock is stale vs its
+      # pyproject — catches "forgot to ``uv lock`` after editing pyproject"
+      # before it bites a downstream consumer of the cookbook template.
       - name: uv sync (locked)
-        run: uv sync --all-packages --group dev --locked
+        run: uv sync --group dev --locked
 
       - name: ruff check
         run: uv run ruff check
@@ -55,28 +64,27 @@ jobs:
         run: uv run ruff format --check
 
       - name: mypy
-        # ``[tool.mypy] files`` in pyproject.toml scopes this to each
-        # workspace member's source dir (tests + scripts are excluded
-        # to match the rilixai pattern).
+        # ``[tool.mypy] files`` in this recipe's pyproject.toml scopes this to
+        # the recipe's source (tests + scripts excluded).
         run: uv run python -m mypy
 
-      # Build each workspace member's wheel without
-      # ``[tool.uv.sources]`` overrides so packaging regressions
-      # surface here rather than in a downstream "copy this template"
-      # user's environment.
-      - name: Build hotpotqa distribution
-        run: uv build --package hotpotqa --no-sources
-
-      - name: Build apex_agents distribution
-        run: uv build --package apex-agents --no-sources
-
-      - name: Build harvey_lab distribution
-        run: uv build --package harvey-lab --no-sources
+      # Build the recipe's wheel without ``[tool.uv.sources]`` overrides so
+      # packaging regressions surface here rather than in a downstream "copy
+      # this template" user's environment.
+      - name: Build distribution
+        run: uv build --no-sources
 
   tests:
-    name: Pytest
+    name: Pytest (${{ matrix.recipe }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: [harvey_lab, hotpotqa, apex_agents]
+    defaults:
+      run:
+        working-directory: ${{ matrix.recipe }}
     steps:
       - uses: actions/checkout@v4
 
@@ -99,7 +107,7 @@ jobs:
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
       - name: uv sync (locked)
-        run: uv sync --all-packages --group dev --locked
+        run: uv sync --group dev --locked
 
       - name: pytest
         run: uv run python -m pytest -q
