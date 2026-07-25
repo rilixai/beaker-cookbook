@@ -270,6 +270,14 @@ def _run_run(args: argparse.Namespace) -> int:
                         "world_id": record.world_id,
                         "error": f"{type(exc).__name__}: {exc}",
                     }
+                agent_error = str(output.extra.get("error") or "")
+                if agent_error:
+                    # The agent reports a failed run instead of raising.
+                    return {
+                        "task_id": record.task_id,
+                        "world_id": record.world_id,
+                        "error": f"{output.status}: {agent_error}",
+                    }
                 return {
                     "task_id": record.task_id,
                     "world_id": record.world_id,

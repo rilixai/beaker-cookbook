@@ -56,9 +56,11 @@ async def evaluate_record(
     """Run the agent on ``record`` and grade it, returning a per-case result.
 
     The returned dict always carries ``task_id`` + ``world_id`` and a ``kind``
-    in ``{"scored", "unscoreable"}``. A ``scored`` result also carries
-    ``rubric_pass_rate`` / ``n_criteria`` plus the agent's ``final_answer``
-    and loop telemetry.
+    in ``{"scored", "error", "unscoreable"}``. The agent reports a failed run
+    as an output carrying ``extra["error"]`` rather than raising, so that case
+    is turned into an ``error`` row here (never graded). A ``scored`` result
+    also carries ``rubric_pass_rate`` / ``n_criteria`` plus the agent's
+    ``final_answer`` and loop telemetry.
     """
     output = await agent.forward(record=record)
     rubric_payload = [{"verifier_id": c.verifier_id, "criteria": c.criteria} for c in record.rubric]
@@ -67,6 +69,9 @@ async def evaluate_record(
         # No scoreable criteria: the task is not measurable, so it is kept
         # out of the aggregate rather than counted as a failure.
         return {**base, "kind": "unscoreable", "final_answer": output.final_answer}
+    agent_error = str(output.extra.get("error") or "")
+    if agent_error:
+        return {**base, "kind": "error", "error": f"{output.status}: {agent_error}"}
     pass_rate = await asyncio.to_thread(
         score_rubric,
         rubric=rubric_payload,

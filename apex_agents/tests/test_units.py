@@ -451,6 +451,36 @@ def test_evaluate_agent_contains_errors_and_excludes_unscoreable() -> None:
     assert "RuntimeError: boom" in errored["error"]
 
 
+def test_evaluate_agent_treats_a_failed_agent_run_as_an_error() -> None:
+    """The agent reports a crash as an output with ``extra['error']`` rather
+    than raising; that must land as an errored (0-scoring) case, ungraded."""
+
+    def _exploding_factory(_name: str, _temp: float) -> Any:
+        class _M:
+            def complete(self, *, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
+                raise TimeoutError("provider timed out")
+
+        return _M()
+
+    agent = ApexReActAgent(
+        model_name="scripted/test",
+        max_steps=5,
+        world_factory=lambda _record: FakeWorld({}),
+        model_factory=_exploding_factory,
+    )
+
+    def _judge(criterion: str, answer: str, task_prompt: str) -> bool:
+        raise AssertionError("a failed agent run must never be graded")
+
+    records = [_eval_record("ib-1", "world-a", rubric=(RubricCriterion("output_llm", "States an EV."),))]
+    report = asyncio.run(evaluate_agent_on_records(agent=agent, records=records, judge=_judge, max_concurrency=1))
+    assert report.num_errored == 1
+    assert report.num_scored == 0
+    assert report.rubric_pass_rate == 0.0
+    assert report.per_case[0]["kind"] == "error"
+    assert "provider timed out" in report.per_case[0]["error"]
+
+
 def test_evaluate_agent_respects_max_concurrency() -> None:
     """No more than ``max_concurrency`` tasks may be in flight at once."""
     records = [
@@ -620,3 +650,48 @@ def test_cli_run_contains_per_task_failures(monkeypatch: pytest.MonkeyPatch, tmp
     by_id = {r["task_id"]: r for r in results}
     assert "RuntimeError: boom" in by_id["ib-bad"]["error"]
     assert by_id["ib-good"]["final_answer"] == "The EV is $5M."
+
+
+def test_cli_run_reports_a_failed_agent_run_as_an_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """An agent run that failed without raising is an error row, not a success."""
+    import argparse
+
+    from apex_agents import cli as apex_cli
+
+    monkeypatch.setattr(
+        apex_cli, "_select_records", lambda _args: ([_eval_record("ib-1", "world-a", rubric=())], set())
+    )
+
+    def _exploding_factory(_name: str, _temp: float) -> Any:
+        class _M:
+            def complete(self, *, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
+                raise TimeoutError("provider timed out")
+
+        return _M()
+
+    monkeypatch.setattr(
+        apex_cli,
+        "_build_agent",
+        lambda _args, _config: ApexReActAgent(
+            model_name="scripted/test",
+            max_steps=5,
+            world_factory=lambda _record: FakeWorld({}),
+            model_factory=_exploding_factory,
+        ),
+    )
+
+    args = argparse.Namespace(
+        split="all",
+        max_concurrency=1,
+        output_dir=tmp_path,
+        task_model="scripted/test",
+        task_temperature=0.0,
+        judge_model="stub/judge",
+        max_steps=5,
+        cost_limit=1.0,
+        llm_timeout=5.0,
+    )
+    assert apex_cli._run_run(args) == 0
+    (result,) = json.loads((tmp_path / "run_outputs.json").read_text())
+    assert "provider timed out" in result["error"]
+    assert "final_answer" not in result
