@@ -32,15 +32,17 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from ...data.dataset import ApexAgentsRecord
+
 
 logger = logging.getLogger(__name__)
 
 
 # Per-case world factory: ``(record) -> WorldFiles``-like.
-WorldFactory = Callable[[Any], "WorldFiles"]
+WorldFactory = Callable[[ApexAgentsRecord], "WorldFiles"]
 
 
-__all__ = ["WorldFiles", "build_world_factory"]
+__all__ = ["WorldFactory", "WorldFiles", "build_world_factory", "world_factory_from_mapping"]
 
 
 # Cap on a single text/file read so a hostile or huge asset can't blow
@@ -331,11 +333,11 @@ def build_world_factory(
     inject a :class:`FakeWorld` factory and never download anything.
     """
 
-    def _factory(record: Any) -> WorldFiles:
+    def _factory(record: ApexAgentsRecord) -> WorldFiles:
         from huggingface_hub import hf_hub_download, snapshot_download
 
-        world_id = getattr(record, "world_id", "") or ""
-        task_id = getattr(record, "task_id", "") or ""
+        world_id = record.world_id
+        task_id = record.task_id
         world_zip = hf_hub_download(
             repo_id=repo_id,
             filename=f"world_files_zipped/{world_id}.zip",
@@ -367,8 +369,8 @@ def world_factory_from_mapping(mapping: Mapping[str, WorldFiles]) -> WorldFactor
     ``world_id``); avoids re-downloading per case.
     """
 
-    def _factory(record: Any) -> WorldFiles:
-        world_id = getattr(record, "world_id", "") or ""
+    def _factory(record: ApexAgentsRecord) -> WorldFiles:
+        world_id = record.world_id
         if world_id not in mapping:
             raise KeyError(f"No prebuilt world for world_id={world_id!r}.")
         return mapping[world_id]

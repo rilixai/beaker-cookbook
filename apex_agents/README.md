@@ -1,104 +1,126 @@
 # APEX-Agents
 
-Mercor's **APEX-Agents** benchmark (Law / Investment Banking) as a ReAct
-toolbelt agent, optimized by rilixai's GEPA loop.
+A self-contained **professional knowledge-worker agent** and a local rubric
+evaluation harness for it. The agent explores a per-task "world" of business
+documents, answers the task, and is graded criterion-by-criterion against
+Mercor's [APEX-Agents](https://huggingface.co/datasets/mercor/apex-agents)
+benchmark (Law / Investment Banking).
 
-- **Agent** — a ReAct loop over per-case "world" files (PDFs, spreadsheets,
-  docs) with meta + domain tools; terminates by calling `final_answer`.
-- **Optimized prompts** — `system_prompt`, `task_template`,
-  `resum_summary_prompt`.
-- **Score** — `rubric_pass_rate` from an LLM judge against each task's rubric.
+## The agent
 
-Cases come from the private HF dataset `mercor/apex-agents`.
+For each task the agent is handed a **world** — the deal room / matter folder
+the task lives in — and a written request, and it must produce the answer.
+
+- **Input** — a read-only per-task world: a directory tree of spreadsheets,
+  PDFs, Word documents and text files, plus the task's own input files.
+- **Tools** — the toolbelt starts *empty*. Meta tools
+  (`toolbelt_list_tools`, `toolbelt_inspect_tool`, `toolbelt_add_tool`,
+  `toolbelt_remove_tool`, `todo_write`, `final_answer`) let the agent discover
+  and mount the domain tools it needs: `list_files`, `read_file`,
+  `read_spreadsheet` (per-sheet, `.xlsx` + legacy `.xls`), `read_pdf`,
+  `read_docx`, and `search_files`.
+- **Loop** — a native async ReAct loop: think → call tools → observe, until
+  `final_answer` is called. Answering is gated on the agent's own todo list
+  being closed, so it can't punt mid-plan. When the conversation outgrows the
+  context budget it is compacted (**ReSum**) and the loop continues.
+- **Model** — a LiteLLM model string (default `openai/gpt-4.1-mini`), so any
+  provider LiteLLM routes to works. `max_steps` and `cost_limit` bound the loop.
+- **Prompts** — three of them: `system_prompt`, `task_template`, and
+  `resum_summary_prompt` (`agent/prompts.py`).
+
+Code map:
+
+| Path | What it holds |
+|---|---|
+| `agent/world/world.py` | the per-task world (zip extraction + file readers) |
+| `agent/agent.py` | the ReAct loop, the toolbelt, and the LiteLLM wrapper |
+| `agent/prompts.py` | the three prompts |
+| `data/dataset.py` | loads task records + world metadata from HuggingFace |
+| `data/world_splits.py` | deterministic world-level splitters |
+| `evaluation/scoring.py` | the per-criterion LLM judge + `rubric_pass_rate` |
+| `evaluation/local_eval.py` | the bounded-concurrency batch evaluator |
+| `evaluation/report.py` | the JSON artifacts |
+| `config.py` | model / budget / timeout knobs |
+| `cli.py` | run the agent, or run + grade it |
+
+## How the work is graded
+
+Each task ships a rubric of atomic criteria written in plain English. A second
+LLM acts as a **judge**: for each criterion it reads the task and the agent's
+final answer and returns `VERDICT: MET` / `VERDICT: NOT MET` — an ambiguous or
+failed judgement is conservatively NOT MET. The per-task score
+(`rubric_pass_rate`) is the fraction of criteria met.
+
+The batch evaluator (`evaluation/local_eval.py`) averages that across tasks. A
+task whose rubric has no scoreable criteria is **unscoreable** and excluded
+from the average; a task that errors counts as `0` (a real failure must
+deflate, not inflate, the metric).
+
+`data/world_splits.py` carves the validation pool by *whole world*, so
+`evaluate --split all` also reports a `rubric_pass_rate_heldout` over the
+worlds outside that pool.
+
+## The data
+
+Tasks come from the **gated** HuggingFace dataset
+[`mercor/apex-agents`](https://huggingface.co/datasets/mercor/apex-agents):
+`tasks_and_rubrics.json`, `world_descriptions.json`, and one zip per world
+holding its files. Request access, then authenticate (below). By default only
+the `Investment Banking` subset is loaded (`--domain`, `--domain ""` for all).
 
 ## Install
 
-This recipe is a standalone uv project; run all commands from this directory:
+Standalone [uv](https://docs.astral.sh/uv/) project; run everything from this
+directory:
 
 ```bash
 cd apex_agents
 uv sync --group dev
 ```
 
-Env vars (needed for any run that calls a model):
+Credentials:
 
 ```bash
-export HF_TOKEN=hf_...          # private dataset access
+export HF_TOKEN=hf_...          # gated dataset access
 export OPENAI_API_KEY=sk-...    # agent (gpt-4.1-mini default)
 export GOOGLE_API_KEY=...       # judge (gemini-3.5-flash default)
 ```
 
-## Run locally
-
-This recipe depends on the lightweight `rilixai` SDK only. The local CLI
-covers the two SDK-only paths — `validate` (offline structural check) and
-`evaluate` (score one candidate via the SDK `run_case` + scorer loop). The
-full GEPA optimize loop runs server-side via `rilixai run` (see the Modal
-section below); the optimizer engine lives in the optional `rilixai-runtime`
-package, not in this recipe.
+## Run
 
 ```bash
-# Validate the spec structure offline (no network, no dataset download)
-uv run python -m apex_agents.cli validate --domain law
+# Run the agent and dump its answers (no grading):
+uv run python -m apex_agents.cli run \
+    --test-size 10 \
+    --output-dir apex_agents_run
 
-# Evaluate one candidate (omit --candidate-json to score the seed prompts)
+# Run the agent AND grade every rubric criterion:
 uv run python -m apex_agents.cli evaluate \
-    --domain law --candidate-json path/to/candidate.json
+    --test-size 10 \
+    --output-dir apex_agents_run
 ```
 
-`--val-worlds` holds out whole worlds when `--split validation` builds the
-fixed val pool, so an evaluated candidate is scored for cross-world transfer
-rather than in-world fit. See `--help` for all flags.
+`run` writes `run_outputs.json` (per-task answer + loop telemetry, or an
+`error` entry for a task that failed — one failure never aborts the batch).
+`evaluate` writes `eval_summary.json` (aggregate `rubric_pass_rate` + case
+counts) and `eval_outputs.json` (per-task results). See `--help` for all flags
+(`--split`, `--val-worlds`, `--val-size`, `--max-concurrency`, `--task-model`,
+`--judge-model`, `--max-steps`, `--cost-limit`, `--cache-dir`, …).
 
-## Run on Modal (rilixai sandbox)
-
-`optimization/spec.py` registers a `@spec(name="apex-agents")` factory that
-rilixai's sandbox runs. `sandbox.py` builds the image, promotes it to
-`apex-agents@production`, and triggers a run in one shot.
-
-**A dataset upload is required.** The migrated spec no longer loads data
-itself — the optimizer reads its cases from an uploaded JSONL dataset via
-`ApexAgentsDataLoader` (see `ApexAgentsDataLoader.dataset_schema` in
-`apex_agents/data/dataset.py`). A run triggered with no dataset reference is
-rejected at startup. Which domain subset (`law` / `investment_banking`) a run
-optimizes over is decided by which cases you export into the uploaded dataset —
-not a per-trigger flag. Upload once, then trigger:
-
-```bash
-export RILIXAI_API_KEY=sk-...
-export RILIXAI_API_BASE_URL=https://<id>.execute-api.<region>.amazonaws.com/prod/
-export RILIXAI_AGENT_KEY=apex-agents   # agent the trigger targets (or pass --agent)
-
-# One-time (or when the data changes): upload the JSONL split as a dataset.
-uv run rilixai dataset upload --name apex-agents-dataset path/to/jsonl-dir/
-
-uv run sandbox.py --build   # build + promote + trigger
-uv run sandbox.py           # trigger only (current @production)
-```
-
-The trigger defaults to `--dataset apex-agents-dataset@production` and
-`--spec apex-agents@production`; override either to pin a specific revision.
-
-Provider keys (`OPENAI_API_KEY`, `GOOGLE_API_KEY`) and `HF_TOKEN` are bound
-as project-level secrets on rilixai's side, injected into each sandbox.
-
-To trigger from code, or to tune the agent knobs (`max_metric_calls`, models,
-…), call `client.create_optimization_run(...)` with a `dataset_ref` — the run
-config keys are documented in `_DEFAULT_SANDBOX_CONFIG` at the top of
-`apex_agents/optimization/spec.py`. The domain subset and train/val split come
-from the uploaded dataset, so there are no `domain`/`train_size`/`val_size`/
-`val_worlds` knobs. Roll back with
-`uv run rilixai spec promote apex-agents v<older-sha>`.
+`--no-network` refuses the dataset download, the world factory, and the judge —
+a dry-run guard against accidental spend.
 
 ## Tests
 
 ```bash
-uv run python -m pytest apex_agents/tests -q
+uv run python -m pytest -q
 ```
 
-Hermetic — a `FakeWorld` shim + stub judge, no network.
+Hermetic — a `FakeWorld` shim + a scripted model + a stub judge, no network.
 
 ## Notes
 
-- rilixai is pinned via git in `pyproject.toml` until it's on PyPI.
-- `max_steps=60` / `cost_limit=$3` are demo-bounded; raise for parity.
+- `max_steps=60` / `cost_limit=$3` are demo-bounded; raise them for parity with
+  the reference harness (which allows 250 steps).
+- The judge is an LLM, so scores carry judge noise; keep the judge model fixed
+  when comparing runs.

@@ -37,22 +37,6 @@ jobs:
       - name: Install Python
         run: uv python install
 
-      # apex_agents still depends on the private rilixai/rilixai repo via a
-      # ``git+ssh://`` pin; auth flows via a deploy-key-style SSH private key
-      # in ``RILIXAI_GITHUB_SSH_KEY``. harvey_lab and hotpotqa are standalone
-      # (no rilixai dependency), so they skip the SSH setup entirely.
-      - name: Configure SSH for private rilixai dependency
-        if: matrix.recipe != 'harvey_lab' && matrix.recipe != 'hotpotqa'
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.RILIXAI_GITHUB_SSH_KEY }}
-
-      - name: Trust GitHub SSH host
-        if: matrix.recipe != 'harvey_lab' && matrix.recipe != 'hotpotqa'
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-
       # ``--locked`` fails the job if this recipe's uv.lock is stale vs its
       # pyproject — catches "forgot to ``uv lock`` after editing pyproject"
       # before it bites a downstream consumer of the cookbook template.
@@ -97,18 +81,6 @@ jobs:
 
       - name: Install Python
         run: uv python install
-
-      - name: Configure SSH for private rilixai dependency
-        if: matrix.recipe != 'harvey_lab' && matrix.recipe != 'hotpotqa'
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.RILIXAI_GITHUB_SSH_KEY }}
-
-      - name: Trust GitHub SSH host
-        if: matrix.recipe != 'harvey_lab' && matrix.recipe != 'hotpotqa'
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
 
       - name: uv sync (locked)
         run: uv sync --group dev --locked

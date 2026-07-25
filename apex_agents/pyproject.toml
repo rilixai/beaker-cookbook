@@ -1,28 +1,17 @@
 [project]
 name = "apex-agents"
 version = "0.1.0"
-description = "GEPA-optimized ReAct toolbelt agent on the Mercor APEX-Agents (Law / IB) benchmark."
+description = "A ReAct toolbelt agent on the Mercor APEX-Agents (Law / IB) benchmark, plus a local rubric evaluation."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "rilixai" }]
 dependencies = [
-  # NOTE: temporary git+url pin while rilixai is not yet published to
-  # PyPI at the needed version. Once a fresh rilixai is published,
-  # swap this to ``rilixai==X.Y.Z`` plus a matching
-  # ``[[tool.uv.index]]`` block + ``[tool.uv.sources]`` mapping.
-  # Pinned to the rilixai PR #24 merge commit on main: brings
-  # ``spec promote`` / ``@production`` resolution + the components
-  # writeback fix. SSH URL (not HTTPS) so CI auth flows through
-  # ``RILIXAI_GITHUB_SSH_KEY`` via webfactory's ssh-agent action —
-  # matches the rilix repo's auth pattern.
-  "rilixai @ git+ssh://git@github.com/rilixai/rilixai.git@28ea6f1380b30e65a85232c312fed9ac088baa86#subdirectory=packages/rilixai",
   "litellm>=1.74",
   # litellm lazy-imports tenacity for its retry wrapper but doesn't
-  # declare it as a dependency. Locally a transitive dep provides it,
-  # but the baked sandbox image has nothing pulling it in, so the
-  # rubric judge call fails with "tenacity import failed". Pin it
-  # explicitly so the image always has it.
+  # declare it as a dependency. A transitive dep usually provides it,
+  # but on a minimal image nothing pulls it in and the rubric judge
+  # call fails with "tenacity import failed". Pin it explicitly.
   "tenacity>=8.0",
   "huggingface-hub>=0.20",
   # Heavy parsers — lazy-imported inside the WorldFiles surface so
@@ -51,7 +40,7 @@ include = [
   "*.py",
   "agent/**/*.py",
   "data/**/*.py",
-  "optimization/**/*.py",
+  "evaluation/**/*.py",
 ]
 exclude = [
   "tests/**",
@@ -59,12 +48,6 @@ exclude = [
   "pyproject.toml",
   "README.md",
 ]
-
-[tool.hatch.metadata]
-# Allow the ``rilixai @ git+ssh://...`` direct reference in
-# ``project.dependencies`` until the cookbook can swap to a PyPI
-# version pin.
-allow-direct-references = true
 
 # Dev tooling + lint/type/test config live in this recipe's own pyproject so
 # the folder is a self-contained project (no root workspace pyproject).

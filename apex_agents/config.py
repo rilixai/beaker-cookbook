@@ -1,13 +1,8 @@
 """Runtime configuration for the APEX-Agents benchmark.
 
-``ApexAgentsConfig`` is the single knob bag shared by the CLI, the
-runtime adapter, and the spec. Lives at the top level (peer of
-``cli.py``) so both ``cli.py`` and ``optimization/runtime.py`` can
-import it without a cycle.
-
-(Renamed from ``ApexAgentsPipelineConfig`` — the "Pipeline" qualifier
-disambiguated against a workflow variant that never materialized; the
-agent path is the only one wired.)
+``ApexAgentsConfig`` is the single knob bag shared by the CLI and the
+evaluation package. Lives at the top level (peer of ``cli.py``) so
+everything can import it without a cycle.
 """
 
 from __future__ import annotations
@@ -15,18 +10,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-# Kept inline (not imported from ``optimization.metrics``) so this
-# module sits at the very bottom of the package import graph: both
-# ``optimization.runtime`` and ``optimization.spec`` import
-# :class:`ApexAgentsConfig` from here, so a back-edge to
-# ``optimization.metrics`` would cycle. The canonical definition lives
-# in ``optimization.metrics``; this mirror is kept in lockstep.
+# Kept inline (not imported from ``evaluation.scoring``) so this module
+# sits at the very bottom of the package import graph. The canonical
+# definition lives in ``evaluation.scoring``; this mirror is kept in
+# lockstep.
 DEFAULT_JUDGE_MODEL = "gemini/gemini-3.5-flash"
 
 
 @dataclass(frozen=True)
 class ApexAgentsConfig:
-    """Knobs for the APEX-Agents runtime.
+    """Knobs for an APEX-Agents run.
 
     ``task_model`` is the LiteLLM model spec for the ReAct agent;
     ``judge_model`` is the LLM-judge model (Mercor default
@@ -46,9 +39,6 @@ class ApexAgentsConfig:
     # judge. Bounds a hung provider request so the case fails fast
     # instead of wedging the whole run.
     llm_timeout: float = 120.0
-    # Cap the size of trajectory previews surfaced in ``run_metrics``
-    # (keeps the rilixai trajectory dict bounded on a long agent run).
-    max_preview_chars: int = 1_500
 
     def __post_init__(self) -> None:
         if self.max_steps < 1:
@@ -57,7 +47,5 @@ class ApexAgentsConfig:
             raise ValueError(f"ApexAgentsConfig.cost_limit must be > 0, got {self.cost_limit}.")
         if self.max_toolbelt_size < 1:
             raise ValueError(f"ApexAgentsConfig.max_toolbelt_size must be >= 1, got {self.max_toolbelt_size}.")
-        if self.max_preview_chars < 0:
-            raise ValueError(f"ApexAgentsConfig.max_preview_chars must be >= 0, got {self.max_preview_chars}.")
         if self.llm_timeout <= 0:
             raise ValueError(f"ApexAgentsConfig.llm_timeout must be > 0, got {self.llm_timeout}.")
