@@ -28,9 +28,12 @@ and a to-do list, and it must produce the requested written work.
 - **Prompts** — two of them, `system_prompt` and `task_template`. These are the
   strings rilixai optimizes.
 
-Code map: `agent/workspace.py` (the workspace + file tools),
-`agent/agent.py` (wires the tools into Stirrup and runs a task),
-`agent/prompts.py` (the seed prompts), `config.py` (model / budget knobs).
+The importable package lives under `src/harvey_lab/` (standalone src-layout
+project). Code map: `src/harvey_lab/agent/workspace.py` (the workspace + file
+tools), `src/harvey_lab/agent/agent.py` (wires the tools into Stirrup and runs a
+task), `src/harvey_lab/agent/prompts.py` (the seed prompts),
+`src/harvey_lab/config.py` (model / budget knobs). Paths below are relative to
+`src/harvey_lab/` unless noted.
 
 ### How the work is graded
 
@@ -94,8 +97,11 @@ runner does). The full GEPA optimize loop runs server-side via `rilixai run`;
 
 ## Install
 
+This recipe is a standalone uv project — set it up from its own folder:
+
 ```bash
-uv sync --all-packages --group dev
+cd harvey_lab
+uv sync --group dev
 ```
 
 Env vars (needed for any run that calls a model):
@@ -151,8 +157,8 @@ uv run python scripts/export_harvey_lab_dataset.py --tasks-root harvey-labs/task
 uv run rilixai dataset upload --name harvey-lab-dataset \
   --split train=883 --split val=123 --split test=126 scripts/_datasets/harvey_lab
 
-uv run harvey_lab/sandbox.py --build   # build + promote + trigger
-uv run harvey_lab/sandbox.py           # trigger only (current @production)
+uv run sandbox.py --build   # build + promote + trigger
+uv run sandbox.py           # trigger only (current @production)
 ```
 
 The trigger defaults to `--dataset harvey-lab-dataset@production` and
@@ -168,7 +174,7 @@ Roll back with `uv run rilixai spec promote harvey-lab v<older-sha>`.
 ## Tests
 
 ```bash
-uv run python -m pytest harvey_lab/tests -q
+uv run python -m pytest -q
 ```
 
 Hermetic — a fixture task tree + a scripted Stirrup client + a stub judge, no

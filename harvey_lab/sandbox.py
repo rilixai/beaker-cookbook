@@ -45,9 +45,15 @@ from rilixai import RilixAIClient
 load_dotenv()
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-MEMBER_PYPROJECT = REPO_ROOT / "harvey_lab" / "pyproject.toml"
-SPEC_TARGET = REPO_ROOT / "harvey_lab" / "optimization" / "spec.py"
+# This recipe is a standalone (src-layout) uv project. The importable
+# package lives under ``src/harvey_lab``; ``rilixai push`` bundles that
+# ``src`` tree (source-only mode — no pyproject at the bundle root — so
+# the build worker puts it on ``sys.path`` and the entrypoint resolves to
+# ``harvey_lab.optimization.spec``).
+PROJECT_ROOT = Path(__file__).resolve().parent
+SRC_ROOT = PROJECT_ROOT / "src"
+PROJECT_PYPROJECT = PROJECT_ROOT / "pyproject.toml"
+SPEC_TARGET = SRC_ROOT / "harvey_lab" / "optimization" / "spec.py"
 SPEC_NAME = "harvey-lab"
 SCOPE_KEY = "harvey-lab"
 TASK_TYPE = "harvey_lab"
@@ -63,7 +69,7 @@ DEFAULT_DATASET_REFERENCE = f"{SPEC_NAME}-dataset@production"
 def _short_sha() -> str:
     try:
         result = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+            ["git", "-C", str(PROJECT_ROOT), "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
             check=True,
@@ -82,14 +88,15 @@ def _is_bundle_provided(dep: str) -> bool:
     return name.startswith(_BUNDLE_PROVIDED_PREFIXES)
 
 
-def _member_pip_deps() -> list[str]:
-    """Read the harvey_lab member's runtime deps from its pyproject.
+def _project_pip_deps() -> list[str]:
+    """Read this recipe's runtime deps from its pyproject.
 
-    The rilixai build worker only sees the bundle-root pyproject when it runs
-    ``pip install /spec``, so the member's deps are shoveled in via
-    ``--pip-install``. ``rilixai`` (baked into the image) is stripped.
+    The bundle is source-only (only the ``src`` tree, no pyproject), so
+    the build worker doesn't resolve dependencies itself — they're
+    shoveled in via ``--pip-install``. ``rilixai`` (baked into the image)
+    is stripped.
     """
-    data = tomllib.loads(MEMBER_PYPROJECT.read_text())
+    data = tomllib.loads(PROJECT_PYPROJECT.read_text())
     deps = data["project"]["dependencies"]
     return [d for d in deps if not _is_bundle_provided(d)]
 
@@ -97,7 +104,7 @@ def _member_pip_deps() -> list[str]:
 def push_image(version: str) -> None:
     """Run ``rilixai push`` to build a new Modal image for this spec version."""
     pip_install_args: list[str] = []
-    for dep in _member_pip_deps():
+    for dep in _project_pip_deps():
         pip_install_args.extend(["--pip-install", dep])
     cmd = [
         "uv",
@@ -105,16 +112,11 @@ def push_image(version: str) -> None:
         "rilixai",
         "push",
         "--source-dir",
-        str(REPO_ROOT),
+        str(SRC_ROOT),
         "--name",
         SPEC_NAME,
         "--version",
         version,
-        # Exported datasets (incl. base64-embedded documents) live under
-        # scripts/_datasets/; they belong in uploaded datasets, not the spec
-        # image, so keep them out of the bundle.
-        "--exclude",
-        "scripts/_datasets/*",
         *pip_install_args,
         str(SPEC_TARGET),
     ]

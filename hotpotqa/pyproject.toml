@@ -8,18 +8,9 @@ license = "MIT"
 authors = [{ name = "rilixai" }]
 dependencies = [
   # NOTE: temporary git+url pin while rilixai is not yet published to
-  # PyPI at the needed version. Once a fresh rilixai is published,
-  # swap this to ``rilixai==X.Y.Z`` plus a matching
-  # ``[[tool.uv.index]]`` block + ``[tool.uv.sources]`` mapping.
-  # Pinned to the rilixai PR #24 merge commit on main: brings
-  # ``spec promote`` / ``@production`` resolution + the components
-  # writeback fix. SSH URL (not HTTPS) so CI auth flows through
-  # ``RILIXAI_GITHUB_SSH_KEY`` via webfactory's ssh-agent action —
-  # matches the rilix repo's auth pattern.
+  # PyPI at the needed version. SSH URL (not HTTPS) so CI auth flows
+  # through ``RILIXAI_GITHUB_SSH_KEY`` via webfactory's ssh-agent action.
   "rilixai @ git+ssh://git@github.com/rilixai/rilixai.git@28ea6f1380b30e65a85232c312fed9ac088baa86#subdirectory=packages/rilixai",
-  # Shared, recipe-agnostic helpers (local eval loop + CLI plumbing);
-  # resolved from the workspace (see root ``[tool.uv.sources]``).
-  "cookbook-common",
   "pydantic-ai>=0.0.20",
   "rank-bm25>=0.2",
   "datasets>=2.14",
@@ -29,31 +20,67 @@ dependencies = [
   "huggingface-hub>=0.20",
 ]
 
+[dependency-groups]
+dev = [
+  "ruff",
+  "mypy",
+  "pytest",
+  "pytest-asyncio>=0.23",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-# The package is the workspace member directory itself. Remap so
-# everything under "." installs at the top-level ``hotpotqa`` import
-# path; exclude dev/test/script assets from the wheel.
-sources = { "." = "hotpotqa" }
-include = [
-  "__init__.py",
-  "*.py",
-  "agent/**/*.py",
-  "data/**/*.py",
-  "optimization/**/*.py",
-]
-exclude = [
-  "tests/**",
-  "scripts/**",
-  "pyproject.toml",
-  "README.md",
-]
+# src-layout: the importable package is ``src/hotpotqa``. Dev/test/script
+# assets live at the project root (outside ``src``) and are excluded from
+# the wheel by construction.
+packages = ["src/hotpotqa"]
 
 [tool.hatch.metadata]
-# Allow the ``rilixai @ git+https://…`` direct reference in
-# ``project.dependencies`` until the cookbook can swap to a PyPI
-# version pin.
+# Allow the ``rilixai @ git+ssh://...`` direct reference in
+# ``project.dependencies`` until the cookbook can swap to a PyPI version pin.
 allow-direct-references = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+
+[tool.ruff]
+line-length = 119
+
+[tool.ruff.lint]
+ignore = ["C901", "E501", "E721", "E741", "F402", "F823"]
+select = ["C", "E", "F", "I", "W", "UP006", "UP007", "UP045"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402", "F401", "F403", "F811"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+show_error_codes = true
+files = ["src/hotpotqa"]
+
+[[tool.mypy.overrides]]
+module = [
+  "rank_bm25",
+  "datasets",
+  "bm25s",
+  "Stemmer",
+]
+ignore_missing_imports = true

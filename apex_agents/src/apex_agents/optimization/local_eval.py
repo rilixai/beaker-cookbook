@@ -1,4 +1,4 @@
-"""SDK-only local evaluation loop (Shape B), shared across cookbook recipes.
+"""SDK-only local evaluation loop (Shape B) for this recipe.
 
 The full GEPA reflect/propose loop lives in the optional ``rilixai-runtime``
 package and runs server-side for hosted ``rilixai run`` triggers. The
@@ -10,7 +10,7 @@ and aggregate the spec scorer's per-field scores + objective.
 It backs each recipe's ``cli.py evaluate`` and mirrors what the hosted runner
 does when it scores a single candidate, without pulling in the optimizer
 engine. The loop is generic over the spec (it touches only the ``rilixai``
-contract types), so both recipes share this one implementation.
+contract types); each recipe keeps its own copy so the folder is self-contained.
 """
 
 from __future__ import annotations

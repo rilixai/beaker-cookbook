@@ -65,11 +65,15 @@ from rilixai import RilixAIClient
 load_dotenv()
 
 
-# Cookbook layout the script is hardwired against. This file lives at
-# ``apex_agents/sandbox.py``; parents[1] is the cookbook repo root.
-REPO_ROOT = Path(__file__).resolve().parents[1]
-MEMBER_PYPROJECT = REPO_ROOT / "apex_agents" / "pyproject.toml"
-SPEC_TARGET = REPO_ROOT / "apex_agents" / "optimization" / "spec.py"
+# This recipe is a standalone (src-layout) uv project. The importable
+# package lives under ``src/apex_agents``; ``rilixai push`` bundles that
+# ``src`` tree (source-only mode — no pyproject at the bundle root — so
+# the build worker puts it on ``sys.path`` and the entrypoint resolves to
+# ``apex_agents.optimization.spec``).
+PROJECT_ROOT = Path(__file__).resolve().parent
+SRC_ROOT = PROJECT_ROOT / "src"
+PROJECT_PYPROJECT = PROJECT_ROOT / "pyproject.toml"
+SPEC_TARGET = SRC_ROOT / "apex_agents" / "optimization" / "spec.py"
 SPEC_NAME = "apex-agents"
 SCOPE_KEY = "apex-agents"
 TASK_TYPE = "apex_agent"
@@ -93,7 +97,7 @@ def _short_sha() -> str:
     """
     try:
         result = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+            ["git", "-C", str(PROJECT_ROOT), "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
             check=True,
@@ -105,46 +109,38 @@ def _short_sha() -> str:
 
 
 # Requirements the sandbox image already provides without an index install:
-# ``rilixai`` (baked in by the build worker) and ``cookbook-common`` (a
-# workspace member installed by the bundle-root ``pip install /spec``). Both
-# are matched by normalized distribution name (``_`` / ``-`` insensitive).
+# ``rilixai`` is baked in by the build worker. Matched by normalized
+# distribution name (``_`` / ``-`` insensitive).
 _BUNDLE_PROVIDED_PREFIXES = ("rilixai",)
-_BUNDLE_PROVIDED_NAMES = ("cookbook-common",)
 
 
 def _is_bundle_provided(dep: str) -> bool:
     """True if ``dep`` is already in the image and must not be ``--pip-install``ed."""
     name = re.split(r"[<>=!~;\[ ]", dep.strip(), maxsplit=1)[0].strip().lower().replace("_", "-")
-    return name.startswith(_BUNDLE_PROVIDED_PREFIXES) or name in _BUNDLE_PROVIDED_NAMES
+    return name.startswith(_BUNDLE_PROVIDED_PREFIXES)
 
 
-def _member_pip_deps() -> list[str]:
-    """Read the apex_agents workspace member's runtime deps from its pyproject.
+def _project_pip_deps() -> list[str]:
+    """Read this recipe's runtime deps from its pyproject.
 
-    The rilixai build worker only sees the *bundle root* pyproject
-    when it runs ``pip install /spec``; the workspace member's
-    pyproject is invisible to it. So we shovel the member's deps in
-    via ``--pip-install`` explicitly. Reading them here keeps the dep
-    list from drifting between ``apex_agents/pyproject.toml`` and the
-    push invocation.
+    The bundle is source-only (only the ``src`` tree, no pyproject),
+    so the build worker doesn't resolve dependencies itself. We shovel
+    the deps in via ``--pip-install`` explicitly. Reading them here
+    keeps the dep list from drifting between ``apex_agents/pyproject.toml``
+    and the push invocation.
 
     ``rilixai`` is stripped because rilixai's build worker bakes its
     own pinned wheel into every spec image — customer pins for
-    rilixai are rejected. ``cookbook-common`` is stripped because it is
-    a workspace member with no index release: the bundle-root ``pip
-    install /spec`` already installs it (the root pyproject's setuptools
-    package list includes ``cookbook_common*``), so passing it to
-    ``--pip-install`` would send the build worker looking for a
-    nonexistent PyPI release.
+    rilixai are rejected.
     """
-    data = tomllib.loads(MEMBER_PYPROJECT.read_text())
+    data = tomllib.loads(PROJECT_PYPROJECT.read_text())
     deps = data["project"]["dependencies"]
     return [d for d in deps if not _is_bundle_provided(d)]
 
 
 def push_image(version: str) -> None:
     """Run ``rilixai push`` to build a new Modal image for this spec version."""
-    deps = _member_pip_deps()
+    deps = _project_pip_deps()
     pip_install_args: list[str] = []
     for dep in deps:
         pip_install_args.extend(["--pip-install", dep])
@@ -154,7 +150,7 @@ def push_image(version: str) -> None:
         "rilixai",
         "push",
         "--source-dir",
-        str(REPO_ROOT),
+        str(SRC_ROOT),
         "--name",
         SPEC_NAME,
         "--version",
@@ -198,19 +194,21 @@ def trigger_run(
         # to the currently promoted dataset revision.
         dataset_ref=dataset_reference,
         config={
-            # GEPA per-run knobs (consumed by rilixai's sandbox runtime).
+            # Launch contract: the top level holds only optimizer-owned settings
+            # (rilixai rejects unknown keys). ``max_metric_calls`` is the primary
+            # budget knob; the reflection model / minibatch / seed are chosen by
+            # the server-side recipe preset and are no longer set from here.
             "max_metric_calls": max_metric_calls,
-            "reflection_minibatch_size": 3,
-            "reflection_model": "openai/gpt-4.1",
-            "seed": 0,
-            # APEX-Agents cookbook knobs (consumed by build_spec in spec.py).
+            # Everything the recipe's ``build_spec`` needs travels under ``extra``.
             # The domain subset + train/val split come from the uploaded
             # dataset, so no domain/train_size/val_size/val_worlds knobs here.
-            "task_model": "openai/gpt-4.1-mini-2025-04-14",
-            "task_temperature": 0.0,
-            "judge_model": "gemini/gemini-2.5-flash",
-            "max_steps": 60,
-            "cost_limit": 3.0,
+            "extra": {
+                "task_model": "openai/gpt-4.1-mini-2025-04-14",
+                "task_temperature": 0.0,
+                "judge_model": "gemini/gemini-2.5-flash",
+                "max_steps": 60,
+                "cost_limit": 3.0,
+            },
         },
     )
     return str(response["id"])

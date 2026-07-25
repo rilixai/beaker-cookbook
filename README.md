@@ -14,29 +14,33 @@ production setups.*
 ## Recipes
 
 ```
+harvey_lab/       Legal deliverables — Stirrup-harnessed agent on Harvey's public LAB tasks
 hotpotqa/         Multi-hop QA — PydanticAI tool-using agent (retrieve_k + summarize)
-apex_agents/      (planned follow-up)
+apex_agents/      Law / IB analyst tasks — ReAct toolbelt agent on Mercor's APEX-Agents
 ```
 
-Each folder contains everything you need to reproduce the recipe: a
-README with the canonical reproduce commands and expected scores, a
-local CLI (`cli.py`) for fast iteration on your laptop, an optional
-Modal sandbox path (`sandbox.py`) for hosted runs at scale, and a
-hermetic test suite so you can verify the harness end-to-end before
-spending anything on LLM calls.
+Each folder is a **self-contained integrated demo**: a complete agent
+plus its rilixai integration, with nothing shared across recipes. A
+folder contains everything you need to reproduce the recipe — a README
+that explains the agent first and then how rilixai plugs in, a local
+CLI (`cli.py`) for fast iteration on your laptop, an optional Modal
+sandbox path (`sandbox.py`) for hosted runs at scale, and a hermetic
+test suite so you can verify the harness end-to-end before spending
+anything on LLM calls.
 
 ## Quick start
 
-Requires Python 3.12+ and [`uv`](https://docs.astral.sh/uv/). The
-cookbook is a uv workspace, so a single command installs every recipe
-together:
+Requires Python 3.12+ and [`uv`](https://docs.astral.sh/uv/). Each
+recipe is its own standalone uv project (its own `pyproject.toml` and
+`uv.lock`), so you set up and run one recipe entirely from its folder —
+there is no root workspace to install:
 
 ```bash
-uv sync --all-packages --group dev
+cd hotpotqa            # or harvey_lab / apex_agents
+uv sync --group dev
 ```
 
-From there each recipe is independently runnable — pick one and
-follow the commands in its README.
+From there follow the commands in that recipe's README.
 
 ## Configuration
 
@@ -80,9 +84,12 @@ fetch them at runtime.
 
 ## Development
 
+Run the checks from within a recipe folder (each recipe is standalone):
+
 ```bash
-uv sync --all-packages --group dev
-uv run python -m pytest -q     # all recipes' tests
+cd hotpotqa            # or harvey_lab / apex_agents
+uv sync --group dev
+uv run python -m pytest -q
 uv run ruff check
 uv run ruff format --check
 uv run python -m mypy

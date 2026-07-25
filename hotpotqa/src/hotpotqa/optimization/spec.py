@@ -90,16 +90,20 @@ def build_spec(ctx: OptimizationContext) -> Spec:
     side version bumps for routine deploys.
 
     Under the SDK-only shape the optimizer sources cases from the
-    uploaded JSONL dataset via :class:`HotpotQADataLoader`; the agent
-    knobs still come from ``ctx.config`` (merged over
-    :data:`_DEFAULT_SANDBOX_CONFIG`).
+    uploaded JSONL dataset via :class:`HotpotQADataLoader`. The recipe's
+    agent knobs travel under ``ctx.config["extra"]`` (the launch
+    contract reserves the top level for optimizer-owned settings), merged
+    over :data:`_DEFAULT_SANDBOX_CONFIG`. When the optimizer selects a
+    task model it arrives as ``ctx.model`` and overrides the configured
+    ``pydantic_agent_model``.
     """
-    cfg_in: dict[str, Any] = {**_DEFAULT_SANDBOX_CONFIG, **dict(ctx.config or {})}
+    extra = dict(ctx.config.get("extra") or {}) if ctx.config else {}
+    cfg_in: dict[str, Any] = {**_DEFAULT_SANDBOX_CONFIG, **extra}
     hotpot_cfg = HotpotQAConfig(
         retrieval_mode=cfg_in["retrieval_mode"],
         retrieve_k=int(cfg_in["retrieve_k"]),
         max_iters=int(cfg_in["max_iters"]),
-        pydantic_agent_model=str(cfg_in["pydantic_agent_model"]),
+        pydantic_agent_model=str(ctx.model) if ctx.model else str(cfg_in["pydantic_agent_model"]),
         pydantic_agent_temperature=float(cfg_in["task_temperature"]),
     )
     return build_hotpotqa_spec(config=hotpot_cfg)

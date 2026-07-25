@@ -55,7 +55,8 @@ from apex_agents.optimization.metrics import (
     score_rubric,
 )
 from apex_agents.optimization.spec import build_apex_agents_spec
-from apex_agents.tests.fake_world import FakeWorld, fake_world_factory
+
+from .fake_world import FakeWorld, fake_world_factory
 
 
 def _task_row(idx: int, **overrides: Any) -> dict[str, Any]:

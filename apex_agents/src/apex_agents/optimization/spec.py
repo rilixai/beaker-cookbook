@@ -107,13 +107,17 @@ def build_spec(ctx: OptimizationContext) -> Spec:
     version bumps for routine deploys.
 
     Under the SDK-only shape the optimizer sources cases from the
-    uploaded JSONL dataset via :class:`ApexAgentsDataLoader`; the
-    ReAct-agent knobs still come from ``ctx.config`` (merged over
-    :data:`_DEFAULT_SANDBOX_CONFIG`).
+    uploaded JSONL dataset via :class:`ApexAgentsDataLoader`. The
+    recipe's ReAct-agent knobs travel under ``ctx.config["extra"]`` (the
+    launch contract reserves the top level for optimizer-owned
+    settings), merged over :data:`_DEFAULT_SANDBOX_CONFIG`. When the
+    optimizer selects a task model it arrives as ``ctx.model`` and
+    overrides the configured ``task_model``.
     """
-    cfg_in: dict[str, Any] = {**_DEFAULT_SANDBOX_CONFIG, **dict(ctx.config or {})}
+    extra = dict(ctx.config.get("extra") or {}) if ctx.config else {}
+    cfg_in: dict[str, Any] = {**_DEFAULT_SANDBOX_CONFIG, **extra}
     apex_cfg = ApexAgentsConfig(
-        task_model=str(cfg_in["task_model"]),
+        task_model=str(ctx.model) if ctx.model else str(cfg_in["task_model"]),
         task_temperature=float(cfg_in["task_temperature"]),
         judge_model=str(cfg_in["judge_model"]),
         max_steps=int(cfg_in["max_steps"]),

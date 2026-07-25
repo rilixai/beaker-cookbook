@@ -1,10 +1,10 @@
 """Shared ``cli.py`` plumbing for the cookbook recipes.
 
-Both recipes' local CLIs (``validate`` / ``evaluate``) need the same
-candidate-JSON loading, spec-validation logging, and eval-report serialization.
-This module holds that recipe-agnostic glue so the two CLIs don't copy it
-verbatim; the only recipe-specific inputs are passed in as arguments (the seed
-targets and the spec/logger).
+The local CLI (``validate`` / ``evaluate``) needs candidate-JSON loading,
+spec-validation logging, and eval-report serialization. This module holds that
+recipe-agnostic glue; the only recipe-specific inputs are passed in as arguments
+(the seed targets and the spec/logger). Each recipe keeps its own copy so the
+folder is self-contained.
 """
 
 from __future__ import annotations
