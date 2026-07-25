@@ -1,10 +1,10 @@
-"""Tunable knobs for the Harvey LAB recipe.
+"""Tunable knobs for the Harvey LAB agent + evaluation.
 
-A single frozen dataclass holds every model / budget / timeout knob so
-the CLI, the sandbox trigger, and the hosted ``build_spec`` all thread
-the same shape. Defaults mirror the Harvey LAB-AA harness where it makes
-sense (an ``analyze``-heavy legal benchmark with long, document-grounded
-tasks) while staying cheap enough for a smoke run.
+A single frozen dataclass holds every model / budget / timeout knob so the
+CLI and the evaluator thread the same shape. Defaults mirror the Harvey
+LAB-AA harness where it makes sense (an ``analyze``-heavy legal benchmark
+with long, document-grounded tasks) while staying cheap enough for a smoke
+run.
 """
 
 from __future__ import annotations
@@ -12,9 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-# Pinned upstream commit of ``harveyai/harvey-labs`` the task documents are
-# fetched from at runtime (see ``agent/workspace.py``). Pinning a commit keeps
-# a spec version reproducible even as the upstream benchmark grows.
+# The upstream ``harveyai/harvey-labs`` commit these defaults were calibrated
+# against. Clone the benchmark at this commit for reproducible runs (the tasks
+# grow over time); the CLI reads it from your local checkout's ``tasks/`` dir.
 HARVEY_LABS_REPO = "harveyai/harvey-labs"
 HARVEY_LABS_COMMIT = "f46ef86e4788545622db25dcffa3aebb7a139929"
 

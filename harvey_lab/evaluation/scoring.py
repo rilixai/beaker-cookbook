@@ -7,19 +7,13 @@ criterion names (deliverable-scoped context — LAB tasks carry ~60 criteria,
 so scoping keeps judging cost bounded). The headline benchmark metric is
 **all-pass**: a task scores ``1.0`` iff every criterion passes, else ``0.0``.
 
-Two fields are emitted per task:
+Two numbers come out per task:
 
-* ``all_pass`` (0/1) — the LAB-AA headline metric, reported as-is.
+* ``all_pass`` (0/1) — the LAB-AA headline metric.
 * ``criterion_pass_rate`` (continuous) — the fraction of criteria that
-  passed. This is the **optimizer objective**: all-pass is an extremely
-  sparse signal on a ~60-criterion task (one missed criterion zeroes the
-  whole task), so GEPA optimizes the dense per-criterion rate while all-pass
-  is tracked alongside as the metric of record. See the README for the
-  rationale and how to flip the objective back to all-pass.
-
-The runtime owns the judge calls (it has the deliverables + criteria), so by
-the time :class:`HarveyLabScorer` runs both floats are already on the
-result; the scorer just plumbs them through the rilixai metrics protocol.
+  passed. It is a denser view of the same grading (all-pass is very sparse
+  on a ~60-criterion task: one missed criterion zeroes the whole task), so
+  the evaluator reports both.
 """
 
 from __future__ import annotations
@@ -30,19 +24,12 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from rilixai import Case, CaseResult, CaseScore, objective_score
-
 
 logger = logging.getLogger(__name__)
 
 
 ALL_PASS_FIELD = "all_pass"
 CRITERION_PASS_RATE_FIELD = "criterion_pass_rate"
-
-# Weight the objective on the DENSE per-criterion rate (see module docstring).
-# ``all_pass`` is scored + reported but carries no objective weight, so GEPA
-# gets a usable gradient while the headline metric is still tracked.
-HARVEY_LAB_FIELD_WEIGHTS: dict[str, float] = {CRITERION_PASS_RATE_FIELD: 1.0}
 
 DEFAULT_JUDGE_MODEL = "gemini/gemini-3.5-flash"
 DEFAULT_JUDGE_TIMEOUT_S = 120.0
@@ -254,50 +241,12 @@ def score_all_pass(
     }
 
 
-def _bounded(value: Any) -> float:
-    try:
-        score = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-    return max(0.0, min(1.0, score))
-
-
-class HarveyLabScorer:
-    """rilixai :class:`CaseScorer` for the ``all_pass`` + ``criterion_pass_rate`` fields.
-
-    The runtime precomputes both floats (it ran the per-criterion judge), so
-    this scorer reads them back, clamps to ``[0, 1]``, and collapses the
-    objective onto the dense ``criterion_pass_rate`` field. A ``None`` marks an
-    unscoreable case (no criteria): the field map is emptied so the case is
-    excluded from the aggregates instead of counting as a real ``0.0``.
-    """
-
-    def __init__(self, field_weights: Mapping[str, float] | None = None) -> None:
-        self.field_weights: dict[str, float] = dict(field_weights or HARVEY_LAB_FIELD_WEIGHTS)
-
-    async def score_case(self, *, case: Case, result: CaseResult) -> CaseScore:
-        del case
-        output = result.output if isinstance(result.output, Mapping) else {}
-        if output.get(CRITERION_PASS_RATE_FIELD, False) is None:
-            return CaseScore(field_scores={}, objective=0.0, key=ALL_PASS_FIELD)
-        field_scores = {
-            ALL_PASS_FIELD: _bounded(output.get(ALL_PASS_FIELD)),
-            CRITERION_PASS_RATE_FIELD: _bounded(output.get(CRITERION_PASS_RATE_FIELD)),
-        }
-        return CaseScore(
-            field_scores=field_scores,
-            objective=objective_score(field_scores, field_weights=self.field_weights),
-            key=ALL_PASS_FIELD,
-        )
-
-
 __all__ = [
     "ALL_PASS_FIELD",
     "CRITERION_PASS_RATE_FIELD",
     "DEFAULT_JUDGE_MODEL",
-    "HARVEY_LAB_FIELD_WEIGHTS",
+    "DEFAULT_MAX_DELIVERABLE_CHARS",
     "CriterionJudge",
-    "HarveyLabScorer",
     "build_criterion_judge",
     "score_all_pass",
 ]

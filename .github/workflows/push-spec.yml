@@ -27,7 +27,6 @@ on:
     paths:
       - 'hotpotqa/**'
       - 'apex_agents/**'
-      - 'harvey_lab/**'
       - '.github/workflows/push-spec.yml'
   workflow_dispatch:
     inputs:
@@ -66,8 +65,6 @@ jobs:
               - 'hotpotqa/**'
             apex_agents:
               - 'apex_agents/**'
-            harvey_lab:
-              - 'harvey_lab/**'
             root:
               - '.github/workflows/push-spec.yml'
 
@@ -83,19 +80,16 @@ jobs:
           ROOT_CHANGED: ${{ steps.filter.outputs.root }}
           HOTPOTQA_CHANGED: ${{ steps.filter.outputs.hotpotqa }}
           APEX_CHANGED: ${{ steps.filter.outputs.apex_agents }}
-          HARVEY_CHANGED: ${{ steps.filter.outputs.harvey_lab }}
         run: |
           set -euo pipefail
           HOTPOTQA='{"dir":"hotpotqa","agent":"hotpotqa-agent"}'
           APEX='{"dir":"apex_agents","agent":"apex-agents"}'
-          HARVEY='{"dir":"harvey_lab","agent":"harvey-lab"}'
           if [ "${EVENT_NAME}" = "workflow_dispatch" ] || [ "${ROOT_CHANGED}" = "true" ]; then
-            MEMBERS=$(jq -c -n --argjson h "$HOTPOTQA" --argjson a "$APEX" --argjson v "$HARVEY" '[$h, $a, $v]')
+            MEMBERS=$(jq -c -n --argjson h "$HOTPOTQA" --argjson a "$APEX" '[$h, $a]')
           else
             MEMBERS='[]'
             [ "${HOTPOTQA_CHANGED}" = "true" ] && MEMBERS=$(echo "$MEMBERS" | jq -c --argjson h "$HOTPOTQA" '. + [$h]')
             [ "${APEX_CHANGED}" = "true" ] && MEMBERS=$(echo "$MEMBERS" | jq -c --argjson a "$APEX" '. + [$a]')
-            [ "${HARVEY_CHANGED}" = "true" ] && MEMBERS=$(echo "$MEMBERS" | jq -c --argjson v "$HARVEY" '. + [$v]')
           fi
           echo "members=$MEMBERS" >> "$GITHUB_OUTPUT"
           echo "selected: $MEMBERS"

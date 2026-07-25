@@ -1,4 +1,4 @@
-"""Harvey LAB dataset loading and conversion to optimizer cases.
+"""Harvey LAB dataset loading.
 
 The benchmark is Harvey's public Legal Agent Benchmark, laid out in the
 ``harveyai/harvey-labs`` GitHub repo as ``tasks/<practice_area>/<slug>/``
@@ -10,16 +10,10 @@ directories. Each task directory holds:
   binary pass/fail rubric items — ~60 per task on average).
 * ``documents/`` — the source record (contracts, memos, spreadsheets, emails).
 
-Two loading paths share one normalizer:
-
-* :func:`load_harvey_lab_records` reads task directories from a local
-  checkout (used by the export script + tests).
-* :class:`HarveyLabDataLoader` parses the exported JSONL rows a hosted
-  ``rilixai run`` streams in (the task documents are fetched at runtime by
-  the workspace's GitHub task source, keyed by ``task_id`` + ``documents``).
-
-No golden reference is materialized: the rubric ``match_criteria`` strings
-are the grading standard (an LLM judge scores each criterion pass/fail).
+:func:`load_harvey_lab_records` reads task directories from a local checkout
+into normalized :class:`HarveyLabRecord` objects. No golden reference is
+materialized: the rubric ``match_criteria`` strings are the grading standard
+(an LLM judge scores each criterion pass/fail).
 """
 
 from __future__ import annotations
@@ -27,53 +21,12 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from rilixai import Case, CaseDataLoader, DatasetRowContext, DatasetSchema
-
 
 logger = logging.getLogger(__name__)
-
-
-# Ground-truth key the scorer reads the rubric bundle back from.
-_HARVEY_LAB_GROUND_TRUTH_KEY = "__harvey_lab_rubric__"
-
-
-HARVEY_LAB_DATASET_SCHEMA = DatasetSchema(
-    json_schema={
-        "type": "object",
-        "required": ["task_id", "practice_area", "instructions", "deliverables", "criteria"],
-        "properties": {
-            "task_id": {"type": "string", "minLength": 1},
-            "practice_area": {"type": "string", "minLength": 1},
-            "title": {"type": "string"},
-            "work_type": {"type": "string"},
-            "instructions": {"type": "string"},
-            "deliverables": {"type": "object"},
-            "documents": {"type": "array", "items": {"type": "string"}},
-            # Optional: base64-encoded document bytes keyed by the same relative
-            # names as ``documents``. Present when a dataset is exported with
-            # ``--embed-documents`` so a run needs no run-time document fetch.
-            "document_blobs": {"type": "object"},
-            "criteria": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "required": ["match_criteria"],
-                    "properties": {
-                        "id": {"type": "string"},
-                        "title": {"type": "string"},
-                        "match_criteria": {"type": "string"},
-                        "deliverables": {"type": "array", "items": {"type": "string"}},
-                    },
-                },
-            },
-        },
-        "additionalProperties": True,
-    },
-)
 
 
 @dataclass(frozen=True)
@@ -92,20 +45,9 @@ class RubricCriterion:
     deliverables: tuple[str, ...]
 
 
-def _coerce_blobs(value: Any) -> dict[str, str]:
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except Exception:
-            return {}
-    if isinstance(value, Mapping):
-        return {str(k): str(v) for k, v in value.items() if v}
-    return {}
-
-
 @dataclass(frozen=True)
 class HarveyLabRecord:
-    """Normalized Harvey LAB task record used by the agent + scorer."""
+    """Normalized Harvey LAB task record used by the agent + judge."""
 
     task_id: str
     practice_area: str
@@ -116,7 +58,6 @@ class HarveyLabRecord:
     criteria: tuple[RubricCriterion, ...]
     documents: tuple[str, ...]
     raw_task: Mapping[str, Any]
-    document_blobs: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def deliverable_names(self) -> tuple[str, ...]:
@@ -177,81 +118,7 @@ def _normalize_record(raw: Mapping[str, Any], *, index_hint: int) -> HarveyLabRe
         criteria=_coerce_criteria(raw.get("criteria")),
         documents=tuple(str(d) for d in (raw.get("documents") or ()) if d),
         raw_task=dict(raw),
-        document_blobs=_coerce_blobs(raw.get("document_blobs")),
     )
-
-
-def record_to_row(record: HarveyLabRecord) -> dict[str, Any]:
-    """Serialize a record to the JSONL row shape the DataLoader parses."""
-    return {
-        "task_id": record.task_id,
-        "practice_area": record.practice_area,
-        "title": record.title,
-        "work_type": record.work_type,
-        "instructions": record.instructions,
-        "deliverables": dict(record.deliverables),
-        "documents": list(record.documents),
-        **({"document_blobs": dict(record.document_blobs)} if record.document_blobs else {}),
-        "criteria": [
-            {
-                "id": c.id,
-                "title": c.title,
-                "match_criteria": c.match_criteria,
-                "deliverables": list(c.deliverables),
-            }
-            for c in record.criteria
-        ],
-    }
-
-
-def record_to_case(record: HarveyLabRecord, *, group_key: str | None = None) -> Case:
-    """Convert a normalized record into a rilixai :class:`Case`.
-
-    Group key defaults to ``practice_area`` so splits stratify by practice
-    area (the leakage-free axis: a GEPA-optimized prompt is validated on
-    practice areas it did not train on). The ground-truth bundle carries the
-    rubric criteria + deliverables map + task metadata the runtime's judge
-    needs after the agent finishes.
-    """
-    resolved_group = group_key or (record.practice_area or "harvey_lab")
-    criteria_payload = [
-        {"id": c.id, "title": c.title, "match_criteria": c.match_criteria, "deliverables": list(c.deliverables)}
-        for c in record.criteria
-    ]
-    bundle = {
-        "task_id": record.task_id,
-        "title": record.title,
-        "instructions": record.instructions,
-        "deliverables": dict(record.deliverables),
-        "criteria": criteria_payload,
-    }
-    ground_truth = {**bundle, _HARVEY_LAB_GROUND_TRUTH_KEY: bundle}
-    return Case(
-        input=record,
-        case_id=record.task_id,
-        ground_truth=ground_truth,
-        group_key=resolved_group,
-        metadata={
-            "practice_area": record.practice_area,
-            "title": record.title,
-            "work_type": record.work_type,
-            "num_criteria": len(record.criteria),
-            "num_documents": len(record.documents),
-        },
-    )
-
-
-def cases_from_records(
-    records: Iterable[Mapping[str, Any] | HarveyLabRecord],
-    *,
-    group_key: str | None = None,
-) -> list[Case]:
-    """Build optimizer cases from raw or normalized records."""
-    cases: list[Case] = []
-    for idx, raw in enumerate(records):
-        record = raw if isinstance(raw, HarveyLabRecord) else _normalize_record(raw, index_hint=idx)
-        cases.append(record_to_case(record, group_key=group_key))
-    return cases
 
 
 def load_harvey_lab_records(
@@ -265,7 +132,7 @@ def load_harvey_lab_records(
     ``tasks_root`` is the repo's ``tasks/`` directory. Walks
     ``<practice_area>/<slug>/task.json`` in stable sorted order (no shuffle —
     the splitter is the single source of randomness), attaching the sorted
-    ``documents/`` filenames so the runtime task source can fetch them.
+    ``documents/`` filenames alongside the task metadata.
     """
     base = Path(tasks_root)
     if not base.is_dir():
@@ -295,58 +162,14 @@ def load_harvey_lab_records(
     return records
 
 
-def attach_document_blobs(record: HarveyLabRecord, tasks_root: str | Path) -> HarveyLabRecord:
-    """Return a copy of ``record`` with each document's bytes base64-embedded.
-
-    Reads the files under ``<tasks_root>/<task_id>/documents/`` named by
-    ``record.documents`` so a dataset exported with ``--embed-documents`` is
-    fully self-contained (no run-time fetch). Missing files are skipped.
-    """
-    import base64
-    from dataclasses import replace
-
-    docs_dir = Path(tasks_root) / record.task_id / "documents"
-    blobs: dict[str, str] = {}
-    for name in record.documents:
-        path = docs_dir / name
-        if path.is_file():
-            blobs[name] = base64.b64encode(path.read_bytes()).decode("ascii")
-    return replace(record, document_blobs=blobs)
-
-
-class HarveyLabDataLoader(CaseDataLoader[HarveyLabRecord]):
-    """Typed rilixai data loader over exported Harvey LAB JSONL rows."""
-
-    dataset_schema = HARVEY_LAB_DATASET_SCHEMA
-
-    def parse_row(self, raw: Mapping[str, Any], context: DatasetRowContext) -> HarveyLabRecord:
-        return _normalize_record(raw, index_hint=context.line_number or 0)
-
-    def iter_cases(self, row: HarveyLabRecord, context: DatasetRowContext) -> Iterable[Case]:
-        del context
-        yield record_to_case(row)
-
-
-def practice_areas_for_cases(cases: Iterable[Case]) -> list[str]:
-    """Return the sorted distinct practice-area group keys across cases."""
-    seen: set[str] = set()
-    for case in cases:
-        area = str(case.metadata.get("practice_area") or case.group_key or "")
-        if area:
-            seen.add(area)
-    return sorted(seen)
+def practice_areas_for_records(records: Iterable[HarveyLabRecord]) -> list[str]:
+    """Return the sorted distinct practice areas across records."""
+    return sorted({r.practice_area for r in records if r.practice_area})
 
 
 __all__ = [
-    "HARVEY_LAB_DATASET_SCHEMA",
-    "HarveyLabDataLoader",
     "HarveyLabRecord",
     "RubricCriterion",
-    "_HARVEY_LAB_GROUND_TRUTH_KEY",
-    "attach_document_blobs",
-    "cases_from_records",
     "load_harvey_lab_records",
-    "practice_areas_for_cases",
-    "record_to_case",
-    "record_to_row",
+    "practice_areas_for_records",
 ]

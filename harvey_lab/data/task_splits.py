@@ -2,25 +2,25 @@
 
 LAB tasks are grouped into practice areas (25 in the full benchmark:
 contracts, corporate-ma, tax, litigation, …). Splitting at the
-*practice-area* level — rather than the task level — keeps train and
-held-out areas disjoint, so a GEPA-optimized prompt is validated on legal
-domains it never saw during optimization (a leakage-free measure).
-
-Mirrors ``apex_agents/data/world_splits.py`` (worlds → practice areas):
+*practice-area* level — rather than the task level — keeps held-out areas
+disjoint from the rest, so an evaluation on a held-out pool measures
+cross-domain behavior (a leakage-free measure).
 
 * :func:`fixed_val_split` — a fixed cross-area validation pool used by
   ``evaluate --split validation``.
 * :func:`stratified_case_cap` — round-robin cap that keeps the area set as
   wide as possible (``evaluate --test-size``).
 
-All helpers are deterministic given their ``(cases, …, seed)`` inputs.
+All helpers are deterministic given their ``(records, …, seed)`` inputs and
+group by each record's ``practice_area``.
 """
 
 from __future__ import annotations
 
 import random as _random
 from collections.abc import Sequence
-from typing import Any
+
+from .dataset import HarveyLabRecord
 
 
 __all__ = [
@@ -29,16 +29,16 @@ __all__ = [
 ]
 
 
-def _group_by_area(cases: Sequence[Any]) -> dict[str, list[Any]]:
-    by_area: dict[str, list[Any]] = {}
-    for case in cases:
-        by_area.setdefault(str(getattr(case, "group_key", "") or ""), []).append(case)
+def _group_by_area(records: Sequence[HarveyLabRecord]) -> dict[str, list[HarveyLabRecord]]:
+    by_area: dict[str, list[HarveyLabRecord]] = {}
+    for record in records:
+        by_area.setdefault(record.practice_area, []).append(record)
     return by_area
 
 
-def _round_robin_take(groups: list[list[Any]], n: int) -> list[Any]:
+def _round_robin_take(groups: list[list[HarveyLabRecord]], n: int) -> list[HarveyLabRecord]:
     """Take ``n`` items round-robin across ``groups`` (stratified, stable)."""
-    out: list[Any] = []
+    out: list[HarveyLabRecord] = []
     idx = 0
     while len(out) < n:
         progressed = False
@@ -55,12 +55,12 @@ def _round_robin_take(groups: list[list[Any]], n: int) -> list[Any]:
 
 
 def fixed_val_split(
-    cases: Sequence[Any],
+    cases: Sequence[HarveyLabRecord],
     *,
     n_val_areas: int,
     val_size: int | None,
     seed: int = 0,
-) -> tuple[list[Any], list[Any], set[str]]:
+) -> tuple[list[HarveyLabRecord], list[HarveyLabRecord], set[str]]:
     """Carve a FIXED cross-practice-area validation pool from the case set.
 
     The validation set depends ONLY on ``(cases, n_val_areas, val_size,
@@ -86,15 +86,15 @@ def fixed_val_split(
     _random.Random(seed).shuffle(shuffled)
     val_area_ids = set(shuffled[:n_val])
 
-    train_pool: list[Any] = []
-    val_pool_by_area: list[list[Any]] = []
+    train_pool: list[HarveyLabRecord] = []
+    val_pool_by_area: list[list[HarveyLabRecord]] = []
     for area in areas:  # stable sorted order
         if area in val_area_ids:
             val_pool_by_area.append(by_area[area])
         else:
             train_pool.extend(by_area[area])
 
-    val_cases: list[Any] = [c for group in val_pool_by_area for c in group]
+    val_cases: list[HarveyLabRecord] = [c for group in val_pool_by_area for c in group]
     if val_size is not None and val_size > 0 and len(val_cases) > val_size:
         val_cases = _round_robin_take(val_pool_by_area, val_size)
 
@@ -104,11 +104,11 @@ def fixed_val_split(
 
 
 def stratified_case_cap(
-    train_pool: Sequence[Any],
+    train_pool: Sequence[HarveyLabRecord],
     n: int | None,
     *,
     seed: int = 0,
-) -> list[Any]:
+) -> list[HarveyLabRecord]:
     """Cap the pool to ``n`` cases, round-robin across practice areas.
 
     Keeps the practice-area set as wide as possible at every ``n`` — the
@@ -122,7 +122,7 @@ def stratified_case_cap(
         return pool
     by_area = _group_by_area(pool)
     rng = _random.Random(seed)
-    groups: list[list[Any]] = []
+    groups: list[list[HarveyLabRecord]] = []
     for area in sorted(by_area):
         group = by_area[area]
         rng.shuffle(group)

@@ -1,6 +1,6 @@
-"""Seed prompts for the Harvey LAB legal agent.
+"""Prompts for the Harvey LAB legal agent.
 
-Two optimizable components:
+Two prompts drive the agent:
 
 * ``system_prompt`` — the agent's system message: the workspace layout,
   the file-tool conventions, and the working method a legal knowledge
@@ -11,22 +11,15 @@ Two optimizable components:
 * ``task_template`` — the first user message. Two Jinja2 variables are
   substituted per task: ``{{instructions}}`` (the task prompt) and
   ``{{deliverables}}`` (the newline list of output filenames the rubric
-  grades). Both placeholders MUST survive optimization — the runtime
-  renders them and a candidate that drops one would hand the agent a
-  task with no instructions or no deliverable list.
+  grades). The runtime renders both; if a variant drops one, the agent
+  falls back to appending the raw value so it always receives the task.
 
-The seeds are adapted from Harvey's reference ``harness/system_prompt.md``
-(trimmed to the tools this recipe exposes) so the agent's behavior tracks
-the LAB-AA harness the benchmark is calibrated against.
+The prompts are adapted from Harvey's reference ``harness/system_prompt.md``
+(trimmed to the tools this agent exposes) so its behavior tracks the
+LAB-AA harness the benchmark is calibrated against.
 """
 
 from __future__ import annotations
-
-from rilixai import OptimizationTargets, optimization_targets_from_prompts
-
-
-SYSTEM_PROMPT_COMPONENT = "system_prompt"
-TASK_TEMPLATE_COMPONENT = "task_template"
 
 
 SYSTEM_PROMPT_SEED = """You are a legal AI agent completing a task inside a workspace.
@@ -61,8 +54,7 @@ a detailed rubric, and each criterion must be satisfied on its own merits.
 5. Call `finish` only when all requested deliverables are present."""
 
 
-# The runtime renders {{instructions}} + {{deliverables}} per task; both
-# placeholders must survive optimization (the spec's build enforces this).
+# The runtime renders {{instructions}} + {{deliverables}} per task.
 TASK_TEMPLATE_SEED = """{{instructions}}
 
 ## Requested deliverables
@@ -71,26 +63,13 @@ Write the following file(s) to `output/`, using the exact filename(s):
 {{deliverables}}"""
 
 
-def harvey_lab_seed_targets() -> OptimizationTargets:
-    """Return the seed :class:`OptimizationTargets` for the Harvey LAB agent."""
-    return optimization_targets_from_prompts(
-        {
-            SYSTEM_PROMPT_COMPONENT: SYSTEM_PROMPT_SEED,
-            TASK_TEMPLATE_COMPONENT: TASK_TEMPLATE_SEED,
-        }
-    )
-
-
-def load_harvey_lab_seed_prompts() -> tuple[str, str]:
-    """Return ``(system_prompt, task_template)`` seeds."""
+def load_harvey_lab_prompts() -> tuple[str, str]:
+    """Return the ``(system_prompt, task_template)`` prompt pair."""
     return SYSTEM_PROMPT_SEED, TASK_TEMPLATE_SEED
 
 
 __all__ = [
-    "SYSTEM_PROMPT_COMPONENT",
     "SYSTEM_PROMPT_SEED",
-    "TASK_TEMPLATE_COMPONENT",
     "TASK_TEMPLATE_SEED",
-    "harvey_lab_seed_targets",
-    "load_harvey_lab_seed_prompts",
+    "load_harvey_lab_prompts",
 ]
