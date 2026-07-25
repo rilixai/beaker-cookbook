@@ -1,27 +1,20 @@
 [project]
 name = "harvey-lab"
 version = "0.1.0"
-description = "GEPA-optimized, Stirrup-harnessed legal agent on Harvey's Legal Agent Benchmark (LAB)."
+description = "A Stirrup-harnessed legal agent on Harvey's Legal Agent Benchmark (LAB), with local rubric evaluation."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "rilixai" }]
 dependencies = [
-  # NOTE: temporary git+url pin while rilixai is not yet published to
-  # PyPI at the needed version. Pinned to the same rilixai commit the
-  # other cookbook members use. SSH URL (not HTTPS) so CI auth flows
-  # through ``RILIXAI_GITHUB_SSH_KEY`` via webfactory's ssh-agent action.
-  "rilixai @ git+ssh://git@github.com/rilixai/rilixai.git@28ea6f1380b30e65a85232c312fed9ac088baa86#subdirectory=packages/rilixai",
   # Stirrup — Artificial Analysis' agent harness the LAB-AA leaderboard
   # runs on; supplies the tool-use loop + LLM routing. The litellm extra
   # pulls in the multi-provider client the task model is routed through.
   "stirrup[litellm]>=0.1.12",
   "litellm>=1.74",
-  # litellm lazy-imports tenacity for its retry wrapper but doesn't declare
-  # it; the baked sandbox image has nothing else pulling it in, so pin it.
+  # litellm lazy-imports tenacity for its retry wrapper but doesn't declare it.
   "tenacity>=8.0",
-  # The agent's structured verdict models use pydantic directly. rilixai
-  # dropped its transitive pydantic dep at v0.2.2, so declare it explicitly.
+  # The agent's structured tool-parameter models use pydantic directly.
   "pydantic>=2,<3",
   # Heavy document parsers — lazy-imported inside the workspace read surface
   # so hermetic tests (fixture text files) don't pay the import cost.
@@ -48,7 +41,7 @@ include = [
   "*.py",
   "agent/**/*.py",
   "data/**/*.py",
-  "optimization/**/*.py",
+  "evaluation/**/*.py",
 ]
 exclude = [
   "tests/**",
@@ -57,13 +50,8 @@ exclude = [
   "README.md",
 ]
 
-[tool.hatch.metadata]
-# Allow the ``rilixai @ git+ssh://...`` direct reference in
-# ``project.dependencies`` until the cookbook can swap to a PyPI version pin.
-allow-direct-references = true
-
 # Dev tooling + lint/type/test config live in this recipe's own pyproject so
-# the folder is a self-contained project (no root workspace pyproject).
+# the folder is a self-contained project.
 
 [dependency-groups]
 dev = [
@@ -115,8 +103,8 @@ show_error_codes = true
 files = ["../harvey_lab"]
 exclude = ["(^|/)tests/", "(^|/)scripts/"]
 
-# ``ignore_missing_imports`` for the scientific/agent deps that ship without
-# ``py.typed`` markers (mirrors the rilixai-side overrides).
+# ``ignore_missing_imports`` for the agent/parser deps that ship without
+# ``py.typed`` markers.
 [[tool.mypy.overrides]]
 module = [
   "stirrup",

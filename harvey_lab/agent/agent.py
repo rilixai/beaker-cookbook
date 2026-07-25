@@ -4,32 +4,27 @@ Stirrup (Artificial Analysis' agent framework) supplies the tool-use loop,
 context management, and message plumbing; this module supplies the
 *domain*: a per-task :class:`~harvey_lab.agent.workspace.TaskWorkspace` and
 the file tools a legal knowledge worker uses over it (read documents,
-search, write / edit deliverables). The two optimizable prompt components
-(``system_prompt`` + ``task_template``) are the GEPA targets.
+search, write / edit deliverables).
 
 Why Stirrup rather than a hand-rolled ReAct loop (as ``apex_agents`` uses)?
 It is the harness Artificial Analysis' Harvey LAB-AA leaderboard runs on,
-so building the recipe on it keeps the agent's control flow aligned with
-the benchmark's published numbers. The LLM client is pluggable: production
-uses Stirrup's LiteLLM client (so the same ``provider/model`` strings as the
-apex recipe work); tests inject a scripted client and never hit the network.
+so building on it keeps the agent's control flow aligned with the
+benchmark's published numbers. The LLM client is pluggable: production
+uses Stirrup's LiteLLM client (so any ``provider/model`` string LiteLLM
+routes to works); tests inject a scripted client and never hit the network.
 """
 
 from __future__ import annotations
 
-import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from ..config import HarveyLabConfig
-from .prompts import (
-    SYSTEM_PROMPT_COMPONENT,
-    TASK_TEMPLATE_COMPONENT,
-    load_harvey_lab_seed_prompts,
-)
+from ..data.dataset import HarveyLabRecord
+from .prompts import load_harvey_lab_prompts
 from .types import HarveyLabAgentOutput
 from .workspace import TaskSource, TaskWorkspace
 
@@ -50,9 +45,8 @@ def _default_model_factory(model: str, temperature: float, max_tokens: int) -> A
 def _render_task_template(task_template: str, *, instructions: str, deliverables: str) -> str:
     """Substitute the ``{{instructions}}`` + ``{{deliverables}}`` Jinja2 vars.
 
-    A candidate may reframe the template but both variables must survive; if a
-    candidate drops one, the raw value is appended so the agent still receives
-    it (mirrors the apex ``{{task}}`` fallback).
+    If the template is missing a variable, its raw value is appended so the
+    agent still receives it (mirrors the apex ``{{task}}`` fallback).
     """
     rendered = task_template
     for name, value in (("instructions", instructions), ("deliverables", deliverables)):
@@ -176,9 +170,9 @@ def _build_workspace_tools(workspace: TaskWorkspace) -> list[Any]:
 class HarveyLabAgent:
     """A Stirrup-driven legal agent with a per-task file workspace.
 
-    ``apply_candidate`` swaps the two optimizable prompt components; ``forward``
-    materializes the task workspace, runs the Stirrup loop, and returns the
-    produced deliverables for the rubric judge.
+    ``forward`` materializes the task workspace, runs the Stirrup loop under
+    the agent's ``system_prompt`` + ``task_template``, and returns the produced
+    deliverables for the rubric judge.
     """
 
     def __init__(
@@ -187,94 +181,31 @@ class HarveyLabAgent:
         config: HarveyLabConfig,
         task_source: TaskSource,
         model_factory: ModelFactory | None = None,
+        system_prompt: str | None = None,
+        task_template: str | None = None,
     ) -> None:
         self._config = config
         self._task_source = task_source
         self._model_factory = model_factory or _default_model_factory
-        seed_system, seed_task = load_harvey_lab_seed_prompts()
-        # Immutable seed defaults — the fallback when a caller does not pass
-        # explicit candidate ``components`` into ``forward`` (never mutated).
-        self._seed_system_prompt = seed_system
-        self._seed_task_template = seed_task
-        # Legacy shared prompt buffer for the ``apply_candidate``-then-``forward``
-        # path. A single agent instance is reused across concurrent ``run_case``
-        # calls on worker *threads*, so this is shared mutable state: the per-op
-        # lock stops a ``forward`` snapshot reading a half-written pair, but not
-        # a concurrent case swapping in a *different* candidate between another
-        # case's ``apply_candidate`` and its ``forward``. The production path
-        # passes the candidate straight into ``forward`` instead (race-free); the
-        # buffer is kept lock-guarded only for the legacy ``components=None`` path.
-        self._system_prompt = seed_system
-        self._task_template = seed_task
-        self._build_lock = threading.Lock()
-
-    def apply_candidate(self, components: Mapping[str, str]) -> None:
-        """Update the stashed prompt components from an optimizer candidate."""
-        system = components.get(SYSTEM_PROMPT_COMPONENT)
-        task = components.get(TASK_TEMPLATE_COMPONENT)
-        with self._build_lock:
-            if system is not None:
-                self._system_prompt = system
-            if task is not None:
-                self._task_template = task
-
-    def _snapshot_components(self) -> tuple[str, str]:
-        with self._build_lock:
-            return self._system_prompt, self._task_template
-
-    def _resolve_components(self, components: Mapping[str, str] | None) -> tuple[str, str]:
-        """Resolve the prompts for one run.
-
-        When ``components`` is supplied (production path) they are read directly
-        — no shared state — so parallel rollouts of different candidates on the
-        reused agent stay isolated. A component absent from the candidate falls
-        back to the immutable seed default, not the shared buffer.
-        ``components=None`` uses the lock-guarded legacy buffer.
-        """
-        if components is None:
-            return self._snapshot_components()
-        system = components.get(SYSTEM_PROMPT_COMPONENT)
-        task = components.get(TASK_TEMPLATE_COMPONENT)
-        return (
-            system if system is not None else self._seed_system_prompt,
-            task if task is not None else self._seed_task_template,
-        )
+        default_system, default_task = load_harvey_lab_prompts()
+        self._system_prompt = system_prompt if system_prompt is not None else default_system
+        self._task_template = task_template if task_template is not None else default_task
 
     @property
-    def current_system_prompt(self) -> str:
-        with self._build_lock:
-            return self._system_prompt
+    def system_prompt(self) -> str:
+        return self._system_prompt
 
     @property
-    def current_task_template(self) -> str:
-        with self._build_lock:
-            return self._task_template
+    def task_template(self) -> str:
+        return self._task_template
 
-    async def forward(
-        self,
-        *,
-        record: Any,
-        components: Mapping[str, str] | None = None,
-        model: str | None = None,
-    ) -> HarveyLabAgentOutput:
+    async def forward(self, *, record: HarveyLabRecord) -> HarveyLabAgentOutput:
         from stirrup import Agent
 
-        # Resolve the candidate prompts for THIS run. Passing ``components``
-        # (production path) reads them directly with no shared mutable state, so
-        # concurrent cases evaluating different candidates on the reused agent
-        # can't cross-contaminate. ``components=None`` falls back to the
-        # lock-guarded legacy ``apply_candidate`` buffer.
-        system_prompt, task_template = self._resolve_components(components)
-
-        # Optional rilixai model-selection seam: when the optimizer hands a model
-        # in for this rollout (e.g. a multi-model benchmark) use it for this run
-        # only; otherwise fall back to the recipe's own production task model.
-        task_model = model or self._config.task_model
-
-        deliverable_lines = "\n".join(f"- `{name}`" for name in getattr(record, "deliverable_names", ()))
+        deliverable_lines = "\n".join(f"- `{name}`" for name in record.deliverable_names)
         user_prompt = _render_task_template(
-            task_template,
-            instructions=str(getattr(record, "instructions", "")),
+            self._task_template,
+            instructions=record.instructions,
             deliverables=deliverable_lines or "- `response.md`",
         )
 
@@ -282,21 +213,21 @@ class HarveyLabAgent:
         started = time.monotonic()
         try:
             client = self._model_factory(
-                task_model,
+                self._config.task_model,
                 self._config.task_temperature,
                 self._config.max_output_tokens,
             )
             agent: Any = Agent(
                 client=client,
                 name="harvey-lab",
-                system_prompt=system_prompt,
+                system_prompt=self._system_prompt,
                 tools=_build_workspace_tools(workspace),
                 finish_tool=_build_finish_tool(),
                 max_turns=self._config.max_turns,
             )
-            # cache_on_interrupt=False: the hosted optimizer runs cases in worker
-            # threads, where Stirrup's default SIGINT handler raises
-            # "signal only works in main thread of the main interpreter".
+            # cache_on_interrupt=False: the eval may run cases in worker threads,
+            # where Stirrup's default SIGINT handler raises "signal only works in
+            # main thread of the main interpreter".
             async with agent.session(output_dir=workspace.output_dir, cache_on_interrupt=False) as session:
                 finish_params, history, _metadata = await session.run(user_prompt)
             deliverables = workspace.collect_deliverables()

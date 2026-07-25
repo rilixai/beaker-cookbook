@@ -34,16 +34,14 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-# Per-case factory: ``(record) -> TaskWorkspace``. Production fetches the task
-# documents from the pinned upstream commit; tests inject a fixture-backed one.
+# Per-case factory: ``(record) -> TaskWorkspace``. Backed by a local
+# ``harvey-labs`` checkout; tests inject a fixture-backed one.
 TaskSource = Callable[[Any], "TaskWorkspace"]
 
 
 __all__ = [
     "TaskSource",
     "TaskWorkspace",
-    "build_bundled_task_source",
-    "build_github_task_source",
     "task_source_from_dir",
     "task_source_from_mapping",
 ]
@@ -267,8 +265,8 @@ def task_source_from_dir(tasks_root: str | Path, *, max_document_chars: int = 20
 
     ``tasks_root`` is a directory laid out like ``harveyai/harvey-labs``:
     ``<practice_area>/<slug>/documents/*``. The record's ``task_id`` is the
-    ``<practice_area>/<slug>`` path. Used by the export script and by tests
-    (which point it at a fixture tree) — fully offline.
+    ``<practice_area>/<slug>`` path. Fully offline (used by the CLI + tests,
+    which point it at a fixture tree).
     """
     base = Path(tasks_root)
 
@@ -278,131 +276,10 @@ def task_source_from_dir(tasks_root: str | Path, *, max_document_chars: int = 20
         task_id = str(getattr(record, "task_id", "") or "")
         src_docs = base / task_id / "documents"
         ws = TaskWorkspace(tempfile.mkdtemp(prefix="harvey_lab_"), max_document_chars=max_document_chars)
-        # Clean up the temp tree if the copy fails partway (don't leak on error),
-        # mirroring the github/bundled factories.
+        # Clean up the temp tree if the copy fails partway (don't leak on error).
         try:
             if src_docs.is_dir():
                 shutil.copytree(src_docs, ws.documents_dir, dirs_exist_ok=True)
-        except BaseException:
-            ws.close()
-            raise
-        return ws
-
-    return _factory
-
-
-def build_github_task_source(
-    *,
-    repo: str,
-    commit: str,
-    max_document_chars: int = 200_000,
-) -> TaskSource:
-    """Build a factory that fetches a task's documents from a pinned commit.
-
-    Mirrors the apex recipe's HF world factory: production runs pull the
-    per-task ``documents/`` from ``raw.githubusercontent.com/<repo>/<commit>/
-    tasks/<task_id>/documents/<file>`` (the LAB benchmark is a public repo),
-    materialize them into a temp :class:`TaskWorkspace`, and return it. The
-    document filenames come from ``record.documents`` (recorded at export time),
-    so no directory-listing API call is needed. Imported lazily + behind a
-    factory so tests never hit the network.
-    """
-
-    def _factory(record: Any) -> TaskWorkspace:
-        import tempfile
-
-        task_id = str(getattr(record, "task_id", "") or "")
-        documents: tuple[str, ...] = tuple(getattr(record, "documents", ()) or ())
-        ws = TaskWorkspace(tempfile.mkdtemp(prefix="harvey_lab_"), max_document_chars=max_document_chars)
-        # Clean up the temp tree if a fetch fails partway (don't leak on error).
-        try:
-            for name in documents:
-                url = f"https://raw.githubusercontent.com/{repo}/{commit}/tasks/{task_id}/documents/{name}"
-                dest = ws.documents_dir / name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(_fetch_bytes(url))
-        except BaseException:
-            ws.close()
-            raise
-        return ws
-
-    return _factory
-
-
-# raw.githubusercontent.com rate-limits unauthenticated requests; many cases
-# fetch concurrently, so a bare urlopen hits HTTP 429. Retry transient failures
-# (429 + 5xx + connection errors) with exponential backoff honouring
-# ``Retry-After`` when present.
-_FETCH_MAX_ATTEMPTS = 6
-_FETCH_BASE_DELAY = 2.0
-_FETCH_MAX_DELAY = 60.0
-
-
-def _fetch_bytes(url: str) -> bytes:
-    import random
-    import time
-    import urllib.error
-    import urllib.request
-
-    last_exc: Exception | None = None
-    for attempt in range(_FETCH_MAX_ATTEMPTS):
-        req = urllib.request.Request(url, headers={"User-Agent": "harvey-lab-cookbook/1.0"})
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 - pinned https host
-                return bytes(resp.read())
-        except urllib.error.HTTPError as exc:
-            if exc.code != 429 and exc.code < 500:
-                raise
-            last_exc = exc
-            retry_after = exc.headers.get("Retry-After") if exc.headers else None
-            delay = float(retry_after) if retry_after and retry_after.isdigit() else None
-        except urllib.error.URLError as exc:
-            last_exc = exc
-            delay = None
-        if attempt == _FETCH_MAX_ATTEMPTS - 1:
-            break
-        if delay is None:
-            delay = min(_FETCH_BASE_DELAY * (2**attempt), _FETCH_MAX_DELAY)
-        time.sleep(delay + random.uniform(0, 1.0))
-    raise RuntimeError(f"Failed to fetch {url} after {_FETCH_MAX_ATTEMPTS} attempts") from last_exc
-
-
-def build_bundled_task_source(
-    *,
-    repo: str,
-    commit: str,
-    max_document_chars: int = 200_000,
-) -> TaskSource:
-    """Build a task source that prefers documents bundled in the dataset row.
-
-    When a record carries ``document_blobs`` (a dataset exported with
-    ``--embed-documents``), the documents are materialized straight from the
-    base64 payload — no network. Any document named in ``record.documents``
-    that has no embedded blob is fetched from the pinned commit, so a
-    partially-embedded row still ends up with a complete ``documents/`` tree;
-    a row with no blobs at all fetches everything.
-    """
-    import base64
-
-    def _factory(record: Any) -> TaskWorkspace:
-        import tempfile
-
-        task_id = str(getattr(record, "task_id", "") or "")
-        documents: tuple[str, ...] = tuple(getattr(record, "documents", ()) or ())
-        blobs: Mapping[str, str] = getattr(record, "document_blobs", {}) or {}
-        # Fetch any document that isn't embedded (all of them when no blobs).
-        missing = [name for name in documents if name not in blobs]
-        ws = TaskWorkspace(tempfile.mkdtemp(prefix="harvey_lab_"), max_document_chars=max_document_chars)
-        try:
-            for name, payload in blobs.items():
-                dest = ws.documents_dir / name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(base64.b64decode(payload))
-            for name in missing:
-                url = f"https://raw.githubusercontent.com/{repo}/{commit}/tasks/{task_id}/documents/{name}"
-                dest = ws.documents_dir / name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(_fetch_bytes(url))
         except BaseException:
             ws.close()
             raise
