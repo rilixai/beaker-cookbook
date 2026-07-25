@@ -1,14 +1,9 @@
-"""Runtime configuration for the HotpotQA agent benchmark.
+"""Runtime configuration for the HotpotQA agent.
 
-``HotpotQAConfig`` is the single knob bag the CLI, the runtime adapter,
-and the spec all share. Lives at the top level (as a peer of ``cli.py``)
-because it's consumed by both the CLI and the optimization runtime —
-keeping it here avoids a cycle between ``cli.py`` and
-``optimization/runtime.py``.
-
-(Renamed from ``HotpotQAPipelineConfig`` post-workflow-deletion — the
-"Pipeline" qualifier was disambiguating against the deleted DSPy
-workflow; with one runtime there's no ambiguity left.)
+``HotpotQAConfig`` is the single knob bag the CLI, the agent, and the
+evaluation all share. Lives at the top level (as a peer of ``cli.py``)
+so neither ``agent/`` nor ``evaluation/`` has to import the other's
+module just to read a setting.
 """
 
 from __future__ import annotations
@@ -23,8 +18,8 @@ def to_pydantic_ai_model(spec: str) -> str:
     PydanticAI model specs use a colon separator (``"openai:gpt-4.1-mini"``),
     while the ``--task-model`` CLI flag and the litellm ecosystem use a slash
     (``"openai/gpt-4.1-mini"``). Historically the slash→colon rewrite lived in
-    the CLI only, so a slash-form model reaching the runtime via sandbox config
-    or a direct spec build produced an invalid PydanticAI spec. Normalizing here
+    the CLI only, so a slash-form model reaching the agent from any other
+    caller produced an invalid PydanticAI spec. Normalizing here
     — the one layer every path funnels through (``HotpotQAConfig``) — makes the
     rewrite source-independent. Only the first separator is rewritten so model
     names that legitimately contain a slash are preserved.
@@ -58,17 +53,17 @@ class HotpotQAConfig:
     """Knobs for the HotpotQA agent runtime.
 
     ``retrieval_mode`` chooses the retrieval corpus the agent sees.
-    ``fullwiki`` mirrors the GEPA paper's setup (bm25s over the 2017
-    Wikipedia abstracts); ``distractor`` is the HF
+    ``fullwiki`` searches a bm25s index over the 2017 Wikipedia
+    abstracts dump (the HotpotQA open-domain setting); ``distractor`` is the HF
     ``hotpot_qa[distractor]`` 10-paragraph-per-case shape, useful as a
     test-friendly opt-out.
 
     ``retrieve_k`` is the number of paragraphs returned per retrieval
-    call. The paper uses ``k=7``.
+    call (default ``7``).
 
     ``max_iters`` caps the agent-loop length;
-    ``pydantic_agent_model`` is the PydanticAI model spec when no
-    pre-built agent is supplied.
+    ``pydantic_agent_model`` is the PydanticAI model spec the CLI builds
+    the agent from.
     """
 
     retrieval_mode: RetrievalMode = "fullwiki"
@@ -82,9 +77,9 @@ class HotpotQAConfig:
 
     def __post_init__(self) -> None:
         # Canonicalize the model spec to PydanticAI colon form regardless of
-        # source (CLI slash form, sandbox config, or a direct build) so the
-        # runtime never sees an invalid slash-form PydanticAI spec. ``frozen``
-        # dataclass → assign through ``object.__setattr__``.
+        # source (CLI slash form or a direct build) so the agent never sees an
+        # invalid slash-form PydanticAI spec. ``frozen`` dataclass → assign
+        # through ``object.__setattr__``.
         if self.pydantic_agent_model is not None:
             object.__setattr__(self, "pydantic_agent_model", to_pydantic_ai_model(self.pydantic_agent_model))
         if self.retrieve_k < 1:

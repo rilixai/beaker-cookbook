@@ -1,23 +1,16 @@
 [project]
 name = "hotpotqa"
 version = "0.1.0"
-description = "GEPA-optimized PydanticAI agent on the HotpotQA multi-hop QA task."
+description = "A PydanticAI tool-using agent on the HotpotQA multi-hop QA task, with local evaluation."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "rilixai" }]
 dependencies = [
-  # NOTE: temporary git+url pin while rilixai is not yet published to
-  # PyPI at the needed version. Once a fresh rilixai is published,
-  # swap this to ``rilixai==X.Y.Z`` plus a matching
-  # ``[[tool.uv.index]]`` block + ``[tool.uv.sources]`` mapping.
-  # Pinned to the rilixai PR #24 merge commit on main: brings
-  # ``spec promote`` / ``@production`` resolution + the components
-  # writeback fix. SSH URL (not HTTPS) so CI auth flows through
-  # ``RILIXAI_GITHUB_SSH_KEY`` via webfactory's ssh-agent action —
-  # matches the rilix repo's auth pattern.
-  "rilixai @ git+ssh://git@github.com/rilixai/rilixai.git@28ea6f1380b30e65a85232c312fed9ac088baa86#subdirectory=packages/rilixai",
+  # The agent loop, its tools, and the structured answer terminator.
   "pydantic-ai>=0.0.20",
+  # Retrieval: rank-bm25 over a case's distractor paragraphs, bm25s (+
+  # PyStemmer, ujson) over the fullwiki abstracts dump.
   "rank-bm25>=0.2",
   "datasets>=2.14",
   "bm25s>=0.2",
@@ -44,7 +37,7 @@ include = [
   "*.py",
   "agent/**/*.py",
   "data/**/*.py",
-  "optimization/**/*.py",
+  "evaluation/**/*.py",
 ]
 exclude = [
   "tests/**",
@@ -53,14 +46,8 @@ exclude = [
   "README.md",
 ]
 
-[tool.hatch.metadata]
-# Allow the ``rilixai @ git+https://…`` direct reference in
-# ``project.dependencies`` until the cookbook can swap to a PyPI
-# version pin.
-allow-direct-references = true
-
-# Dev tooling + lint/type/test config live in this recipe's own pyproject so
-# the folder is a self-contained project (no root workspace pyproject).
+# Dev tooling + lint/type/test config live in this project's own pyproject so
+# the folder is self-contained.
 
 [dependency-groups]
 dev = [
@@ -113,7 +100,7 @@ files = ["../hotpotqa"]
 exclude = ["(^|/)tests/", "(^|/)scripts/"]
 
 # ``ignore_missing_imports`` for the scientific deps that ship without
-# ``py.typed`` markers (mirrors the rilixai-side overrides).
+# ``py.typed`` markers.
 [[tool.mypy.overrides]]
 module = [
   "rank_bm25",

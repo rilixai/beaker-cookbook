@@ -37,18 +37,18 @@ jobs:
       - name: Install Python
         run: uv python install
 
-      # hotpotqa + apex_agents still depend on the private rilixai/rilixai
-      # repo via a ``git+ssh://`` pin; auth flows via a deploy-key-style SSH
-      # private key in ``RILIXAI_GITHUB_SSH_KEY``. harvey_lab is standalone
-      # (no rilixai dependency), so it skips the SSH setup entirely.
+      # apex_agents still depends on the private rilixai/rilixai repo via a
+      # ``git+ssh://`` pin; auth flows via a deploy-key-style SSH private key
+      # in ``RILIXAI_GITHUB_SSH_KEY``. harvey_lab and hotpotqa are standalone
+      # (no rilixai dependency), so they skip the SSH setup entirely.
       - name: Configure SSH for private rilixai dependency
-        if: matrix.recipe != 'harvey_lab'
+        if: matrix.recipe != 'harvey_lab' && matrix.recipe != 'hotpotqa'
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.RILIXAI_GITHUB_SSH_KEY }}
 
       - name: Trust GitHub SSH host
-        if: matrix.recipe != 'harvey_lab'
+        if: matrix.recipe != 'harvey_lab' && matrix.recipe != 'hotpotqa'
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan github.com >> ~/.ssh/known_hosts
@@ -99,13 +99,13 @@ jobs:
         run: uv python install
 
       - name: Configure SSH for private rilixai dependency
-        if: matrix.recipe != 'harvey_lab'
+        if: matrix.recipe != 'harvey_lab' && matrix.recipe != 'hotpotqa'
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.RILIXAI_GITHUB_SSH_KEY }}
 
       - name: Trust GitHub SSH host
-        if: matrix.recipe != 'harvey_lab'
+        if: matrix.recipe != 'harvey_lab' && matrix.recipe != 'hotpotqa'
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan github.com >> ~/.ssh/known_hosts

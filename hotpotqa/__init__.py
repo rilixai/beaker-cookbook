@@ -1,15 +1,15 @@
-"""HotpotQA — PydanticAI tool-using agent + rilixai GEPA optimization.
+"""HotpotQA — a PydanticAI tool-using agent + a local evaluation.
 
-The multi-hop QA task wrapped as the kind of agent a customer would
-actually write in PydanticAI: two tools
+The multi-hop QA task wrapped as the kind of agent you'd actually write
+in PydanticAI: two tools
 (``retrieve_k(query)`` + ``summarize(question, passages, context=None)``)
-and a structured Pydantic answer terminator. Two optimizable
-components — ``policy_prompt`` + ``summarize_prompt`` — get rewritten
-by rilixai's GEPA loop.
+and a structured Pydantic answer terminator, steered by two prompts
+(``policy_prompt`` + ``summarize_prompt``).
 
-Retrieval is pluggable: ``fullwiki`` (paper parity — bm25s over the
+Retrieval is pluggable: ``fullwiki`` (open-domain — bm25s over the
 2017 Wikipedia abstracts dump) or ``distractor`` (HF
-``hotpot_qa[distractor]`` 10-paragraph corpus, opt-out for tests).
+``hotpot_qa[distractor]`` 10-paragraph corpus, the cheap option for
+tests).
 
 Layout (each subpackage groups one concern):
 
@@ -17,67 +17,73 @@ Layout (each subpackage groups one concern):
   ``retrieve_k`` tool implementation under :mod:`.agent.retrieval`).
 * :mod:`hotpotqa.data` — raw HotpotQA primitives (dataset loader,
   official scorer, supporting-fact helpers).
-* :mod:`hotpotqa.optimization` — GEPA-facing surface (spec, runtime
-  adapter, metrics aggregator, per-component feedback strings).
-* :mod:`hotpotqa.config` — :class:`HotpotQAConfig` shared by the CLI
-  and the runtime.
+* :mod:`hotpotqa.evaluation` — scoring + the bounded-concurrency batch
+  evaluator and its JSON reports.
+* :mod:`hotpotqa.config` — :class:`HotpotQAConfig` shared by the CLI,
+  the agent, and the evaluation.
 * :mod:`hotpotqa.cli` — command-line entry point.
 """
 
 from .agent.prompts import (
     DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
     DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
-    hotpotqa_pydantic_agent_seed_targets,
+    hotpotqa_default_prompts,
 )
 from .agent.types import AgentToolCall, HotpotQAAgentOutput
 from .config import HotpotQAConfig
 from .data.dataset import (
-    HotpotQADataLoader,
+    HotpotQAParagraph,
     HotpotQARecord,
-    cases_from_records,
     load_hotpotqa_paper_split,
     load_hotpotqa_split,
-    record_to_case,
+    records_from_raw,
 )
 from .data.eval import exact_match_score, f1_score, f1_score_components, normalize_answer
-from .optimization.feedback import build_agent_per_component_feedback
-from .optimization.local_eval import LocalEvalReport, run_local_evaluation
-from .optimization.metrics import (
+from .evaluation.local_eval import (
+    EvalReport,
+    evaluate_agent_on_records,
+    evaluate_record,
+    run_agent_on_record,
+    run_evaluation,
+)
+from .evaluation.report import eval_summary, write_json
+from .evaluation.scoring import (
     ANSWER_F1_FIELD,
     ANSWER_FIELD,
     HOTPOTQA_FIELD_WEIGHTS,
     SUPPORTING_TITLES_RECALL_FIELD,
-    HotpotQAScorer,
+    objective_score,
+    score_prediction,
 )
-from .optimization.runtime import build_hotpotqa_run_case
-from .optimization.spec import build_hotpotqa_spec
 
 
 __all__ = [
     "ANSWER_F1_FIELD",
     "ANSWER_FIELD",
-    "AgentToolCall",
     "DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT",
     "DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT",
     "HOTPOTQA_FIELD_WEIGHTS",
+    "SUPPORTING_TITLES_RECALL_FIELD",
+    "AgentToolCall",
+    "EvalReport",
     "HotpotQAAgentOutput",
     "HotpotQAConfig",
-    "HotpotQADataLoader",
+    "HotpotQAParagraph",
     "HotpotQARecord",
-    "HotpotQAScorer",
-    "LocalEvalReport",
-    "SUPPORTING_TITLES_RECALL_FIELD",
-    "build_agent_per_component_feedback",
-    "build_hotpotqa_run_case",
-    "build_hotpotqa_spec",
-    "cases_from_records",
+    "eval_summary",
+    "evaluate_agent_on_records",
+    "evaluate_record",
     "exact_match_score",
     "f1_score",
     "f1_score_components",
-    "hotpotqa_pydantic_agent_seed_targets",
+    "hotpotqa_default_prompts",
     "load_hotpotqa_paper_split",
     "load_hotpotqa_split",
     "normalize_answer",
-    "record_to_case",
-    "run_local_evaluation",
+    "objective_score",
+    "records_from_raw",
+    "run_agent_on_record",
+    "run_evaluation",
+    "score_prediction",
+    "write_json",
 ]

@@ -1,114 +1,151 @@
 # HotpotQA
 
-The HotpotQA multi-hop QA benchmark as a PydanticAI tool-using agent,
-optimized by rilixai's GEPA loop.
+A self-contained **multi-hop question-answering agent** and a local evaluation
+harness for it. The agent searches Wikipedia, chains evidence across several
+paragraphs, and answers questions from
+[HotpotQA](https://hotpotqa.github.io/) — then gets scored on exact match,
+answer F1, and whether it actually retrieved the gold supporting paragraphs.
 
-- **Agent** — a tool-using PydanticAI loop with two tools, terminating on a
-  Pydantic `HotpotQAOutput`.
-  - `retrieve_k(query)` — deterministic BM25 / fullwiki paragraph retrieval.
-  - `summarize(question, passages, context=None)` — raw `AsyncOpenAI` call so
-    the optimized prompt is visible at the call site.
-- **Optimized prompts** — `policy_prompt` (the agent's `system_prompt`) and
+## The agent
+
+A plain [PydanticAI](https://ai.pydantic.dev/) tool-using agent
+(`agent/agent.py`). One question in, one short answer out.
+
+- **Task** — a HotpotQA question whose answer requires *hopping*: find one
+  paragraph, learn a bridging entity from it, search again, then answer.
+- **Tools** — two of them:
+  - `retrieve_k(query)` — deterministic BM25 retrieval returning the top-`k`
+    Wikipedia paragraphs not yet seen this case.
+  - `summarize(question, passages, context=None)` — an LLM condensation of the
+    retrieved passages. It's a direct `AsyncOpenAI.chat.completions` call (not a
+    hidden sub-agent), so the prompt that lands in the API call is visible right
+    at the call site. The agent decides whether to feed a previous summary back
+    in as `context`.
+- **Loop** — PydanticAI drives tool dispatch; the agent terminates by emitting
+  the structured `HotpotQAOutput.answer`, so there is no `finish` tool.
+  `max_iters` caps the number of model requests.
+- **Prompts** — two, both overridable at construction (`agent/prompts.py`):
+  `policy_prompt` (the agent's `system_prompt` / tool-use policy) and
   `summarize_prompt` (the summarize tool's system message).
-- **Score** — exact-match + F1 against the gold answer.
+- **Retrieval corpus** — pluggable via `--retrieval`:
+  - `fullwiki` (default) — bm25s over the 2017 Wikipedia abstracts dump: the
+    open-domain setting, where retrieval is a real part of the problem.
+  - `distractor` — the HF `hotpot_qa[distractor]` per-case 10-paragraph
+    context: cheap, offline-friendly, and the mode the tests use.
 
-Retrieval is pluggable: `fullwiki` (paper parity, bm25s over the 2017
-Wikipedia abstracts dump) or `distractor` (HF `hotpot_qa[distractor]`,
-10 paragraphs/case — fast and test-friendly).
+Code map:
+
+| Path | What it holds |
+|---|---|
+| `agent/agent.py` | the PydanticAI agent, its two tools, and the trajectory it records |
+| `agent/prompts.py` | the two default prompts |
+| `agent/retrieval/` | the `retrieve_k` implementations (case-local BM25, fullwiki bm25s) |
+| `data/dataset.py` | HotpotQA loading + the typed `HotpotQARecord` |
+| `data/eval.py` | the canonical HotpotQA answer normalizer / EM / F1 |
+| `evaluation/scoring.py` | per-case field scoring + the weighted objective |
+| `evaluation/local_eval.py` | the bounded-concurrency batch evaluator |
+| `evaluation/report.py` | the JSON artifacts |
+| `config.py` | retrieval / model / loop-budget knobs |
+| `cli.py` | run the agent, or run + score it |
+
+## How answers are scored
+
+Three fields per case (`evaluation/scoring.py`):
+
+- `answer` — exact match (0/1) after HotpotQA's canonical normalization
+  (lowercase, strip articles and punctuation).
+- `answer_f1` — token-level F1 against the gold answer, HotpotQA's denser
+  answer metric.
+- `supporting_titles_recall` — the fraction of the gold supporting paragraph
+  titles the agent retrieved at any hop. This is the multi-hop signal: it says
+  whether the evidence was ever found, independent of the final wording.
+
+The objective is **pure exact match** by default
+(`HOTPOTQA_FIELD_WEIGHTS`), matching how HotpotQA numbers are usually reported;
+the other two fields are computed and reported as diagnostics. Pass different
+`field_weights` to blend them.
+
+The batch evaluator (`evaluation/local_eval.py`) runs cases concurrently,
+bounded by `--max-concurrency`. One case failing never aborts the batch: it is
+recorded with its error and counts as `0` (a real failure must deflate, never
+inflate, the metrics). A case with no supervision at all (no gold answer and no
+gold supporting titles) is **unscoreable** and dropped from the averages
+instead.
+
+## The data
+
+Records come from the HuggingFace
+[`hotpotqa/hotpot_qa`](https://huggingface.co/datasets/hotpotqa/hotpot_qa)
+dataset and are normalized into a plain typed `HotpotQARecord`.
+
+`load_hotpotqa_paper_split` reproduces the standard benchmark slicing so
+numbers stay comparable with published HotpotQA results: take the HotpotQA
+*train* split (90k questions), slice `[0, 40%)` → test, `[40%, 80%)` →
+validation, `[80%, 100%)` → train, then subsample each slice with
+`random.Random(1)`. The defaults are the usual 300 test / 300 validation
+cases.
 
 ## Install
 
-This recipe is a standalone uv project; run all commands from this directory:
+Standalone [uv](https://docs.astral.sh/uv/) project; run everything from this
+directory:
 
 ```bash
 cd hotpotqa
 uv sync --group dev
 ```
 
-Env vars (needed for any run that calls a model):
+Provider key (needed for any run that calls a model):
 
 ```bash
-export OPENAI_API_KEY=sk-...    # agent + summarize (gpt-4.1-mini default)
+export OPENAI_API_KEY=sk-...    # agent + summarize tool (gpt-4.1-mini default)
 ```
 
-## Run locally
+No dataset token is required — HotpotQA is public.
 
-This recipe depends on the lightweight `rilixai` SDK only. The local CLI
-covers the two SDK-only paths — `validate` (offline structural check) and
-`evaluate` (score one candidate via the SDK `run_case` + scorer loop). The
-full GEPA optimize loop runs server-side via `rilixai run` (see the Modal
-section below); the optimizer engine lives in the optional `rilixai-runtime`
-package, not in this recipe.
+## Run
 
 ```bash
-# Validate the spec structure offline (no network, no dataset download)
-uv run python -m hotpotqa.cli validate
+# Run the agent and dump its answers (no scoring):
+uv run python -m hotpotqa.cli run \
+    --split test --test-size 20 \
+    --retrieval distractor \
+    --output-dir hotpotqa_run
 
-# Evaluate one candidate (omit --candidate-json to score the seed prompts)
+# Run the agent AND score it:
 uv run python -m hotpotqa.cli evaluate \
-    --split test --candidate-json path/to/candidate.json \
-    --output-dir hotpotqa_results/seed
+    --split test --test-size 20 \
+    --output-dir hotpotqa_run
 ```
 
-Evaluate with no flags scores the seed candidate on the 300-case fullwiki
-test slice. See `--help` for all flags.
+Artifacts land in `--output-dir`:
 
-## Run on Modal (rilixai sandbox)
+| File | Contents |
+|---|---|
+| `run_outputs.json` | (`run`) per case: the answer, gold answer, retrieved titles, tool-call count — or an `error` |
+| `eval_summary.json` | (`evaluate`) the objective, per-field means, and scored / errored / unscoreable counts |
+| `eval_outputs.json` | (`evaluate`) the per-case scored results |
 
-`optimization/spec.py` registers a `@spec(name="hotpotqa-agent")` factory
-that rilixai's sandbox runs. `sandbox.py` builds the image, promotes it to
-`hotpotqa-agent@production`, and triggers a run in one shot.
-
-**A dataset upload is required.** The migrated spec no longer loads data
-itself — the optimizer reads its cases from an uploaded JSONL dataset via
-`HotpotQADataLoader` (row schema: raw `hotpotqa/hotpot_qa` records; see
-`HOTPOTQA_DATASET_SCHEMA` in `hotpotqa/data/dataset.py`). A run triggered with
-no dataset reference is rejected at startup. Upload a split directory once, then
-trigger:
-
-```bash
-export RILIXAI_API_KEY=sk-...
-export RILIXAI_API_BASE_URL=https://<id>.execute-api.<region>.amazonaws.com/prod/
-export RILIXAI_AGENT_KEY=hotpotqa-agent   # agent the trigger targets (or pass --agent)
-
-# One-time (or when the data changes): upload the JSONL split as a dataset.
-uv run rilixai dataset upload --name hotpotqa-agent-dataset path/to/jsonl-dir/
-
-uv run sandbox.py --build   # build + promote + trigger
-uv run sandbox.py           # trigger only (current @production)
-```
-
-The trigger defaults to `--dataset hotpotqa-agent-dataset@production` and
-`--spec hotpotqa-agent@production`; override either to pin a specific revision.
-
-`OPENAI_API_KEY` is bound as a project-level secret on rilixai's side,
-injected into each sandbox.
-
-To trigger from code, or to tune the agent knobs (`max_metric_calls`,
-`retrieval_mode`, models, …), call `client.create_optimization_run(...)` with a
-`dataset_ref` — the run config keys are documented in `_DEFAULT_SANDBOX_CONFIG`
-at the top of `hotpotqa/optimization/spec.py`. The train/val split is derived
-from the uploaded dataset server-side, so there are no `train_size`/`val_size`
-knobs. Roll back with `uv run rilixai spec promote hotpotqa-agent v<older-sha>`.
-
-CI (`.github/workflows/push-spec.yml`) runs `sandbox.py --build --no-trigger`
-on every merge to `main` that touches `hotpotqa/`: it ships the image and
-flips `@production` without spending LLM tokens on a smoke run.
+With no size flags, both commands use the 300-case fullwiki test slice. See
+`--help` for all flags (`--split`, `--retrieval`, `--retrieve-k`,
+`--max-iters`, `--max-concurrency`, `--task-model`, `--no-network`, …).
 
 ## Tests
 
 ```bash
-uv run python -m pytest hotpotqa/tests -q
+uv run python -m pytest -q
 ```
 
-Hermetic — scripted PydanticAI `FunctionModel`s, no network.
+Hermetic — a scripted PydanticAI `FunctionModel` plus a stubbed summarize call,
+no network.
 
 ## Notes
 
-- rilixai is pinned via git in `pyproject.toml` until it's on PyPI.
-- The 2017 Wikipedia abstracts dump (~5GB) downloads lazily on first
-  `fullwiki` use and caches under `$XDG_CACHE_HOME/rilixai/hotpotqa/fullwiki/`.
-- Data slicing is bit-faithful to the GEPA artifact: HotpotQA *train* split
-  (90k cases) sliced `[0, 40%)` → test, `[40%, 80%)` → val, `[80%, 100%)` →
-  train, sampled with `random.Random(1)`. The 300/300/150 picks match the
-  paper.
+- The 2017 Wikipedia abstracts dump (~5GB) downloads lazily on first `fullwiki`
+  use and caches under `$XDG_CACHE_HOME/hotpotqa/fullwiki/` (override with
+  `HOTPOTQA_FULLWIKI_CACHE_DIR`). Use `--retrieval distractor` to avoid it.
+- Scoring supporting facts at *title* granularity (not sentence) matches what
+  the agent retrieves: paragraphs. Sentence-level supporting-fact F1 can be
+  layered on without changing the objective.
+- `--no-network` makes the loaders refuse to download anything, so a
+  misconfigured dry run can't quietly spend tokens.

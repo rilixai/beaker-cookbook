@@ -1,28 +1,16 @@
-"""Seed prompts for the PydanticAI agent benchmark.
+"""The agent's two prompts.
 
 An idiomatic two-tool agent: ``retrieve_k`` + ``summarize`` (with an
-optional ``context`` arg). Two optimizable components — the agent's
+optional ``context`` arg). Two prompts steer it — the agent's tool-use
 policy and the summarize tool's system prompt.
 
-The seeds below match the spirit of the paper's DSPy defaults: minimal
-one-liners that don't pre-bake any tool-use strategy. Optimization
-lift then measures what GEPA discovers about *agent* behavior, not
-what handwritten prose already encodes.
+Both are deliberately minimal one-liners that pre-bake no tool-use
+strategy, so the measured behavior is the agent's, not handwritten
+prose's. Pass your own to :class:`~hotpotqa.agent.agent.HotpotQAPydanticAgent`
+to try alternatives.
 """
 
 from __future__ import annotations
-
-from rilixai import OptimizationTargets, optimization_targets_from_prompts
-
-from .types import POLICY_COMPONENT, SUMMARIZE_COMPONENT
-
-
-# Re-export the canonical component names defined in ``types.py`` under the
-# legacy ``*_PROMPT_COMPONENT`` spellings kept for external importers. The
-# constants themselves live in ``types.py`` (single source of truth) so the
-# two names can't drift out of sync.
-POLICY_PROMPT_COMPONENT = POLICY_COMPONENT
-SUMMARIZE_PROMPT_COMPONENT = SUMMARIZE_COMPONENT
 
 
 DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT = (
@@ -34,20 +22,16 @@ DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT = (
 )
 
 
-def hotpotqa_pydantic_agent_seed_targets() -> OptimizationTargets:
-    """Agent-mode seed :class:`OptimizationTargets` (2 components: policy + summarize)."""
-    return optimization_targets_from_prompts(
-        {
-            POLICY_PROMPT_COMPONENT: DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
-            SUMMARIZE_PROMPT_COMPONENT: DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
-        }
-    )
+def hotpotqa_default_prompts() -> dict[str, str]:
+    """The default ``{policy_prompt, summarize_prompt}`` pair."""
+    return {
+        "policy_prompt": DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT,
+        "summarize_prompt": DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT,
+    }
 
 
 __all__ = [
     "DEFAULT_PYDANTIC_AGENT_POLICY_PROMPT",
     "DEFAULT_PYDANTIC_AGENT_SUMMARIZE_PROMPT",
-    "POLICY_PROMPT_COMPONENT",
-    "SUMMARIZE_PROMPT_COMPONENT",
-    "hotpotqa_pydantic_agent_seed_targets",
+    "hotpotqa_default_prompts",
 ]

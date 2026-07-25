@@ -78,17 +78,17 @@ def build_retrieve_k_fn_for_case(
       never re-surface earlier hits. Without this, the small corpus
       would cause the BM25 ranking to trivially return the same top-k
       again, wasting every later slot on duplicates. The dedup is a
-      small-corpus pragmatism — the GEPA artifact's HotpotQA pipeline
-      doesn't have a distractor mode; we added this for cheap iteration
+      small-corpus pragmatism — the open-domain reference pipelines
+      don't have a distractor mode; we added this for cheap iteration
       and smoke tests.
 
     * **Fullwiki mode** does NOT dedupe across calls. It delegates to
       ``fullwiki_retrieve_k_fn`` which dedupes only *within* a single
       retrieve call. This matches ``dspy.Retrieve`` — the retrieval
-      primitive the upstream GEPA artifact's HotpotMultiHop calls for
-      hop 2 — which doesn't filter earlier hits out of subsequent
-      results. Reproducing this behavior keeps the agent's retrieval
-      semantics comparable to the paper's reference setup.
+      primitive the reference multi-hop HotpotQA programs call for hop
+      2 — which doesn't filter earlier hits out of subsequent results.
+      Reproducing this behavior keeps the agent's retrieval semantics
+      comparable to published HotpotQA numbers.
     """
     if cfg.retrieval_mode == "distractor":
         already_retrieved: set[str] = set()
