@@ -114,7 +114,9 @@ class WorldFiles:
         out: list[str] = []
         for path in sorted(base.rglob("*")):
             if path.is_file():
-                out.append(str(path.relative_to(self._root)))
+                # ``as_posix`` so the paths handed to the model (and fed back
+                # through ``read_text``) use forward slashes on every platform.
+                out.append(path.relative_to(self._root).as_posix())
         return out
 
     def read_text(self, rel_path: str, *, max_bytes: int = _MAX_READ_BYTES) -> str:
