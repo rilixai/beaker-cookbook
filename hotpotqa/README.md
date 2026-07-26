@@ -9,7 +9,7 @@ answer F1, and whether it actually retrieved the gold supporting paragraphs.
 ## The agent
 
 A plain [PydanticAI](https://ai.pydantic.dev/) tool-using agent
-(`agent/agent.py`). One question in, one short answer out.
+(`src/hotpotqa/agent/agent.py`). One question in, one short answer out.
 
 - **Task** — a HotpotQA question whose answer requires *hopping*: find one
   paragraph, learn a bridging entity from it, search again, then answer.
@@ -35,18 +35,20 @@ A plain [PydanticAI](https://ai.pydantic.dev/) tool-using agent
 
 Code map:
 
+Standard src layout — the importable package lives under `src/hotpotqa/`:
+
 | Path | What it holds |
 |---|---|
-| `agent/agent.py` | the PydanticAI agent, its two tools, and the trajectory it records |
-| `agent/prompts.py` | the two default prompts |
-| `agent/retrieval/` | the `retrieve_k` implementations (case-local BM25, fullwiki bm25s) |
-| `data/dataset.py` | HotpotQA loading + the typed `HotpotQARecord` |
-| `data/eval.py` | the canonical HotpotQA answer normalizer / EM / F1 |
-| `evaluation/scoring.py` | per-case field scoring + the weighted objective |
-| `evaluation/local_eval.py` | the bounded-concurrency batch evaluator |
-| `evaluation/report.py` | the JSON artifacts |
-| `config.py` | retrieval / model / loop-budget knobs |
-| `cli.py` | run the agent, or run + score it |
+| `src/hotpotqa/agent/agent.py` | the PydanticAI agent, its two tools, and the trajectory it records |
+| `src/hotpotqa/agent/prompts.py` | the two default prompts |
+| `src/hotpotqa/agent/retrieval/` | the `retrieve_k` implementations (case-local BM25, fullwiki bm25s) |
+| `src/hotpotqa/data/dataset.py` | HotpotQA loading + the typed `HotpotQARecord` |
+| `src/hotpotqa/data/eval.py` | the canonical HotpotQA answer normalizer / EM / F1 |
+| `src/hotpotqa/evaluation/scoring.py` | per-case field scoring + the weighted objective |
+| `src/hotpotqa/evaluation/local_eval.py` | the bounded-concurrency batch evaluator |
+| `src/hotpotqa/evaluation/report.py` | the JSON artifacts |
+| `src/hotpotqa/config.py` | retrieval / model / loop-budget knobs |
+| `src/hotpotqa/cli.py` | run the agent, or run + score it (`hotpotqa` console command) |
 
 ## How answers are scored
 
@@ -107,13 +109,13 @@ No dataset token is required — HotpotQA is public.
 
 ```bash
 # Run the agent and dump its answers (no scoring):
-uv run python -m hotpotqa.cli run \
+uv run hotpotqa run \
     --split test --test-size 20 \
     --retrieval distractor \
     --output-dir hotpotqa_run
 
 # Run the agent AND score it:
-uv run python -m hotpotqa.cli evaluate \
+uv run hotpotqa evaluate \
     --split test --test-size 20 \
     --output-dir hotpotqa_run
 ```
