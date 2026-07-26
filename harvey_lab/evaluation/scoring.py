@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -90,6 +89,49 @@ def _criteria_block(criteria: Sequence[Mapping[str, Any]]) -> str:
     return "\n\n".join(parts)
 
 
+def _extract_verdicts_payload(text: str) -> Mapping[str, Any] | None:
+    """Recover the ``{"verdicts": [...]}`` object from a judge reply.
+
+    The model may wrap the JSON in markdown fences or add prose before/after
+    it (including text with its own braces), so a greedy first-to-last-brace
+    match would over-capture and fail to parse. Instead scan for each balanced
+    ``{...}`` object (by brace depth, ignoring braces inside strings) and
+    return the first that parses AND holds a ``verdicts`` key.
+    """
+    blob = text.replace("```json", "").replace("```", "")
+    for start, obj in enumerate(blob):
+        if obj != "{":
+            continue
+        depth = 0
+        in_str = False
+        escaped = False
+        for end in range(start, len(blob)):
+            ch = blob[end]
+            if in_str:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        parsed = json.loads(blob[start : end + 1])
+                    except Exception:
+                        break  # not valid JSON from this "{"; try the next one
+                    if isinstance(parsed, Mapping) and "verdicts" in parsed:
+                        return parsed
+                    break
+    return None
+
+
 def _parse_batch_verdicts(text: str, ids: Sequence[str]) -> dict[str, bool]:
     """Parse a batched judge reply into ``{criterion_id: passed}``.
 
@@ -98,15 +140,7 @@ def _parse_batch_verdicts(text: str, ids: Sequence[str]) -> dict[str, bool]:
     must not inflate the score), logged so an unparseable judge is visible.
     """
     result: dict[str, bool] = dict.fromkeys(ids, False)
-    blob = text or ""
-    # Find the JSON object holding "verdicts" (tolerate prose/code fences around it).
-    match = re.search(r"\{.*\"verdicts\".*\}", blob, re.DOTALL)
-    payload: Any = None
-    if match:
-        try:
-            payload = json.loads(match.group(0))
-        except Exception:
-            payload = None
+    payload = _extract_verdicts_payload(text or "")
     entries: Sequence[Any] = payload.get("verdicts", []) if isinstance(payload, Mapping) else []
     seen = 0
     for entry in entries:

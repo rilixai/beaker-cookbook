@@ -224,6 +224,17 @@ def test_parse_batch_verdicts_garbage_is_all_fail() -> None:
     assert _parse_batch_verdicts("no json here", ["C1"]) == {"C1": False}
 
 
+def test_parse_batch_verdicts_tolerates_surrounding_prose_and_fences() -> None:
+    # A code fence around the JSON, plus trailing prose that itself has braces:
+    # the balanced-brace scan must recover the verdicts object, not over-capture.
+    reply = (
+        "Here is my grading:\n"
+        '```json\n{"verdicts": [{"id": "C1", "verdict": "pass"}, {"id": "C2", "verdict": "pass"}]}\n```\n'
+        "Note: formatting like {curly} should not break parsing."
+    )
+    assert _parse_batch_verdicts(reply, ["C1", "C2"]) == {"C1": True, "C2": True}
+
+
 def test_build_rubric_judge_uses_injected_llm() -> None:
     """The judge sends all batched criteria in one call and parses the reply."""
     calls: list[list[dict]] = []
