@@ -30,18 +30,20 @@ and a to-do list, and it must produce the requested written work.
 
 Code map:
 
+Standard src layout — the importable package lives under `src/harvey_lab/`:
+
 | Path | What it holds |
 |---|---|
-| `agent/workspace.py` | the per-task workspace + the file tools |
-| `agent/agent.py` | wires the tools into Stirrup and runs one task |
-| `agent/prompts.py` | the two prompts |
-| `data/dataset.py` | loads LAB task records from a local checkout + reads the splits |
-| `splits/{train,val,test}.txt` | frozen task-id lists (see `splits/README.md`) |
-| `evaluation/scoring.py` | grades ONE task: the batched judge + all-pass aggregation |
-| `evaluation/run_eval.py` | runs the agent + scoring across the dataset (bounded concurrency) |
-| `evaluation/utils.py` | JSON + summary serialization for the CLI |
-| `config.py` | model / budget / timeout knobs |
-| `cli.py` | run the agent, or run + grade it |
+| `src/harvey_lab/agent/workspace.py` | the per-task workspace + the file tools |
+| `src/harvey_lab/agent/agent.py` | wires the tools into Stirrup and runs one task |
+| `src/harvey_lab/agent/prompts.py` | the two prompts |
+| `src/harvey_lab/data/dataset.py` | loads LAB task records from a local checkout + reads the splits |
+| `src/harvey_lab/splits/{train,val,test}.txt` | frozen task-id lists (see `splits/README.md`) |
+| `src/harvey_lab/evaluation/scoring.py` | grades ONE task: the batched judge + all-pass aggregation |
+| `src/harvey_lab/evaluation/run_eval.py` | runs the agent + scoring across the dataset (bounded concurrency) |
+| `src/harvey_lab/evaluation/utils.py` | JSON + summary serialization for the CLI |
+| `src/harvey_lab/config.py` | model / budget / timeout knobs |
+| `src/harvey_lab/cli.py` | run the agent, or run + grade it (`harvey-lab` console command) |
 
 ## How the work is graded
 
@@ -114,13 +116,13 @@ git clone https://github.com/harveyai/harvey-labs
 git -C harvey-labs checkout 1da4750171bc5a534960b3d82d15ba7fd2cf653f
 
 # Run the agent and dump its deliverables (no grading), on 10 test tasks:
-uv run python -m harvey_lab.cli run \
+uv run harvey-lab run \
     --tasks-root harvey-labs/tasks \
     --split test --limit 10 \
     --output-dir harvey_lab_run
 
 # Run the agent AND grade every rubric criterion:
-uv run python -m harvey_lab.cli evaluate \
+uv run harvey-lab evaluate \
     --tasks-root harvey-labs/tasks \
     --split test --limit 10 \
     --output-dir harvey_lab_run
