@@ -12,11 +12,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-# The upstream ``harveyai/harvey-labs`` commit these defaults were calibrated
-# against. Clone the benchmark at this commit for reproducible runs (the tasks
-# grow over time); the CLI reads it from your local checkout's ``tasks/`` dir.
-HARVEY_LABS_REPO = "harveyai/harvey-labs"
-HARVEY_LABS_COMMIT = "f46ef86e4788545622db25dcffa3aebb7a139929"
+# The upstream ``harveyai/harvey-labs`` commit the frozen splits were cut
+# against (see ``splits/README.md``). Clone the benchmark at this commit for
+# reproducible runs — the task set grows over time, and task IDs are paths
+# into this exact tree.
+HARVEY_LABS_COMMIT = "1da4750171bc5a534960b3d82d15ba7fd2cf653f"
+
+# Global caps used when the frozen ``splits/{val,test}.txt`` were generated.
+# Recorded here for documentation; the split files are the source of truth.
+VAL_CAP = 100
+TEST_CAP = 100
 
 
 @dataclass(frozen=True)
@@ -31,10 +36,15 @@ class HarveyLabConfig:
     # gpt-4.1-mini caps completions at 32768, so the default leaves headroom.
     max_output_tokens: int = 16_000
 
-    # The per-criterion rubric judge. Harvey LAB-AA defaults to
-    # ``claude-sonnet``; a cheaper Gemini flash keeps smoke runs affordable
-    # and matches the apex recipe's judge default.
-    judge_model: str = "gemini/gemini-3.5-flash"
+    # The rubric judge. Graded in BATCHES of ``judge_batch_size`` criteria per
+    # LLM call rather than one call per criterion — batched verification is an
+    # order of magnitude cheaper at LAB's scale (tasks carry ~60 criteria).
+    # DeepSeek v4 Flash is a cheap open verifier that stays near frontier
+    # graders on LAB. See:
+    #   https://www.langchain.com/blog/designing-efficient-verifiers-for-legal-agents
+    #   https://www.appliedcompute.com/case-studies/harvey  (GPT-5 Mini, 4/call)
+    judge_model: str = "deepseek/deepseek-v4-flash"
+    judge_batch_size: int = 8
 
     # Cap on the Stirrup agent's tool-use loop per task. LAB tasks are long
     # (dozens of documents, ~60 rubric criteria) but a smoke budget stays low.

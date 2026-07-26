@@ -26,7 +26,7 @@ from __future__ import annotations
 import email
 import logging
 import shutil
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +43,6 @@ __all__ = [
     "TaskSource",
     "TaskWorkspace",
     "task_source_from_dir",
-    "task_source_from_mapping",
 ]
 
 
@@ -263,9 +262,10 @@ def _read_eml(path: Path) -> str:
 def task_source_from_dir(tasks_root: str | Path, *, max_document_chars: int = 200_000) -> TaskSource:
     """Build a ``(record) -> TaskWorkspace`` factory backed by a local tree.
 
-    ``tasks_root`` is a directory laid out like ``harveyai/harvey-labs``:
-    ``<practice_area>/<slug>/documents/*``. The record's ``task_id`` is the
-    ``<practice_area>/<slug>`` path. Fully offline (used by the CLI + tests,
+    ``tasks_root`` is the ``tasks/`` directory of a ``harveyai/harvey-labs``
+    checkout; a task's ``documents/`` live at ``tasks_root/<task_id>/documents``
+    (``task_id`` is the task directory's path relative to ``tasks/``, possibly
+    nested under a sub-category). Fully offline (used by the CLI + tests,
     which point it at a fixture tree).
     """
     base = Path(tasks_root)
@@ -284,17 +284,5 @@ def task_source_from_dir(tasks_root: str | Path, *, max_document_chars: int = 20
             ws.close()
             raise
         return ws
-
-    return _factory
-
-
-def task_source_from_mapping(mapping: Mapping[str, TaskWorkspace]) -> TaskSource:
-    """Factory from a prebuilt ``{task_id: TaskWorkspace}`` mapping (tests)."""
-
-    def _factory(record: Any) -> TaskWorkspace:
-        task_id = str(getattr(record, "task_id", "") or "")
-        if task_id not in mapping:
-            raise KeyError(f"No prebuilt workspace for task_id={task_id!r}.")
-        return mapping[task_id]
 
     return _factory

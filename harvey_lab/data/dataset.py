@@ -1,8 +1,7 @@
 """Harvey LAB dataset loading.
 
 The benchmark is Harvey's public Legal Agent Benchmark, laid out in the
-``harveyai/harvey-labs`` GitHub repo as ``tasks/<practice_area>/<slug>/``
-directories. Each task directory holds:
+``harveyai/harvey-labs`` GitHub repo under ``tasks/``. A task directory holds:
 
 * ``task.json`` — ``title``, ``work_type``, ``tags``, ``instructions``,
   ``deliverables`` (a ``{filename: canonical_name}`` map the rubric grades),
@@ -10,23 +9,33 @@ directories. Each task directory holds:
   binary pass/fail rubric items — ~60 per task on average).
 * ``documents/`` — the source record (contracts, memos, spreadsheets, emails).
 
-:func:`load_harvey_lab_records` reads task directories from a local checkout
-into normalized :class:`HarveyLabRecord` objects. No golden reference is
-materialized: the rubric ``match_criteria`` strings are the grading standard
-(an LLM judge scores each criterion pass/fail).
+Task directories are **not** all one level under a practice area: larger
+areas nest sub-categories (e.g. ``contracts/banking/<slug>/task.json``), so
+tasks are discovered by walking for ``task.json`` recursively. A task's
+``task_id`` is its directory path relative to ``tasks/`` (e.g.
+``contracts/banking/<slug>``); its practice area is the first path segment.
+
+:func:`load_records` reads task directories into normalized
+:class:`HarveyLabRecord` objects. No golden reference is materialized: the
+rubric ``match_criteria`` strings are the grading standard (an LLM judge
+scores each criterion pass/fail). :func:`read_split` returns the frozen
+train / val / test task-id lists in ``splits/`` (see ``splits/README.md``).
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 
 logger = logging.getLogger(__name__)
+
+# The frozen split lists live at the recipe root, next to this package.
+SPLITS_DIR = Path(__file__).resolve().parent.parent / "splits"
 
 
 @dataclass(frozen=True)
@@ -105,71 +114,70 @@ def _coerce_deliverables(value: Any) -> dict[str, str]:
     return {}
 
 
-def _normalize_record(raw: Mapping[str, Any], *, index_hint: int) -> HarveyLabRecord:
-    tid = str(raw.get("task_id") or f"harvey-lab-{index_hint}")
-    practice_area = str(raw.get("practice_area") or (tid.split("/", 1)[0] if "/" in tid else "harvey_lab"))
+def _load_task_dir(task_dir: Path, task_id: str) -> HarveyLabRecord:
+    raw = json.loads((task_dir / "task.json").read_text(encoding="utf-8"))
+    docs_dir = task_dir / "documents"
+    documents = sorted(str(p.relative_to(docs_dir)) for p in docs_dir.rglob("*") if p.is_file())
+    tid = task_id
     return HarveyLabRecord(
         task_id=tid,
-        practice_area=practice_area,
+        practice_area=tid.split("/", 1)[0],
         title=str(raw.get("title") or ""),
         work_type=str(raw.get("work_type") or ""),
         instructions=str(raw.get("instructions") or ""),
         deliverables=_coerce_deliverables(raw.get("deliverables")),
         criteria=_coerce_criteria(raw.get("criteria")),
-        documents=tuple(str(d) for d in (raw.get("documents") or ()) if d),
+        documents=tuple(documents),
         raw_task=dict(raw),
     )
 
 
-def load_harvey_lab_records(
+def load_records(
     tasks_root: str | Path,
     *,
-    practice_areas: Sequence[str] | None = None,
-    max_per_area: int | None = None,
+    task_ids: Sequence[str] | None = None,
 ) -> list[HarveyLabRecord]:
     """Load + normalize LAB task records from a local ``harvey-labs`` checkout.
 
-    ``tasks_root`` is the repo's ``tasks/`` directory. Walks
-    ``<practice_area>/<slug>/task.json`` in stable sorted order (no shuffle —
-    the splitter is the single source of randomness), attaching the sorted
-    ``documents/`` filenames alongside the task metadata.
+    ``tasks_root`` is the repo's ``tasks/`` directory. Tasks are discovered by
+    walking for ``task.json`` recursively (areas nest sub-categories), so a
+    ``task_id`` is the task directory's path relative to ``tasks/``.
+
+    ``task_ids`` (e.g. from :func:`read_split`) loads exactly those tasks in
+    the given order — cheap for a capped run. Without it, every task is loaded
+    in sorted ``task_id`` order.
     """
     base = Path(tasks_root)
     if not base.is_dir():
         raise FileNotFoundError(f"tasks_root {base} is not a directory.")
-    wanted = {p.strip() for p in practice_areas} if practice_areas else None
-    records: list[HarveyLabRecord] = []
-    for area_dir in sorted(p for p in base.iterdir() if p.is_dir()):
-        if wanted is not None and area_dir.name not in wanted:
-            continue
-        count = 0
-        for task_json in sorted(area_dir.glob("*/task.json")):
-            if max_per_area is not None and count >= max_per_area:
-                break
-            raw = json.loads(task_json.read_text(encoding="utf-8"))
-            task_dir = task_json.parent
-            documents = sorted(
-                str(p.relative_to(task_dir / "documents")) for p in (task_dir / "documents").rglob("*") if p.is_file()
-            )
-            merged = {
-                **raw,
-                "task_id": f"{area_dir.name}/{task_dir.name}",
-                "practice_area": area_dir.name,
-                "documents": documents,
-            }
-            records.append(_normalize_record(merged, index_hint=len(records)))
-            count += 1
-    return records
+    if task_ids is not None:
+        records: list[HarveyLabRecord] = []
+        for tid in task_ids:
+            task_dir = base / tid
+            if not (task_dir / "task.json").is_file():
+                logger.warning("Skipping task_id %s: no task.json under %s.", tid, base)
+                continue
+            records.append(_load_task_dir(task_dir, tid))
+        return records
+    return [_load_task_dir(tj.parent, str(tj.parent.relative_to(base))) for tj in sorted(base.rglob("task.json"))]
 
 
-def practice_areas_for_records(records: Iterable[HarveyLabRecord]) -> list[str]:
-    """Return the sorted distinct practice areas across records."""
-    return sorted({r.practice_area for r in records if r.practice_area})
+def read_split(split: str) -> list[str]:
+    """Return the frozen task-id list for ``split`` in {train, val, test}.
+
+    Lists are stored round-robin across practice areas, so any prefix stays
+    distribution-representative — a run cap can take the first N ids.
+    """
+    path = SPLITS_DIR / f"{split}.txt"
+    if not path.is_file():
+        raise FileNotFoundError(f"No split file {path} (expected one of train/val/test).")
+    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 __all__ = [
     "HarveyLabRecord",
     "RubricCriterion",
-    "load_harvey_lab_records",
-    "practice_areas_for_records",
+    "SPLITS_DIR",
+    "load_records",
+    "read_split",
 ]

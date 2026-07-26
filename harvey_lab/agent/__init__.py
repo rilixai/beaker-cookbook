@@ -1,8 +1,7 @@
 """Harvey LAB agent package (Stirrup harness + file workspace + prompts)."""
 
-from .agent import HarveyLabAgent, ModelFactory
+from .agent import HarveyLabAgent, HarveyLabAgentOutput, ModelFactory
 from .prompts import load_harvey_lab_prompts
-from .types import HarveyLabAgentOutput
 from .workspace import TaskSource, TaskWorkspace
 
 

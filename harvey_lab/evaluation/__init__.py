@@ -1,32 +1,31 @@
-"""Local rubric evaluation for the Harvey LAB agent (judge + batch eval)."""
+"""Rubric evaluation for the Harvey LAB agent (batched judge + dataset run)."""
 
-from .local_eval import (
+from .run_eval import (
     EvalReport,
     evaluate_agent_on_records,
     evaluate_record,
-    run_evaluation,
 )
-from .report import eval_summary, heldout_subset_summary, write_json
 from .scoring import (
     ALL_PASS_FIELD,
+    ALL_PASS_RATE_FIELD,
     CRITERION_PASS_RATE_FIELD,
-    CriterionJudge,
-    build_criterion_judge,
-    score_all_pass,
+    BatchJudge,
+    build_rubric_judge,
+    score_rubric,
 )
+from .utils import eval_summary, write_json
 
 
 __all__ = [
     "ALL_PASS_FIELD",
+    "ALL_PASS_RATE_FIELD",
     "CRITERION_PASS_RATE_FIELD",
-    "CriterionJudge",
+    "BatchJudge",
     "EvalReport",
-    "build_criterion_judge",
+    "build_rubric_judge",
     "eval_summary",
     "evaluate_agent_on_records",
     "evaluate_record",
-    "heldout_subset_summary",
-    "run_evaluation",
-    "score_all_pass",
+    "score_rubric",
     "write_json",
 ]
