@@ -13,7 +13,7 @@ from typing import Any
 from apex_agents.agent.agent import ApexReActAgent
 from apex_agents.agent.prompts import load_apex_agents_prompts
 from apex_agents.data.dataset import ApexAgentsRecord, RubricCriterion
-from apex_agents.tests.fake_world import FakeWorld
+from tests.fake_world import FakeWorld
 
 
 def _record() -> ApexAgentsRecord:

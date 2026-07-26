@@ -41,7 +41,7 @@ from apex_agents.evaluation.scoring import (
     build_rubric_judge,
     score_rubric,
 )
-from apex_agents.tests.fake_world import FakeWorld
+from tests.fake_world import FakeWorld
 
 
 def _task_row(idx: int, **overrides: Any) -> dict[str, Any]:
