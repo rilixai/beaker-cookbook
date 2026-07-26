@@ -1,6 +1,7 @@
 """CLI entrypoint for the HotpotQA agent.
 
-Run as ``python -m hotpotqa.cli <command> ...`` after installing this
+Run as ``uv run hotpotqa <command> ...`` (or ``python -m
+hotpotqa.cli <command> ...``) after installing this
 project from its directory (``cd hotpotqa && uv sync --group dev``).
 
 Subcommands:
