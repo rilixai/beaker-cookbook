@@ -22,32 +22,16 @@ dependencies = [
   "xlrd>=2.0",
 ]
 
+[project.scripts]
+apex-agents = "apex_agents.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# Standard src layout: the importable package lives at ``src/apex_agents``.
 [tool.hatch.build.targets.wheel]
-# The package is the workspace member directory itself. Remap so
-# everything under "." installs at the top-level ``apex_agents``
-# import path; exclude dev/test/script assets from the wheel.
-sources = { "." = "apex_agents" }
-# Editable installs add the repo root (not this dir) to sys.path so the
-# package resolves under its ``apex_agents`` import name from anywhere,
-# including a ``cd apex_agents`` shell.
-dev-mode-dirs = [".."]
-include = [
-  "__init__.py",
-  "*.py",
-  "agent/**/*.py",
-  "data/**/*.py",
-  "evaluation/**/*.py",
-]
-exclude = [
-  "tests/**",
-  "scripts/**",
-  "pyproject.toml",
-  "README.md",
-]
+packages = ["src/apex_agents"]
 
 # Dev tooling + lint/type/test config live in this recipe's own pyproject so
 # the folder is a self-contained project (no root workspace pyproject).
@@ -62,12 +46,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# ``importlib`` import mode + the repo root on ``sys.path`` (``..``) so the
-# recipe imports as the top-level ``apex_agents`` package (how the tests
-# reference it, incl. ``apex_agents.tests.fake_world``) regardless of how
-# pytest is launched.
 addopts = "--import-mode=importlib"
-pythonpath = [".."]
 
 [tool.ruff]
 line-length = 119
@@ -97,11 +76,7 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 show_error_codes = true
-# Flat layout: the package dir IS this recipe folder. Point mypy at it via the
-# parent so modules resolve as ``apex_agents.…`` and intra-package imports
-# type-check. Tests + scripts are excluded (fixture-shaped types).
-files = ["../apex_agents"]
-exclude = ["(^|/)tests/", "(^|/)scripts/"]
+files = ["src/apex_agents"]
 
 # ``ignore_missing_imports`` for the parser/agent deps that ship without
 # ``py.typed`` markers.

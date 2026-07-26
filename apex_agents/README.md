@@ -30,18 +30,20 @@ the task lives in — and a written request, and it must produce the answer.
 
 Code map:
 
+Standard src layout — the importable package lives under `src/apex_agents/`:
+
 | Path | What it holds |
 |---|---|
-| `agent/world/world.py` | the per-task world (zip extraction + file readers) |
-| `agent/agent.py` | the ReAct loop, the toolbelt, and the LiteLLM wrapper |
-| `agent/prompts.py` | the three prompts |
-| `data/dataset.py` | loads task records + world metadata from HuggingFace |
-| `data/world_splits.py` | deterministic world-level splitters |
-| `evaluation/scoring.py` | the per-criterion LLM judge + `rubric_pass_rate` |
-| `evaluation/local_eval.py` | the bounded-concurrency batch evaluator |
-| `evaluation/report.py` | the JSON artifacts |
-| `config.py` | model / budget / timeout knobs |
-| `cli.py` | run the agent, or run + grade it |
+| `src/apex_agents/agent/world/world.py` | the per-task world (zip extraction + file readers) |
+| `src/apex_agents/agent/agent.py` | the ReAct loop, the toolbelt, and the LiteLLM wrapper |
+| `src/apex_agents/agent/prompts.py` | the three prompts |
+| `src/apex_agents/data/dataset.py` | loads task records + world metadata from HuggingFace |
+| `src/apex_agents/data/world_splits.py` | deterministic world-level splitters |
+| `src/apex_agents/evaluation/scoring.py` | the per-criterion LLM judge + `rubric_pass_rate` |
+| `src/apex_agents/evaluation/local_eval.py` | the bounded-concurrency batch evaluator |
+| `src/apex_agents/evaluation/report.py` | the JSON artifacts |
+| `src/apex_agents/config.py` | model / budget / timeout knobs |
+| `src/apex_agents/cli.py` | run the agent, or run + grade it (`apex-agents` console command) |
 
 ## How the work is graded
 
@@ -90,12 +92,12 @@ export GOOGLE_API_KEY=...       # judge (gemini-3.5-flash default)
 
 ```bash
 # Run the agent and dump its answers (no grading):
-uv run python -m apex_agents.cli run \
+uv run apex-agents run \
     --test-size 10 \
     --output-dir apex_agents_run
 
 # Run the agent AND grade every rubric criterion:
-uv run python -m apex_agents.cli evaluate \
+uv run apex-agents evaluate \
     --test-size 10 \
     --output-dir apex_agents_run
 ```
