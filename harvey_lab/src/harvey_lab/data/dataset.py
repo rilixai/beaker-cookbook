@@ -117,7 +117,7 @@ def _coerce_deliverables(value: Any) -> dict[str, str]:
 def _load_task_dir(task_dir: Path, task_id: str) -> HarveyLabRecord:
     raw = json.loads((task_dir / "task.json").read_text(encoding="utf-8"))
     docs_dir = task_dir / "documents"
-    documents = sorted(str(p.relative_to(docs_dir)) for p in docs_dir.rglob("*") if p.is_file())
+    documents = sorted(p.relative_to(docs_dir).as_posix() for p in docs_dir.rglob("*") if p.is_file())
     tid = task_id
     return HarveyLabRecord(
         task_id=tid,
@@ -159,7 +159,11 @@ def load_records(
                 continue
             records.append(_load_task_dir(task_dir, tid))
         return records
-    return [_load_task_dir(tj.parent, str(tj.parent.relative_to(base))) for tj in sorted(base.rglob("task.json"))]
+    # ``as_posix`` so discovered task IDs use "/" on every OS and match the
+    # committed ``splits/*.txt`` lists (and the "/"-based practice-area parse).
+    return [
+        _load_task_dir(tj.parent, tj.parent.relative_to(base).as_posix()) for tj in sorted(base.rglob("task.json"))
+    ]
 
 
 def read_split(split: str) -> list[str]:
