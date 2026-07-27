@@ -141,7 +141,9 @@ def _parse_batch_verdicts(text: str, ids: Sequence[str]) -> dict[str, bool]:
     """
     result: dict[str, bool] = dict.fromkeys(ids, False)
     payload = _extract_verdicts_payload(text or "")
-    entries: Sequence[Any] = payload.get("verdicts", []) if isinstance(payload, Mapping) else []
+    raw = payload.get("verdicts") if isinstance(payload, Mapping) else None
+    # ``verdicts`` may be JSON null or a non-list; only iterate a real sequence.
+    entries: Sequence[Any] = raw if isinstance(raw, (list, tuple)) else []
     seen = 0
     for entry in entries:
         if not isinstance(entry, Mapping):

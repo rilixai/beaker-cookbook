@@ -169,6 +169,13 @@ def test_load_records_by_task_ids_preserves_order(tasks_root: Path) -> None:
     assert [r.task_id for r in records] == ids
 
 
+def test_load_records_raises_on_missing_split_task(tasks_root: Path) -> None:
+    # A frozen-split id absent from the tree must fail loudly (checkout drift),
+    # not silently shrink the run.
+    with pytest.raises(FileNotFoundError, match="no-such/task"):
+        load_records(tasks_root, task_ids=["contracts/t1", "no-such/task"])
+
+
 # ─── frozen splits ────────────────────────────────────────────────────
 
 
@@ -222,6 +229,11 @@ def test_parse_batch_verdicts_missing_ids_default_fail() -> None:
 
 def test_parse_batch_verdicts_garbage_is_all_fail() -> None:
     assert _parse_batch_verdicts("no json here", ["C1"]) == {"C1": False}
+
+
+def test_parse_batch_verdicts_null_verdicts_is_all_fail() -> None:
+    # ``verdicts`` present but JSON null must not crash the iterator.
+    assert _parse_batch_verdicts('{"verdicts": null}', ["C1"]) == {"C1": False}
 
 
 def test_parse_batch_verdicts_tolerates_surrounding_prose_and_fences() -> None:

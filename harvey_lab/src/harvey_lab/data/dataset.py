@@ -25,14 +25,11 @@ train / val / test task-id lists in ``splits/`` (see ``splits/README.md``).
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
-logger = logging.getLogger(__name__)
 
 # The frozen split lists live at the recipe root, next to this package.
 SPLITS_DIR = Path(__file__).resolve().parent.parent / "splits"
@@ -152,12 +149,22 @@ def load_records(
         raise FileNotFoundError(f"tasks_root {base} is not a directory.")
     if task_ids is not None:
         records: list[HarveyLabRecord] = []
+        missing: list[str] = []
         for tid in task_ids:
             task_dir = base / tid
             if not (task_dir / "task.json").is_file():
-                logger.warning("Skipping task_id %s: no task.json under %s.", tid, base)
+                missing.append(tid)
                 continue
             records.append(_load_task_dir(task_dir, tid))
+        # Fail loudly: a frozen split id absent from the tree means the checkout
+        # doesn't match the pinned commit, and silently shrinking the run would
+        # break reproducibility and make scores non-comparable.
+        if missing:
+            preview = ", ".join(missing[:10]) + (" …" if len(missing) > 10 else "")
+            raise FileNotFoundError(
+                f"{len(missing)} split task id(s) have no task.json under {base} "
+                f"(is the checkout at the pinned HARVEY_LABS_COMMIT?): {preview}"
+            )
         return records
     # ``as_posix`` so discovered task IDs use "/" on every OS and match the
     # committed ``splits/*.txt`` lists (and the "/"-based practice-area parse).
