@@ -14,7 +14,7 @@ production setups.*
 ## Recipes
 
 ```
-harvey_lab/       Legal-research agent over the Harvey/LegalBench-style corpus
+harvey_lab/       Legal-research agent over the Harvey LABs corpus
 hotpotqa/         Multi-hop QA — PydanticAI tool-using agent (retrieve_k + summarize)
 apex_agents/      Professional knowledge-work tasks — ReAct toolbelt agent, LLM rubric judge
 ```

@@ -18,10 +18,19 @@ cheaper at LAB's scale, at near-frontier agreement:
 
 Two numbers come out per task:
 
-* ``all_pass`` (0/1) — the LAB-AA headline metric.
+* ``all_pass`` (0/1) — the share of tasks where every criterion passes.
 * ``criterion_pass_rate`` (continuous) — the fraction of criteria that
-  passed. It is a denser view of the same grading (all-pass is very sparse
-  on a ~60-criterion task: one missed criterion zeroes the whole task).
+  passed; LAB-AA's default headline metric, and a denser view of the same
+  grading (all-pass is very sparse on a ~60-criterion task: one missed
+  criterion zeroes the whole task).
+
+Two LAB-AA grading rules are enforced here:
+
+* Deliverable filenames match **exactly** — a near-miss filename counts as not
+  produced.
+* A criterion fails outright, without reaching the judge, only when *none* of
+  its declared deliverables exist. A partial submission is still judged, with
+  the absent files marked as such.
 """
 
 from __future__ import annotations
@@ -42,13 +51,18 @@ CRITERION_PASS_RATE_FIELD = "criterion_pass_rate"
 DEFAULT_JUDGE_MODEL = "openrouter/deepseek/deepseek-v4-flash"
 DEFAULT_JUDGE_BATCH_SIZE = 8
 DEFAULT_JUDGE_TIMEOUT_S = 120.0
-DEFAULT_JUDGE_NUM_RETRIES = 2
-DEFAULT_MAX_DELIVERABLE_CHARS = 40_000
+# LAB-AA retries API failures aggressively rather than letting a transient
+# outage silently score a criterion FAIL.
+DEFAULT_JUDGE_NUM_RETRIES = 8
 
 
 # A batched judge: ``judge(task_description, criteria, agent_output) ->
 # {criterion_id: passed}`` for the criteria in one same-scope batch.
 BatchJudge = Callable[[str, Sequence[Mapping[str, Any]], str], dict[str, bool]]
+
+
+class JudgeCallError(RuntimeError):
+    """The rubric judge request failed before returning usable verdicts."""
 
 
 # Batched adaptation of Harvey's reference judge prompt
@@ -154,6 +168,8 @@ def _parse_batch_verdicts(text: str, ids: Sequence[str]) -> dict[str, bool]:
         verdict = str(entry.get("verdict") or "").strip().lower()
         result[cid] = verdict == "pass"
         seen += 1
+    if ids and seen == 0:
+        raise JudgeCallError(f"Rubric judge returned no usable verdicts for {len(ids)} criteria.")
     if seen < len(ids):
         logger.warning("Judge returned %d/%d verdicts; missing ones scored FAIL.", seen, len(ids))
     return result
@@ -206,9 +222,8 @@ def build_rubric_judge(
         )
         try:
             reply = _call_llm([{"role": "user", "content": prompt}])
-        except Exception as exc:  # pragma: no cover - judge outage is a batch of FAILs
-            logger.warning("Rubric judge call failed (scoring FAIL): %s", exc)
-            return dict.fromkeys(ids, False)
+        except Exception as exc:
+            raise JudgeCallError(f"Rubric judge request failed: {exc}") from exc
         return _parse_batch_verdicts(reply, ids)
 
     return _judge
@@ -217,30 +232,28 @@ def build_rubric_judge(
 def _scope_deliverables(
     criterion_deliverables: Sequence[str],
     deliverables: Mapping[str, str],
-    *,
-    max_chars: int,
 ) -> str:
     """Concatenate only the deliverables a criterion names (deliverable-scoping).
 
-    Matches by exact filename, then by basename. A criterion that names no
-    deliverable (or names ones the agent never produced) falls back to every
-    produced deliverable so the judge still has context.
+    Filenames are matched **exactly** — LAB-AA counts a near-miss filename as
+    not produced, which is stricter than Harvey's best-effort matching. A file
+    the criterion declares but the agent never produced is included as an
+    explicit *absent* marker rather than silently dropped, so the judge grades a
+    partial submission on what is actually there (AA judges a criterion whenever
+    at least one of its files exists, marking the rest absent).
+
+    A criterion that names no deliverable at all falls back to every produced
+    deliverable so the judge still has context.
     """
     wanted = [str(d) for d in criterion_deliverables if d]
-    selected: dict[str, str] = {}
+    if not wanted:
+        return "\n\n".join(f"### {name}\n{text}" for name, text in deliverables.items())
+    parts: list[str] = []
     for name in wanted:
         if name in deliverables:
-            selected[name] = deliverables[name]
-            continue
-        base = name.rsplit("/", 1)[-1]
-        for produced, text in deliverables.items():
-            if produced.rsplit("/", 1)[-1] == base:
-                selected[produced] = text
-    if not selected:
-        selected = dict(deliverables)
-    parts: list[str] = []
-    for name, text in selected.items():
-        parts.append(f"### {name}\n{text[:max_chars]}")
+            parts.append(f"### {name}\n{deliverables[name]}")
+        else:
+            parts.append(f"### {name}\n(this deliverable was not produced)")
     return "\n\n".join(parts)
 
 
@@ -256,7 +269,7 @@ def score_rubric(
     task_description: str,
     judge: BatchJudge,
     batch_size: int = DEFAULT_JUDGE_BATCH_SIZE,
-    max_deliverable_chars: int = DEFAULT_MAX_DELIVERABLE_CHARS,
+    judge_batch_callback: Callable[[int, int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Grade every criterion and aggregate into the LAB all-pass result.
 
@@ -278,17 +291,26 @@ def score_rubric(
         groups.setdefault(_scope_key(c), []).append(c)
 
     passed_by_id: dict[str, bool] = {}
+    processed = 0
     for scope, group in groups.items():
-        scoped_output = _scope_deliverables(scope, deliverables, max_chars=max_deliverable_chars)
+        # AA's rule: a criterion fails outright, WITHOUT being shown to the
+        # judge, only when none of its declared deliverables were produced. A
+        # partial submission is still judged, with the missing files marked
+        # absent by ``_scope_deliverables``.
+        if scope and not any(name in deliverables for name in scope):
+            for c in group:
+                passed_by_id[str(c.get("id"))] = False
+            processed += len(group)
+            continue
+        scoped_output = _scope_deliverables(scope, deliverables)
         for start in range(0, len(group), max(1, batch_size)):
             batch = group[start : start + max(1, batch_size)]
-            try:
-                verdicts = judge(task_description, batch, scoped_output)
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.debug("Rubric judge raised on a batch: %s", exc)
-                verdicts = {str(c.get("id")): False for c in batch}
+            if judge_batch_callback is not None:
+                judge_batch_callback(processed + 1, processed + len(batch), total_criteria)
+            verdicts = judge(task_description, batch, scoped_output)
             for c in batch:
                 passed_by_id[str(c.get("id"))] = bool(verdicts.get(str(c.get("id")), False))
+            processed += len(batch)
 
     verdicts_out = [{"id": c.get("id"), "passed": passed_by_id.get(str(c.get("id")), False)} for c in scoreable]
     n_passed = sum(1 for v in verdicts_out if v["passed"])
@@ -307,8 +329,8 @@ __all__ = [
     "CRITERION_PASS_RATE_FIELD",
     "DEFAULT_JUDGE_BATCH_SIZE",
     "DEFAULT_JUDGE_MODEL",
-    "DEFAULT_MAX_DELIVERABLE_CHARS",
     "BatchJudge",
+    "JudgeCallError",
     "build_rubric_judge",
     "score_rubric",
 ]

@@ -3,6 +3,8 @@
 from .run_eval import (
     EvalReport,
     evaluate_agent_on_records,
+    evaluate_output,
+    evaluate_outputs_on_records,
     evaluate_record,
 )
 from .scoring import (
@@ -10,6 +12,7 @@ from .scoring import (
     ALL_PASS_RATE_FIELD,
     CRITERION_PASS_RATE_FIELD,
     BatchJudge,
+    JudgeCallError,
     build_rubric_judge,
     score_rubric,
 )
@@ -22,9 +25,12 @@ __all__ = [
     "CRITERION_PASS_RATE_FIELD",
     "BatchJudge",
     "EvalReport",
+    "JudgeCallError",
     "build_rubric_judge",
     "eval_summary",
     "evaluate_agent_on_records",
+    "evaluate_output",
+    "evaluate_outputs_on_records",
     "evaluate_record",
     "score_rubric",
     "write_json",
