@@ -23,6 +23,7 @@ import os
 import shutil
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
@@ -79,7 +80,10 @@ def _request(url: str) -> bytes:
 
 def _download_dir(repo_path: str, dest: Path, ref: str) -> None:
     """Recursively download the GitHub directory ``repo_path`` into ``dest``."""
-    listing = json.loads(_request(_CONTENTS_API.format(repo=REPO, path=repo_path, ref=ref)))
+    # Percent-encode the path (LAB folders can contain spaces, e.g.
+    # "1.0 Transaction Documents"); keep "/" as the path separator.
+    quoted = urllib.parse.quote(repo_path, safe="/")
+    listing = json.loads(_request(_CONTENTS_API.format(repo=REPO, path=quoted, ref=ref)))
     if not isinstance(listing, list):
         raise RuntimeError(f"Expected a directory listing at {repo_path!r}, got a file.")
     dest.mkdir(parents=True, exist_ok=True)
