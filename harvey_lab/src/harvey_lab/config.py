@@ -29,7 +29,10 @@ class HarveyLabConfig:
     """Model + budget configuration for one Harvey LAB run."""
 
     # The inner legal agent (driven through Stirrup). LiteLLM model spec.
-    task_model: str = "openai/gpt-4.1-mini-2025-04-14"
+    # Routed through OpenRouter so a single ``OPENROUTER_API_KEY`` covers both
+    # the agent and the judge; override with a direct ``openai/…`` (+ that
+    # provider's key) if you'd rather call the provider straight.
+    task_model: str = "openrouter/openai/gpt-4.1-mini"
     task_temperature: float = 0.0
     # Per-call completion-token cap handed to the Stirrup client (litellm's
     # ``max_tokens``). Must stay within the task model's output limit —
@@ -43,11 +46,12 @@ class HarveyLabConfig:
     # graders on LAB. See:
     #   https://www.langchain.com/blog/designing-efficient-verifiers-for-legal-agents
     #   https://www.appliedcompute.com/case-studies/harvey  (GPT-5 Mini, 4/call)
-    judge_model: str = "deepseek/deepseek-v4-flash"
+    judge_model: str = "openrouter/deepseek/deepseek-v4-flash"
     judge_batch_size: int = 8
 
     # Cap on the Stirrup agent's tool-use loop per task. LAB tasks are long
-    # (dozens of documents, ~60 rubric criteria) but a smoke budget stays low.
+    # (dozens of documents, ~60 rubric criteria) but a smoke budget stays low;
+    # raise it for parity with a full LAB-AA harness.
     max_turns: int = 40
 
     # Per-LLM-call timeout (seconds), shared by the agent model and the judge.
