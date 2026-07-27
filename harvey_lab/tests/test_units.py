@@ -236,6 +236,26 @@ def test_ensure_task_dirs_fetches_and_caches(tmp_path: Path, monkeypatch: pytest
     assert calls["n"] == 0
 
 
+def test_ensure_task_dirs_refetches_on_commit_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A reused --cache-dir must not serve a stale tree after a pin bump: the
+    # sentinel records the commit, and a mismatch forces a refetch.
+    old_tree = {"tasks/contracts/t1/task.json": b'{"title": "old"}'}
+    monkeypatch.setattr(fetch_mod, "_request", _fake_github(old_tree))
+    fetch_mod.ensure_task_dirs(["contracts/t1"], commit="aaa", cache_dir=tmp_path)
+
+    new_tree = {"tasks/contracts/t1/task.json": b'{"title": "new"}'}
+    calls = {"n": 0}
+
+    def _counting(url: str) -> bytes:
+        calls["n"] += 1
+        return _fake_github(new_tree)(url)
+
+    monkeypatch.setattr(fetch_mod, "_request", _counting)
+    root = fetch_mod.ensure_task_dirs(["contracts/t1"], commit="bbb", cache_dir=tmp_path)
+    assert calls["n"] > 0
+    assert (root / "contracts/t1/task.json").read_bytes() == b'{"title": "new"}'
+
+
 # ─── frozen splits ────────────────────────────────────────────────────
 
 

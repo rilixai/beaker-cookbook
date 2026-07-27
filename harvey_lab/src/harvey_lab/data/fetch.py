@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import time
 import urllib.error
 import urllib.request
@@ -105,11 +106,21 @@ def ensure_task_dirs(
     root = cache_dir or default_cache_dir()
     tasks_root = root / "tasks"
     sentinels = root / ".fetched"
-    pending = [tid for tid in task_ids if not (sentinels / tid).is_file()]
+
+    def _cached_for(tid: str) -> bool:
+        # The sentinel records the commit it was fetched at; a mismatch (e.g. a
+        # reused --cache-dir after a pin bump) must refetch, not serve stale trees.
+        marker = sentinels / tid
+        return marker.is_file() and marker.read_text(encoding="utf-8") == commit
+
+    pending = [tid for tid in task_ids if not _cached_for(tid)]
     if pending:
         logger.info("Fetching %d task(s) from %s@%s into %s ...", len(pending), REPO, commit[:10], root)
     for tid in pending:
         dest = tasks_root / tid
+        # Drop any stale tree (different commit) so removed files don't linger.
+        if dest.exists():
+            shutil.rmtree(dest)
         _download_dir(f"tasks/{tid}", dest, commit)
         if not (dest / "task.json").is_file():
             raise FileNotFoundError(f"Fetched {tid} but no task.json — is the task id valid at {commit[:10]}?")
