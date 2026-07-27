@@ -373,6 +373,13 @@ def _run_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _archive_eval_reports(output_dir: Path) -> None:
+    for name in ("eval_summary.json", "eval_outputs.json"):
+        current = output_dir / name
+        if current.is_file():
+            current.replace(output_dir / f"{current.stem}.previous.json")
+
+
 def _run_evaluate(args: argparse.Namespace) -> int:
     tasks_root, records = _select_records(args)
     if not records:
@@ -413,8 +420,7 @@ def _run_evaluate(args: argparse.Namespace) -> int:
     )
     summary_path = args.output_dir / "eval_summary.json"
     outputs_path = args.output_dir / "eval_outputs.json"
-    summary_path.unlink(missing_ok=True)
-    outputs_path.unlink(missing_ok=True)
+    _archive_eval_reports(args.output_dir)
     logger.info(
         "Grading %d task(s) with up to %d concurrent case(s)...",
         len(records),

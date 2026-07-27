@@ -1046,6 +1046,8 @@ def test_cli_judge_failure_returns_nonzero_without_partial_reports(
     assert (output_dir / "contracts/t1/memo.md").read_bytes() == b"body"
     assert not (output_dir / "eval_summary.json").exists()
     assert not (output_dir / "eval_outputs.json").exists()
+    assert (output_dir / "eval_summary.previous.json").read_text() == "stale"
+    assert (output_dir / "eval_outputs.previous.json").read_text() == "stale"
 
 
 def test_evaluate_agent_contains_errors_and_excludes_unscoreable(tasks_root: Path) -> None:
