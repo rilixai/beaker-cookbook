@@ -25,7 +25,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from ..config import HARVEY_LABS_COMMIT
@@ -78,8 +78,11 @@ def _request(url: str) -> bytes:
     raise RuntimeError(f"Failed to GET {url}: {last_exc}")
 
 
-def _download_dir(repo_path: str, dest: Path, ref: str) -> None:
-    """Recursively download the GitHub directory ``repo_path`` into ``dest``."""
+def _download_dir(repo_path: str, dest: Path, ref: str, on_file: Callable[[], None] | None = None) -> None:
+    """Recursively download the GitHub directory ``repo_path`` into ``dest``.
+
+    ``on_file`` is called once per downloaded file (for progress reporting).
+    """
     # Percent-encode the path (LAB folders can contain spaces, e.g.
     # "1.0 Transaction Documents"); keep "/" as the path separator.
     quoted = urllib.parse.quote(repo_path, safe="/")
@@ -90,9 +93,11 @@ def _download_dir(repo_path: str, dest: Path, ref: str) -> None:
     for entry in listing:
         name = entry["name"]
         if entry["type"] == "dir":
-            _download_dir(f"{repo_path}/{name}", dest / name, ref)
+            _download_dir(f"{repo_path}/{name}", dest / name, ref, on_file)
         elif entry["type"] == "file":
             (dest / name).write_bytes(_request(entry["download_url"]))
+            if on_file is not None:
+                on_file()
 
 
 def ensure_task_dirs(
@@ -124,12 +129,25 @@ def ensure_task_dirs(
     pending = [tid for tid in task_ids if not _cached_for(tid)]
     if pending:
         logger.info("Fetching %d task(s) from %s@%s into %s ...", len(pending), REPO, commit[:10], root)
-    for tid in pending:
+    for i, tid in enumerate(pending, start=1):
         dest = tasks_root / tid
         # Drop any stale tree (different commit) so removed files don't linger.
         if dest.exists():
             shutil.rmtree(dest)
-        _download_dir(f"tasks/{tid}", dest, commit)
+        logger.info("  [%d/%d] %s ...", i, len(pending), tid)
+
+        # Log a running file count so a big task (some have thousands of
+        # documents) visibly ticks along rather than looking hung.
+        count = 0
+
+        def _tick() -> None:
+            nonlocal count
+            count += 1
+            if count % 25 == 0:
+                logger.info("      ... %d files", count)
+
+        _download_dir(f"tasks/{tid}", dest, commit, _tick)
+        logger.info("  [%d/%d] %s done (%d files)", i, len(pending), tid, count)
         if not (dest / "task.json").is_file():
             raise FileNotFoundError(f"Fetched {tid} but no task.json — is the task id valid at {commit[:10]}?")
         marker = sentinels / tid
