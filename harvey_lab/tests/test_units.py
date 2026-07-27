@@ -959,6 +959,35 @@ def test_max_turn_and_stale_task_entries_are_not_reusable(tasks_root: Path, tmp_
     assert not cli_mod._is_reusable(tmp_path, record, entry)
 
 
+def test_max_turn_run_is_graded_not_errored(tasks_root: Path, tmp_path: Path) -> None:
+    """A max-turns run is not *reusable* (it gets re-run), but once persisted it
+    must still be graded on whatever partial output it submitted — not bucketed
+    as an error, which would drop its passes and inflate ``num_errored``."""
+    record = load_records(tasks_root, task_ids=["contracts/t1"])[0]
+    memo = tmp_path / "contracts/t1/memo.md"
+    memo.parent.mkdir(parents=True)
+    memo.write_text("partial memo body")
+    entry = {
+        "task_id": record.task_id,
+        "task_fingerprint": record.task_fingerprint,
+        "deliverables_produced": ["memo.md"],
+        "deliverables_missing": [],
+        "finished": False,
+        "abandoned": False,
+        "max_turns_reached": True,
+        "final_answer": "ran out of turns",
+    }
+
+    assert not cli_mod._is_reusable(tmp_path, record, entry)
+    assert cli_mod._is_gradeable(tmp_path, record, entry)
+
+    outputs, errors = cli_mod._load_persisted_outputs(tmp_path, [record], {record.task_id: entry})
+    assert errors == {}
+    graded = outputs[record.task_id]
+    assert graded.max_turns_reached is True
+    assert graded.deliverables == {"memo.md": "partial memo body"}
+
+
 def test_judge_failure_aborts_evaluation(tasks_root: Path) -> None:
     records = load_records(tasks_root, task_ids=["contracts/t1", "tax/t1"])
     outputs = {

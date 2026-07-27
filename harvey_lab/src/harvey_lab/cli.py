@@ -186,14 +186,15 @@ def _artifact_path(output_dir: Path, task_id: str, name: str) -> Path:
     return path
 
 
-def _is_reusable(output_dir: Path, record: HarveyLabRecord, entry: dict[str, Any] | None) -> bool:
+def _is_gradeable(output_dir: Path, record: HarveyLabRecord, entry: dict[str, Any] | None) -> bool:
+    """Whether a persisted output can be reloaded from disk and graded.
+
+    A run is gradeable whenever it is not an agent error and its metadata +
+    produced files are intact — regardless of *how* it ended. A max-turns or
+    partial run is graded on whatever it managed to submit (matching the old
+    run-then-grade path), rather than being bucketed as an error.
+    """
     if entry is None or "error" in entry:
-        return False
-    finished = entry.get("finished") is True
-    abandoned = entry.get("abandoned") is True
-    if finished == abandoned or entry.get("max_turns_reached") is True:
-        return False
-    if entry.get("task_fingerprint") != record.task_fingerprint:
         return False
     produced = entry.get("deliverables_produced")
     missing = entry.get("deliverables_missing")
@@ -210,6 +211,22 @@ def _is_reusable(output_dir: Path, record: HarveyLabRecord, entry: dict[str, Any
         return all(_artifact_path(output_dir, record.task_id, name).is_file() for name in produced)
     except (OSError, ValueError):
         return False
+
+
+def _is_reusable(output_dir: Path, record: HarveyLabRecord, entry: dict[str, Any] | None) -> bool:
+    """Whether a saved output is a completed terminal run we can skip re-running.
+
+    Stricter than :func:`_is_gradeable`: only a genuinely finished-or-abandoned
+    run whose source-document fingerprint is unchanged is reused. A max-turns
+    (or errored / stale-fingerprint) task is re-run before grading.
+    """
+    if entry is None or not _is_gradeable(output_dir, record, entry):
+        return False
+    finished = entry.get("finished") is True
+    abandoned = entry.get("abandoned") is True
+    if finished == abandoned or entry.get("max_turns_reached") is True:
+        return False
+    return entry.get("task_fingerprint") == record.task_fingerprint
 
 
 def _persist_agent_output(
@@ -297,7 +314,7 @@ def _load_persisted_outputs(
         if "error" in entry:
             errors[record.task_id] = str(entry["error"])
             continue
-        if not _is_reusable(output_dir, record, entry):
+        if not _is_gradeable(output_dir, record, entry):
             errors[record.task_id] = "Persisted run metadata or deliverable files are incomplete."
             continue
         produced = [str(name) for name in entry["deliverables_produced"]]
