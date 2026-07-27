@@ -1106,5 +1106,12 @@ def test_default_config_targets_deepseek_v4_pro_max_reasoning() -> None:
 def test_default_model_factory_threads_reasoning_effort() -> None:
     client = _default_model_factory("openrouter/deepseek/deepseek-v4-pro", 0.0, 16_384, 120.0, "xhigh")
     assert client._reasoning_effort == "xhigh"
-    # An empty/none effort disables reasoning for non-thinking models.
-    assert _default_model_factory("openrouter/openai/gpt-4.1-mini", 0.0, 16_384, 120.0, "")._reasoning_effort is None
+    # A reasoning effort opts the param through litellm's model-support gate so a
+    # newly released model (not yet in litellm's reasoning map) doesn't raise
+    # UnsupportedParamsError on OpenRouter.
+    assert client._kwargs["allowed_openai_params"] == ["reasoning_effort"]
+    # An empty/none effort disables reasoning for non-thinking models — and does
+    # not force the param through.
+    disabled = _default_model_factory("openrouter/openai/gpt-4.1-mini", 0.0, 16_384, 120.0, "")
+    assert disabled._reasoning_effort is None
+    assert "allowed_openai_params" not in disabled._kwargs
