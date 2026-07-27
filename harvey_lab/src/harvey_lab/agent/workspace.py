@@ -26,7 +26,7 @@ from __future__ import annotations
 import email
 import logging
 import shutil
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +43,6 @@ __all__ = [
     "TaskSource",
     "TaskWorkspace",
     "task_source_from_dir",
-    "task_source_from_mapping",
 ]
 
 
@@ -90,7 +89,7 @@ class TaskWorkspace:
         for base in (self._documents, self._output):
             for path in sorted(base.rglob("*")):
                 if path.is_file():
-                    out.append(str(path.relative_to(self._root)))
+                    out.append(path.relative_to(self._root).as_posix())
         return out
 
     def read_document(self, rel_path: str) -> str:
@@ -132,7 +131,7 @@ class TaskWorkspace:
         for path in sorted(self._documents.rglob("*")):
             if not path.is_file():
                 continue
-            rel = str(path.relative_to(self._root))
+            rel = path.relative_to(self._root).as_posix()
             try:
                 text = self.read_document(rel)
             except Exception:  # noqa: BLE001 - unreadable file, skip
@@ -151,7 +150,7 @@ class TaskWorkspace:
         path = self._resolve_within(self._output, rel_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        return str(path.relative_to(self._root))
+        return path.relative_to(self._root).as_posix()
 
     def edit_deliverable(self, rel_path: str, old: str, new: str) -> str:
         """Replace the first occurrence of ``old`` with ``new`` in an output file."""
@@ -162,14 +161,14 @@ class TaskWorkspace:
         if old not in text:
             raise ValueError(f"edit_deliverable: snippet not found in output/{rel_path}.")
         path.write_text(text.replace(old, new, 1), encoding="utf-8")
-        return str(path.relative_to(self._root))
+        return path.relative_to(self._root).as_posix()
 
     def collect_deliverables(self) -> dict[str, str]:
         """Read every file under ``output/`` back out, keyed by filename."""
         out: dict[str, str] = {}
         for path in sorted(self._output.rglob("*")):
             if path.is_file():
-                rel = str(path.relative_to(self._output))
+                rel = path.relative_to(self._output).as_posix()
                 out[rel] = path.read_bytes().decode("utf-8", errors="replace")
         return out
 
@@ -263,9 +262,10 @@ def _read_eml(path: Path) -> str:
 def task_source_from_dir(tasks_root: str | Path, *, max_document_chars: int = 200_000) -> TaskSource:
     """Build a ``(record) -> TaskWorkspace`` factory backed by a local tree.
 
-    ``tasks_root`` is a directory laid out like ``harveyai/harvey-labs``:
-    ``<practice_area>/<slug>/documents/*``. The record's ``task_id`` is the
-    ``<practice_area>/<slug>`` path. Fully offline (used by the CLI + tests,
+    ``tasks_root`` is the ``tasks/`` directory of a ``harveyai/harvey-labs``
+    checkout; a task's ``documents/`` live at ``tasks_root/<task_id>/documents``
+    (``task_id`` is the task directory's path relative to ``tasks/``, possibly
+    nested under a sub-category). Fully offline (used by the CLI + tests,
     which point it at a fixture tree).
     """
     base = Path(tasks_root)
@@ -284,17 +284,5 @@ def task_source_from_dir(tasks_root: str | Path, *, max_document_chars: int = 20
             ws.close()
             raise
         return ws
-
-    return _factory
-
-
-def task_source_from_mapping(mapping: Mapping[str, TaskWorkspace]) -> TaskSource:
-    """Factory from a prebuilt ``{task_id: TaskWorkspace}`` mapping (tests)."""
-
-    def _factory(record: Any) -> TaskWorkspace:
-        task_id = str(getattr(record, "task_id", "") or "")
-        if task_id not in mapping:
-            raise KeyError(f"No prebuilt workspace for task_id={task_id!r}.")
-        return mapping[task_id]
 
     return _factory

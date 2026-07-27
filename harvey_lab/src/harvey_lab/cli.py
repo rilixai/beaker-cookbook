@@ -3,15 +3,19 @@
 Run as ``python -m harvey_lab.cli <command> ...``.
 
 Subcommands:
-* ``run`` — run the agent on tasks from a local ``harvey-labs`` checkout and
-  write the produced deliverables to ``--output-dir`` (agent only; needs the
-  task model's provider key).
-* ``evaluate`` — run the agent AND grade every rubric criterion with the LLM
-  judge, reporting ``all_pass`` / ``criterion_pass_rate`` (needs the task
-  model's and the judge model's provider keys).
+* ``run`` — run the agent on a split's tasks and write the produced
+  deliverables to ``--output-dir`` (agent only; needs the task model's
+  provider key).
+* ``evaluate`` — run the agent AND grade every rubric criterion with the
+  batched LLM judge, reporting ``all_pass_rate`` / ``criterion_pass_rate``
+  (needs the task model's and the judge model's provider keys).
 
-Both load tasks from ``--tasks-root`` (clone
-https://github.com/harveyai/harvey-labs and point at its ``tasks/`` dir).
+Tasks come from the frozen ``splits/{train,val,test}.txt`` lists (see
+``splits/README.md``); ``--tasks-root`` points at a local ``harvey-labs``
+checkout's ``tasks/`` dir (clone https://github.com/harveyai/harvey-labs at
+``config.HARVEY_LABS_COMMIT``). ``--limit`` caps how many of the split's
+tasks actually run — the lists are ordered so any prefix stays
+distribution-representative, so ``--limit`` gives a cheap smoke run.
 """
 
 from __future__ import annotations
@@ -25,15 +29,13 @@ from pathlib import Path
 from .agent.agent import HarveyLabAgent
 from .agent.workspace import task_source_from_dir
 from .config import HarveyLabConfig
-from .data.dataset import HarveyLabRecord, load_harvey_lab_records
-from .data.task_splits import fixed_val_split, stratified_case_cap
+from .data.dataset import HarveyLabRecord, load_records, read_split
 from .evaluation import (
-    ALL_PASS_FIELD,
+    ALL_PASS_RATE_FIELD,
     CRITERION_PASS_RATE_FIELD,
-    build_criterion_judge,
+    build_rubric_judge,
     eval_summary,
     evaluate_agent_on_records,
-    heldout_subset_summary,
     write_json,
 )
 
@@ -42,11 +44,12 @@ logger = logging.getLogger("harvey_lab")
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    defaults = HarveyLabConfig()
     parser = argparse.ArgumentParser(
         description=(
             "Harvey LAB legal agent: a Stirrup-harnessed agent that reads a task's "
             "documents and writes deliverables, graded by an all-pass rubric (a "
-            "per-criterion LLM judge with deliverable-scoped context)."
+            "batched LLM judge with deliverable-scoped context)."
         ),
     )
     parser.add_argument(
@@ -61,47 +64,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to a local `harvey-labs` checkout's `tasks/` dir.",
     )
     parser.add_argument(
-        "--practice-areas",
-        type=str,
-        default=None,
-        help="Comma-separated practice areas to load (default: all).",
-    )
-    parser.add_argument(
-        "--max-per-area",
-        type=int,
-        default=None,
-        help="Optional cap on tasks loaded per practice area.",
-    )
-    parser.add_argument(
-        "--val-areas",
-        type=int,
-        default=2,
-        help="Number of WHOLE practice areas forming the fixed validation pool.",
-    )
-    parser.add_argument(
-        "--val-size",
-        type=int,
-        default=20,
-        help="Validation case count (stratified across the val areas). 0/None = all.",
-    )
-    parser.add_argument(
-        "--test-size",
-        type=int,
-        default=None,
-        help="Optional cap on the number of tasks run/evaluated.",
-    )
-    parser.add_argument(
         "--split",
-        choices=("all", "validation"),
-        default="all",
-        help="'all' uses every loaded task; 'validation' uses the fixed cross-area val pool.",
+        choices=("train", "val", "test"),
+        default="test",
+        help="Which frozen split to run (splits/<split>.txt). Default: test.",
     )
-    parser.add_argument("--seed", type=int, default=0, help="Seed for the area-level validation carve + caps.")
-    parser.add_argument("--task-model", type=str, default="openai/gpt-4.1-mini-2025-04-14")
-    parser.add_argument("--task-temperature", type=float, default=0.0)
-    parser.add_argument("--judge-model", type=str, default="gemini/gemini-3.5-flash")
-    parser.add_argument("--max-turns", type=int, default=40)
-    parser.add_argument("--llm-timeout", type=float, default=120.0)
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Run only the first N tasks of the split (cheap smoke run). Default: all.",
+    )
+    parser.add_argument("--task-model", type=str, default=defaults.task_model)
+    parser.add_argument("--task-temperature", type=float, default=defaults.task_temperature)
+    parser.add_argument("--judge-model", type=str, default=defaults.judge_model)
+    parser.add_argument("--judge-batch-size", type=int, default=defaults.judge_batch_size)
+    parser.add_argument("--max-turns", type=int, default=defaults.max_turns)
+    parser.add_argument("--llm-timeout", type=float, default=defaults.llm_timeout)
     parser.add_argument("--max-concurrency", type=int, default=4)
     parser.add_argument("--output-dir", type=Path, default=Path("harvey_lab_run"))
     return parser.parse_args(argv)
@@ -112,29 +91,17 @@ def _config_from_args(args: argparse.Namespace) -> HarveyLabConfig:
         task_model=args.task_model,
         task_temperature=args.task_temperature,
         judge_model=args.judge_model,
+        judge_batch_size=args.judge_batch_size,
         max_turns=args.max_turns,
         llm_timeout=args.llm_timeout,
     )
 
 
-def _select_records(args: argparse.Namespace) -> tuple[list[HarveyLabRecord], set[str]]:
-    areas = [a.strip() for a in args.practice_areas.split(",")] if args.practice_areas else None
-    all_records = load_harvey_lab_records(args.tasks_root, practice_areas=areas, max_per_area=args.max_per_area)
-    _, val_records, val_area_ids = fixed_val_split(
-        all_records,
-        n_val_areas=args.val_areas,
-        val_size=(args.val_size if args.val_size and args.val_size > 0 else None),
-        seed=args.seed,
-    )
-    excluded_area_ids: set[str] = set()
-    if args.split == "validation":
-        records = list(val_records)
-    else:
-        records = list(all_records)
-        excluded_area_ids = {str(a) for a in val_area_ids}
-    if args.test_size is not None:
-        records = stratified_case_cap(records, args.test_size, seed=args.seed)
-    return records, excluded_area_ids
+def _select_records(args: argparse.Namespace) -> list[HarveyLabRecord]:
+    task_ids = read_split(args.split)
+    if args.limit is not None:
+        task_ids = task_ids[: max(0, args.limit)]
+    return load_records(args.tasks_root, task_ids=task_ids)
 
 
 def _build_agent(args: argparse.Namespace, config: HarveyLabConfig) -> HarveyLabAgent:
@@ -145,7 +112,7 @@ def _build_agent(args: argparse.Namespace, config: HarveyLabConfig) -> HarveyLab
 
 
 def _run_run(args: argparse.Namespace) -> int:
-    records, _ = _select_records(args)
+    records = _select_records(args)
     if not records:
         logger.error("run got no tasks for --split %s.", args.split)
         return 2
@@ -184,7 +151,7 @@ def _run_run(args: argparse.Namespace) -> int:
 
         return list(await asyncio.gather(*[_one(r) for r in records]))
 
-    logger.info("Running the agent on %d task(s)...", len(records))
+    logger.info("Running the agent on %d task(s) from split=%s...", len(records), args.split)
     results = asyncio.run(_run_all())
     write_json(args.output_dir / "run_outputs.json", results)
     num_errored = sum(1 for r in results if "error" in r)
@@ -199,34 +166,33 @@ def _run_run(args: argparse.Namespace) -> int:
 
 
 def _run_evaluate(args: argparse.Namespace) -> int:
-    records, excluded_area_ids = _select_records(args)
+    records = _select_records(args)
     if not records:
         logger.error("evaluate got no tasks for --split %s.", args.split)
         return 2
     config = _config_from_args(args)
     agent = _build_agent(args, config)
-    judge = build_criterion_judge(model=config.judge_model, timeout=config.llm_timeout)
+    judge = build_rubric_judge(model=config.judge_model, timeout=config.llm_timeout)
     logger.info("Starting evaluate on split=%s (%d tasks)...", args.split, len(records))
     report = asyncio.run(
         evaluate_agent_on_records(
             agent=agent,
             records=records,
             judge=judge,
+            batch_size=config.judge_batch_size,
             max_deliverable_chars=config.max_deliverable_chars,
             max_concurrency=args.max_concurrency,
         )
     )
     summary = eval_summary(report, split=args.split)
-    if args.split == "all":
-        summary.update(heldout_subset_summary(report.per_case, excluded_area_ids))
     args.output_dir.mkdir(parents=True, exist_ok=True)
     write_json(args.output_dir / "eval_summary.json", summary)
     write_json(args.output_dir / "eval_outputs.json", report.per_case)
     logger.info(
         "Split=%s | %s=%.4f %s=%.4f over %d task(s) (%d scored, %d errored, %d unscoreable)",
         args.split,
-        ALL_PASS_FIELD,
-        report.all_pass,
+        ALL_PASS_RATE_FIELD,
+        report.all_pass_rate,
         CRITERION_PASS_RATE_FIELD,
         report.criterion_pass_rate,
         report.num_cases,

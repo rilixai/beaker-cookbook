@@ -1,9 +1,10 @@
-"""Local batch evaluation for the Harvey LAB agent.
+"""Run the Harvey LAB agent over a set of tasks and grade each one.
 
 Runs the :class:`~harvey_lab.agent.agent.HarveyLabAgent` over a set of
 :class:`~harvey_lab.data.dataset.HarveyLabRecord` tasks and grades each with
-the deliverable-scoped rubric judge, aggregating to the LAB metrics
-(``all_pass`` + ``criterion_pass_rate``).
+the batched rubric judge, aggregating to the LAB metrics (``all_pass_rate``
++ ``criterion_pass_rate``). ``scoring.py`` grades ONE task; this runs the
+agent + scoring across the whole dataset.
 
 Cases run concurrently (bounded by ``max_concurrency``). One case failing
 never aborts the batch: an errored case counts as ``0`` (a real failure must
@@ -20,14 +21,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..agent.agent import HarveyLabAgent
-from ..config import HarveyLabConfig
 from ..data.dataset import HarveyLabRecord
 from .scoring import (
     ALL_PASS_FIELD,
     CRITERION_PASS_RATE_FIELD,
+    DEFAULT_JUDGE_BATCH_SIZE,
     DEFAULT_MAX_DELIVERABLE_CHARS,
-    CriterionJudge,
-    score_all_pass,
+    BatchJudge,
+    score_rubric,
 )
 
 
@@ -39,7 +40,7 @@ class EvalReport:
     """Aggregate of the agent's graded performance over a set of records."""
 
     num_cases: int
-    all_pass: float
+    all_pass_rate: float
     criterion_pass_rate: float
     num_scored: int = 0
     num_errored: int = 0
@@ -57,15 +58,16 @@ async def evaluate_record(
     *,
     record: HarveyLabRecord,
     agent: HarveyLabAgent,
-    judge: CriterionJudge,
+    judge: BatchJudge,
+    batch_size: int = DEFAULT_JUDGE_BATCH_SIZE,
     max_deliverable_chars: int = DEFAULT_MAX_DELIVERABLE_CHARS,
 ) -> dict[str, Any]:
     """Run the agent on ``record`` and grade it, returning a per-case result.
 
     The returned dict always carries ``task_id`` + ``practice_area`` and a
     ``kind`` in ``{"scored", "unscoreable"}``. A ``scored`` result also carries
-    ``all_pass`` / ``criterion_pass_rate`` / ``n_passed`` / ``n_total`` and the
-    agent's ``final_answer`` + produced ``deliverables``.
+    ``all_pass`` / ``criterion_pass_rate`` / ``passed`` / ``total_criteria`` and
+    the agent's ``final_answer`` + produced ``deliverables``.
     """
     output = await agent.forward(record=record)
     criteria_payload = [
@@ -77,20 +79,21 @@ async def evaluate_record(
     if not has_scoreable:
         return {**base, "kind": "unscoreable", "final_answer": output.final_answer}
     scored = await asyncio.to_thread(
-        score_all_pass,
+        score_rubric,
         criteria=criteria_payload,
         deliverables=output.deliverables,
         task_description=_task_description(record),
         judge=judge,
+        batch_size=batch_size,
         max_deliverable_chars=max_deliverable_chars,
     )
     return {
         **base,
         "kind": "scored",
-        ALL_PASS_FIELD: scored["all_pass"],
-        CRITERION_PASS_RATE_FIELD: scored["criterion_pass_rate"],
-        "n_passed": scored["n_passed"],
-        "n_total": scored["n_total"],
+        ALL_PASS_FIELD: scored[ALL_PASS_FIELD],
+        CRITERION_PASS_RATE_FIELD: scored[CRITERION_PASS_RATE_FIELD],
+        "passed": scored["passed"],
+        "total_criteria": scored["total_criteria"],
         "deliverables_produced": sorted(output.deliverables),
         "final_answer": output.final_answer,
     }
@@ -100,7 +103,8 @@ async def evaluate_agent_on_records(
     *,
     agent: HarveyLabAgent,
     records: Sequence[HarveyLabRecord],
-    judge: CriterionJudge,
+    judge: BatchJudge,
+    batch_size: int = DEFAULT_JUDGE_BATCH_SIZE,
     max_deliverable_chars: int = DEFAULT_MAX_DELIVERABLE_CHARS,
     max_concurrency: int = 4,
 ) -> EvalReport:
@@ -114,6 +118,7 @@ async def evaluate_agent_on_records(
                     record=record,
                     agent=agent,
                     judge=judge,
+                    batch_size=batch_size,
                     max_deliverable_chars=max_deliverable_chars,
                 )
             except Exception as exc:  # noqa: BLE001 - one bad case must not abort the batch
@@ -151,7 +156,7 @@ async def evaluate_agent_on_records(
 
     return EvalReport(
         num_cases=len(per_case),
-        all_pass=(all_pass_total / denominator) if denominator else 0.0,
+        all_pass_rate=(all_pass_total / denominator) if denominator else 0.0,
         criterion_pass_rate=(rate_total / denominator) if denominator else 0.0,
         num_scored=num_scored,
         num_errored=num_errored,
@@ -160,30 +165,8 @@ async def evaluate_agent_on_records(
     )
 
 
-def run_evaluation(
-    *,
-    agent: HarveyLabAgent,
-    records: Sequence[HarveyLabRecord],
-    judge: CriterionJudge,
-    config: HarveyLabConfig | None = None,
-    max_concurrency: int = 4,
-) -> EvalReport:
-    """Synchronous wrapper around :func:`evaluate_agent_on_records`."""
-    cfg = config or HarveyLabConfig()
-    return asyncio.run(
-        evaluate_agent_on_records(
-            agent=agent,
-            records=records,
-            judge=judge,
-            max_deliverable_chars=cfg.max_deliverable_chars,
-            max_concurrency=max_concurrency,
-        )
-    )
-
-
 __all__ = [
     "EvalReport",
     "evaluate_agent_on_records",
     "evaluate_record",
-    "run_evaluation",
 ]

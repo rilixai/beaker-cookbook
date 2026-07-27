@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -25,8 +26,24 @@ from pydantic import BaseModel, Field
 from ..config import HarveyLabConfig
 from ..data.dataset import HarveyLabRecord
 from .prompts import load_harvey_lab_prompts
-from .types import HarveyLabAgentOutput
 from .workspace import TaskSource, TaskWorkspace
+
+
+@dataclass
+class HarveyLabAgentOutput:
+    """Per-case result returned by the Harvey LAB Stirrup agent.
+
+    ``deliverables`` maps each ``output/`` filename the agent produced to its
+    text content — this is what the rubric judge grades (criteria are scoped to
+    named deliverables). The rubric score is NOT computed here; the evaluator
+    runs the judge after the agent terminates. ``total_turns`` / ``wall_seconds``
+    are recorded into ``run_outputs.json`` for cost/latency inspection.
+    """
+
+    final_answer: str
+    deliverables: dict[str, str] = field(default_factory=dict)
+    total_turns: int = 0
+    wall_seconds: float = 0.0
 
 
 # Factory that builds a Stirrup ``LLMClient`` from ``(model, temperature,
@@ -233,7 +250,6 @@ class HarveyLabAgent:
             deliverables = workspace.collect_deliverables()
             return HarveyLabAgentOutput(
                 final_answer=str(getattr(finish_params, "reason", "")),
-                status="completed",
                 deliverables=deliverables,
                 total_turns=len(history),
                 wall_seconds=time.monotonic() - started,
@@ -242,4 +258,4 @@ class HarveyLabAgent:
             workspace.close()
 
 
-__all__ = ["HarveyLabAgent", "ModelFactory"]
+__all__ = ["HarveyLabAgent", "HarveyLabAgentOutput", "ModelFactory"]
