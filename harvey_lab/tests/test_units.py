@@ -181,31 +181,46 @@ def test_load_records_raises_on_missing_split_task(tasks_root: Path) -> None:
 
 
 def _fake_github(tree: dict[str, bytes]) -> Any:
-    """Return a fake ``_request`` serving one task's contents API + raw blobs.
+    """Return a fake ``_request`` serving the contents API, Trees API + raw blobs.
 
     ``tree`` maps repo-relative file paths (e.g. ``tasks/x/task.json``) to bytes.
-    Directory listings are synthesized from the paths; raw urls are ``raw://<path>``.
+    Directory listings and the recursive tree are synthesized from the paths; a
+    dir's synthetic ``sha`` is its own path so the Trees API can resolve it.
     """
+    import urllib.parse
 
     def _request(url: str) -> bytes:
-        if url.startswith("raw://"):
-            return tree[url[len("raw://") :]]
+        if url.startswith("https://raw.githubusercontent.com/"):
+            # .../<owner>/<name>/<ref>/<path...>
+            _owner, _name, _ref, *parts = url[len("https://raw.githubusercontent.com/") :].split("/")
+            return tree[urllib.parse.unquote("/".join(parts))]
+        if "/git/trees/" in url:
+            root = urllib.parse.unquote(url.split("/git/trees/", 1)[1].split("?", 1)[0])
+            prefix = root + "/"
+            items: list[dict[str, str]] = []
+            seen: set[str] = set()
+            for fpath in tree:
+                if not fpath.startswith(prefix):
+                    continue
+                rel = fpath[len(prefix) :]
+                parts = rel.split("/")
+                for i in range(len(parts) - 1):
+                    d = "/".join(parts[: i + 1])
+                    if d not in seen:
+                        seen.add(d)
+                        items.append({"path": d, "type": "tree"})
+                items.append({"path": rel, "type": "blob"})
+            return json.dumps({"tree": items, "truncated": False}).encode()
         # contents API: ".../contents/<path>?ref=..." (path is percent-encoded)
-        import urllib.parse
-
         path = urllib.parse.unquote(url.split("/contents/", 1)[1].split("?", 1)[0])
         prefix = path + "/"
         children: dict[str, str] = {}
         for fpath in tree:
             if fpath.startswith(prefix):
-                rest = fpath[len(prefix) :]
-                head = rest.split("/", 1)
+                head = fpath[len(prefix) :].split("/", 1)
                 children[head[0]] = "dir" if len(head) > 1 else "file"
         return json.dumps(
-            [
-                {"name": name, "type": kind, "download_url": f"raw://{path}/{name}"}
-                for name, kind in sorted(children.items())
-            ]
+            [{"name": name, "type": kind, "sha": f"{path}/{name}"} for name, kind in sorted(children.items())]
         ).encode()
 
     return _request

@@ -8,25 +8,30 @@ locally, reproducing the same on-disk layout a clone would give
 (``<tasks_root>/<task_id>/task.json`` + ``<task_id>/documents/…``) so the
 loader and the agent's workspace factory work unchanged.
 
-Directory listings use the GitHub contents API (rate-limited to 60 req/hour
-unauthenticated — set ``GITHUB_TOKEN`` for 5000/hour when pulling large
-splits); file bodies download from ``raw.githubusercontent.com``, which is not
-API-rate-limited. Already-fetched tasks are skipped via a sentinel marker, so
-re-runs hit the network only for new tasks.
+A task's whole file tree is enumerated with a single git Trees API call
+(``recursive=1``) rather than one contents-API call per subdirectory — this
+matters because the unauthenticated API limit is only 60 req/hour and a large
+task has hundreds of nested folders. File bodies then download in parallel
+from ``raw.githubusercontent.com``, which is not API-rate-limited. Set
+``GITHUB_TOKEN`` to raise the API limit to 5000/hour. Already-fetched tasks are
+skipped via a sentinel marker, so re-runs hit the network only for new tasks.
 """
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import os
 import shutil
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 from ..config import HARVEY_LABS_COMMIT
 
@@ -35,8 +40,11 @@ logger = logging.getLogger(__name__)
 
 REPO = "harveyai/harvey-labs"
 _CONTENTS_API = "https://api.github.com/repos/{repo}/contents/{path}?ref={ref}"
+_TREES_API = "https://api.github.com/repos/{repo}/git/trees/{sha}?recursive=1"
+_RAW_URL = "https://raw.githubusercontent.com/{repo}/{ref}/{path}"
 _USER_AGENT = "harvey-lab-cookbook"
 _MAX_RETRIES = 3
+_DOWNLOAD_WORKERS = 8
 
 
 def default_cache_dir() -> Path:
@@ -78,26 +86,73 @@ def _request(url: str) -> bytes:
     raise RuntimeError(f"Failed to GET {url}: {last_exc}")
 
 
-def _download_dir(repo_path: str, dest: Path, ref: str, on_file: Callable[[], None] | None = None) -> None:
-    """Recursively download the GitHub directory ``repo_path`` into ``dest``.
-
-    ``on_file`` is called once per downloaded file (for progress reporting).
-    """
+def _list_contents(repo_path: str, ref: str) -> list[dict[str, Any]]:
+    """Return the GitHub contents-API listing for directory ``repo_path``."""
     # Percent-encode the path (LAB folders can contain spaces, e.g.
     # "1.0 Transaction Documents"); keep "/" as the path separator.
     quoted = urllib.parse.quote(repo_path, safe="/")
     listing = json.loads(_request(_CONTENTS_API.format(repo=REPO, path=quoted, ref=ref)))
     if not isinstance(listing, list):
         raise RuntimeError(f"Expected a directory listing at {repo_path!r}, got a file.")
-    dest.mkdir(parents=True, exist_ok=True)
-    for entry in listing:
-        name = entry["name"]
+    return listing
+
+
+def _subtree_sha(task_id: str, ref: str) -> str:
+    """Tree SHA of ``tasks/<task_id>`` (one contents call on its parent dir)."""
+    parent, _, name = task_id.rpartition("/")
+    parent_path = f"tasks/{parent}" if parent else "tasks"
+    for entry in _list_contents(parent_path, ref):
+        if entry["name"] == name and entry["type"] == "dir":
+            return str(entry["sha"])
+    raise FileNotFoundError(f"Task {task_id!r} not found under tasks/ at {ref[:10]}.")
+
+
+def _walk_blob_paths(repo_path: str, ref: str, prefix: str = "") -> list[str]:
+    """Enumerate file paths (relative to ``repo_path``) via the contents API."""
+    paths: list[str] = []
+    for entry in _list_contents(repo_path, ref):
+        rel = f"{prefix}{entry['name']}"
         if entry["type"] == "dir":
-            _download_dir(f"{repo_path}/{name}", dest / name, ref, on_file)
+            paths.extend(_walk_blob_paths(f"{repo_path}/{entry['name']}", ref, rel + "/"))
         elif entry["type"] == "file":
-            (dest / name).write_bytes(_request(entry["download_url"]))
-            if on_file is not None:
-                on_file()
+            paths.append(rel)
+    return paths
+
+
+def _blob_paths(task_id: str, ref: str) -> list[str]:
+    """File paths under ``tasks/<task_id>`` (relative to it), via the Trees API.
+
+    One recursive Trees call lists the whole subtree regardless of nesting;
+    falls back to a per-directory walk only if GitHub truncates the response
+    (subtrees over ~100k entries — no LAB task is that large).
+    """
+    tree = json.loads(_request(_TREES_API.format(repo=REPO, sha=_subtree_sha(task_id, ref))))
+    if tree.get("truncated"):
+        return _walk_blob_paths(f"tasks/{task_id}", ref)
+    return [item["path"] for item in tree.get("tree", []) if item["type"] == "blob"]
+
+
+def _download_task(task_id: str, dest: Path, ref: str, on_file: Callable[[], None] | None = None) -> None:
+    """Download every file under ``tasks/<task_id>`` into ``dest`` in parallel.
+
+    ``on_file`` is called once per downloaded file (for progress reporting).
+    """
+    rel_paths = _blob_paths(task_id, ref)
+    dest.mkdir(parents=True, exist_ok=True)
+
+    def _fetch_one(rel: str) -> None:
+        repo_path = f"tasks/{task_id}/{rel}"
+        url = _RAW_URL.format(repo=REPO, ref=ref, path=urllib.parse.quote(repo_path, safe="/"))
+        data = _request(url)
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        if on_file is not None:
+            on_file()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=_DOWNLOAD_WORKERS) as pool:
+        for fut in concurrent.futures.as_completed([pool.submit(_fetch_one, rel) for rel in rel_paths]):
+            fut.result()  # surface the first download error
 
 
 def ensure_task_dirs(
@@ -137,16 +192,20 @@ def ensure_task_dirs(
         logger.info("  [%d/%d] %s ...", i, len(pending), tid)
 
         # Log a running file count so a big task (some have thousands of
-        # documents) visibly ticks along rather than looking hung.
+        # documents) visibly ticks along rather than looking hung. Downloads
+        # run on a thread pool, so guard the counter with a lock.
         count = 0
+        lock = threading.Lock()
 
         def _tick() -> None:
             nonlocal count
-            count += 1
-            if count % 25 == 0:
-                logger.info("      ... %d files", count)
+            with lock:
+                count += 1
+                done = count
+            if done % 25 == 0:
+                logger.info("      ... %d files", done)
 
-        _download_dir(f"tasks/{tid}", dest, commit, _tick)
+        _download_task(tid, dest, commit, _tick)
         logger.info("  [%d/%d] %s done (%d files)", i, len(pending), tid, count)
         if not (dest / "task.json").is_file():
             raise FileNotFoundError(f"Fetched {tid} but no task.json — is the task id valid at {commit[:10]}?")
