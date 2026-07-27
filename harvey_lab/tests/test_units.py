@@ -727,6 +727,24 @@ def test_finish_rejects_relative_paths_and_stat_errors() -> None:
     assert asyncio.run(_run("/tmp/memo.md")).success is False
 
 
+def test_finish_accepts_posix_absolute_paths_cross_platform() -> None:
+    """A POSIX container path (e.g. `/workspace/memo.md`) must count as absolute
+    even on a Windows host, so a swapped-in container/remote backend still works.
+    Here the path is absolute + stats as a real file, so finish succeeds."""
+
+    class _Env:
+        async def file_exists(self, _path: str) -> bool:
+            return True
+
+        async def is_directory(self, _path: str) -> bool:
+            return False
+
+    finish = _build_finish_tools(_Env())[0]
+    result = finish.executor(FinishParams(summary="done", paths=["/workspace/memo.md"]))
+    result = asyncio.run(result) if inspect.isawaitable(result) else result
+    assert result.success is not False
+
+
 def test_finish_rejects_paths_that_are_not_files(tasks_root: Path) -> None:
     """A submitted path that does not resolve to a real file is rejected, and the
     agent gets another turn (AA validates finish paths)."""

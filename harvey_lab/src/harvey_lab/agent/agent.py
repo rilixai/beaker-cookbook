@@ -30,7 +30,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -160,6 +160,18 @@ class AbandonParams(BaseModel):
     reason: str = Field(description="Why the task is genuinely impossible to complete.")
 
 
+def _is_absolute_path(path: str) -> bool:
+    """Whether ``path`` is absolute under POSIX *or* Windows rules.
+
+    ``finish`` paths come from the execution environment, whose path style is
+    the backend's, not the host's: a container/remote backend hands back POSIX
+    paths (``/workspace/memo.md``) that host ``Path.is_absolute()`` would call
+    relative on Windows. Accepting either style keeps the swap-in-a-backend
+    extension working regardless of host OS.
+    """
+    return PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute()
+
+
 def _build_finish_tools(exec_env: Any) -> list[Any]:
     """Build LAB-AA's ``finish`` + ``abandon_task_finish`` pair.
 
@@ -175,7 +187,7 @@ def _build_finish_tools(exec_env: Any) -> list[Any]:
     async def _finish(params: FinishParams) -> Any:
         invalid: list[str] = []
         for path in params.paths:
-            if not Path(path).is_absolute():
+            if not _is_absolute_path(path):
                 invalid.append(path)
                 continue
             try:
