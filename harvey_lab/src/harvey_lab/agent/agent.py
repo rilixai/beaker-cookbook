@@ -31,7 +31,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
@@ -73,20 +73,23 @@ class HarveyLabAgentOutput:
 
 # Factory that builds a Stirrup ``LLMClient`` from model settings. Kept behind
 # a factory so tests inject a scripted client and avoid network calls.
-ModelFactory = Callable[[str, float, int, float], Any]
+ModelFactory = Callable[[str, float, int, float, str], Any]
 
 # Factory that builds the Stirrup ``CodeExecToolProvider`` used for each task.
 # Kept injectable for tests and callers extending the local-only default.
 ExecProviderFactory = Callable[[HarveyLabConfig], Any]
 
 
-def _default_model_factory(model: str, temperature: float, max_tokens: int, timeout: float) -> Any:
+def _default_model_factory(
+    model: str, temperature: float, max_tokens: int, timeout: float, reasoning_effort: str
+) -> Any:
     """Build Stirrup's LiteLLM client (imported lazily; needs ``stirrup[litellm]``)."""
-    from stirrup.clients.litellm_client import LiteLLMClient
+    from stirrup.clients.litellm_client import LiteLLMClient, ReasoningEffort
 
     return LiteLLMClient(
         model=model,
         max_tokens=max_tokens,
+        reasoning_effort=cast("ReasoningEffort | None", reasoning_effort or None),
         kwargs={"temperature": temperature, "timeout": timeout},
     )
 
@@ -313,6 +316,7 @@ class HarveyLabAgent:
                 self._config.task_temperature,
                 self._config.max_output_tokens,
                 self._config.llm_timeout,
+                self._config.task_reasoning_effort,
             )
             agent: Any = Agent(
                 client=client,

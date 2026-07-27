@@ -31,10 +31,16 @@ class HarveyLabConfig:
 
     # The inner legal agent (driven through Stirrup). LiteLLM model spec.
     # Routed through OpenRouter so a single ``OPENROUTER_API_KEY`` covers both
-    # the agent and the judge; override with a direct ``openai/…`` (+ that
+    # the agent and the judge; override with a direct ``deepseek/…`` (+ that
     # provider's key) if you'd rather call the provider straight.
-    task_model: str = "openrouter/openai/gpt-4.1-mini"
+    task_model: str = "openrouter/deepseek/deepseek-v4-pro"
     task_temperature: float = 0.0
+    # Reasoning budget for a thinking-capable task model, passed through to
+    # LiteLLM's ``reasoning_effort``. ``xhigh`` is the top tier the Stirrup
+    # LiteLLM client exposes (``none``/``minimal``/``low``/``medium``/``high``/
+    # ``xhigh``) and runs DeepSeek V4 Pro at max reasoning. Set to ``none`` (or
+    # empty) if you swap in a non-reasoning model.
+    task_reasoning_effort: str = "xhigh"
     # Per-call completion-token cap handed to the Stirrup client (litellm's
     # ``max_tokens``). Must stay within the task model's output limit
     max_output_tokens: int = 16_384

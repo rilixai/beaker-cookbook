@@ -98,6 +98,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--task-model", type=str, default=defaults.task_model)
     parser.add_argument("--task-temperature", type=float, default=defaults.task_temperature)
+    parser.add_argument(
+        "--task-reasoning-effort",
+        type=str,
+        default=defaults.task_reasoning_effort,
+        choices=("none", "minimal", "low", "medium", "high", "xhigh"),
+        help="Reasoning budget for a thinking task model (default xhigh = DeepSeek V4 Pro max reasoning); use none for non-reasoning models.",
+    )
     parser.add_argument("--judge-model", type=str, default=defaults.judge_model)
     parser.add_argument("--judge-batch-size", type=int, default=defaults.judge_batch_size)
     parser.add_argument("--max-turns", type=int, default=defaults.max_turns)
@@ -133,6 +140,7 @@ def _config_from_args(args: argparse.Namespace) -> HarveyLabConfig:
     return HarveyLabConfig(
         task_model=args.task_model,
         task_temperature=args.task_temperature,
+        task_reasoning_effort=args.task_reasoning_effort,
         judge_model=args.judge_model,
         judge_batch_size=args.judge_batch_size,
         max_turns=args.max_turns,
