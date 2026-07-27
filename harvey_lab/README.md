@@ -29,8 +29,10 @@ and a to-do list, and it must produce the requested written work.
   Analysis' agent harness (the one their
   [Harvey LAB-AA leaderboard](https://artificialanalysis.ai/evaluations/harvey-lab-aa)
   runs on). `max_turns` defaults to **200**, matching LAB-AA.
-- **Model** — a LiteLLM model string (default `openrouter/openai/gpt-4.1-mini`),
-  so any provider LiteLLM routes to works.
+- **Model** — a LiteLLM model string (default `openrouter/deepseek/deepseek-v4-pro`
+  run at max reasoning), so any provider LiteLLM routes to works. Reasoning
+  budget is `--task-reasoning-effort` (default `high`; set `none` for a
+  non-reasoning model).
 - **Prompts** — `system_prompt` and `task_template` (`agent/prompts.py`), ported
   from [AA's published LAB-AA prompts](https://artificialanalysis.ai/methodology/intelligence-benchmarking#harvey-lab-aa),
   adapted only where they assume AA's specific sandbox.
@@ -145,7 +147,7 @@ export OPENROUTER_API_KEY=sk-or-...
 
 Prefer calling providers directly? Override the models with direct LiteLLM
 strings and set those providers' keys, e.g.
-`--task-model openai/gpt-4.1-mini` (`OPENAI_API_KEY`) and
+`--task-model deepseek/deepseek-v4-pro` (`DEEPSEEK_API_KEY`) and
 `--judge-model deepseek/deepseek-v4-flash` (`DEEPSEEK_API_KEY`).
 
 ## Run
@@ -178,5 +180,6 @@ for example after changing the task model or agent settings.
 
 See `--help` for all flags (`--split {train,val,test}`, `--limit`,
 `--tasks-root`, `--cache-dir`, `--max-concurrency`, `--task-model`,
-`--judge-model`, `--judge-batch-size`, `--judge-num-retries`, `--shell-timeout`,
-`--max-turns`, `--no-view-image`, `--rerun`, …).
+`--task-reasoning-effort`, `--judge-model`, `--judge-batch-size`,
+`--judge-num-retries`, `--shell-timeout`, `--max-turns`, `--no-view-image`,
+`--rerun`, …).

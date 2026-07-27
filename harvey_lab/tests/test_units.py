@@ -27,6 +27,7 @@ from harvey_lab.agent.agent import (
     HarveyLabAgentOutput,
     _build_finish_tools,
     _count_turns,
+    _default_model_factory,
     _render_template,
 )
 from harvey_lab.agent.workspace import TaskWorkspace, extract_text, task_source_from_dir
@@ -144,7 +145,7 @@ def _workspace_from_messages(messages: list[Any]) -> str:
 
 
 def _scripted_model_factory(body: str, name: str = "memo.md") -> Any:
-    def _factory(_model: str, _temp: float, _max_tokens: int, _timeout: float) -> Any:
+    def _factory(_model: str, _temp: float, _max_tokens: int, _timeout: float, _reasoning: str) -> Any:
         return _ScriptedClient(deliverable_body=body, deliverable_name=name)
 
     return _factory
@@ -1092,3 +1093,17 @@ def test_evaluate_agent_contains_errors_and_excludes_unscoreable(tasks_root: Pat
     assert report.num_scored == 5
     # denominator = scored (5) + errored (1) = 6; the errored case scores 0.
     assert report.all_pass_rate == pytest.approx(5 / 6)
+
+
+def test_default_config_targets_deepseek_v4_pro_max_reasoning() -> None:
+    config = HarveyLabConfig()
+    assert config.task_model == "openrouter/deepseek/deepseek-v4-pro"
+    assert config.task_reasoning_effort == "high"
+    assert cli_mod._parse_args(["run"]).task_reasoning_effort == "high"
+
+
+def test_default_model_factory_threads_reasoning_effort() -> None:
+    client = _default_model_factory("openrouter/deepseek/deepseek-v4-pro", 0.0, 16_384, 120.0, "high")
+    assert client._reasoning_effort == "high"
+    # An empty/none effort disables reasoning for non-thinking models.
+    assert _default_model_factory("openrouter/openai/gpt-4.1-mini", 0.0, 16_384, 120.0, "")._reasoning_effort is None
