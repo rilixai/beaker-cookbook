@@ -73,7 +73,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--cache-dir",
         type=Path,
         default=None,
-        help="Where on-demand-fetched tasks are cached (default: $HARVEY_LAB_CACHE or ~/.cache/harvey_lab).",
+        help=(
+            "Root for the on-demand task cache. Default: "
+            "$HARVEY_LAB_CACHE/<commit> or ~/.cache/harvey_lab/<commit>. A custom "
+            "path is reused across commits (fetches are commit-checked, so a pin "
+            "bump refetches)."
+        ),
     )
     parser.add_argument(
         "--split",

@@ -109,9 +109,13 @@ def ensure_task_dirs(
 
     def _cached_for(tid: str) -> bool:
         # The sentinel records the commit it was fetched at; a mismatch (e.g. a
-        # reused --cache-dir after a pin bump) must refetch, not serve stale trees.
+        # reused --cache-dir after a pin bump) must refetch, not serve stale
+        # trees. Also require the task tree to still be on disk (guards a
+        # manually-deleted cache dir leaving a dangling sentinel).
         marker = sentinels / tid
-        return marker.is_file() and marker.read_text(encoding="utf-8") == commit
+        if not (marker.is_file() and marker.read_text(encoding="utf-8") == commit):
+            return False
+        return (tasks_root / tid / "task.json").is_file()
 
     pending = [tid for tid in task_ids if not _cached_for(tid)]
     if pending:
