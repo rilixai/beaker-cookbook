@@ -35,34 +35,17 @@ and a to-do list, and it must produce the requested written work.
   from [AA's published LAB-AA prompts](https://artificialanalysis.ai/methodology/intelligence-benchmarking#harvey-lab-aa),
   adapted only where they assume AA's specific sandbox.
 
-### ⚠️ Where `code_exec` runs — read this before a real run
+### Where `code_exec` runs
 
-`code_exec` runs in a **temp directory on your machine, with no isolation**. The
-model's shell commands execute as *your user*, with your filesystem and network
-reachable. Concretely:
-
-- It can do anything you can — delete files, install packages, reach the
-  internet. The prompt *asks* it to stay offline and inside its working
-  directory; nothing *enforces* that.
-- Task documents are untrusted input, and they are parsed on your host.
-
-So: run it on a machine you don't mind a model poking at, and skim the
-deliverables rather than trusting them blindly.
-
-> **Left as an extension.** LAB-AA sandboxes `code_exec` remotely and Harvey's
-> own harness containerizes it. This recipe stays local on purpose, to keep it
-> runnable with zero setup. If you want containment, `HarveyLabAgent` takes an
-> `exec_provider_factory` — return any other Stirrup `CodeExecToolProvider`
-> (the framework ships container and remote-sandbox backends). The one
-> backend-specific touchpoint is `_env_working_dir` (the directory the model's
-> shell runs in, used to build the absolute `finish` paths): it reads the local
-> backend's `temp_dir`, so a container/remote backend that runs commands
-> elsewhere (e.g. `/workspace`) needs that directory made discoverable there.
-> A sandbox image would also be the right place to preinstall
-> a document toolchain (`pandoc`, `python-docx`, `openpyxl`, …): this recipe's
-> own copies of those libraries are used for *grading* on the host and are not
-> on the agent's `PATH`, so today the agent installs what it needs or falls
-> back to Markdown.
+By default it runs in a temp directory on your machine — no container. The
+model's shell runs as your user, so treat it like any script you'd run locally:
+prefer a dev box or VM. For real isolation, pass `HarveyLabAgent` an
+`exec_provider_factory` returning any other Stirrup `CodeExecToolProvider`
+(the framework ships container and remote-sandbox backends); the one
+backend-specific touchpoint is `_env_working_dir`. A sandbox image is also the
+natural place to preinstall a document toolchain (`pandoc`, `python-docx`,
+`openpyxl`, …) — this recipe's copies are used for *grading* on the host, not on
+the agent's `PATH`, so today it installs what it needs or falls back to Markdown.
 
 Code map:
 
