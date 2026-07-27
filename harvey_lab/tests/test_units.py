@@ -928,14 +928,15 @@ def test_completed_empty_submission_is_reusable(tasks_root: Path, tmp_path: Path
 
 
 def test_persisted_rerun_removes_stale_deliverables(tasks_root: Path, tmp_path: Path) -> None:
+    """A re-run that produces nothing must clear a prior run's files — even when
+    the intervening manifest entry was an error (carrying no produced list)."""
     record = load_records(tasks_root, task_ids=["contracts/t1"])[0]
     stale = tmp_path / "contracts/t1/memo.md"
     stale.parent.mkdir(parents=True)
     stale.write_text("old run")
-    previous = {"task_id": record.task_id, "deliverables_produced": ["memo.md"]}
     output = HarveyLabAgentOutput(final_answer="none", missing_deliverables=["memo.md"], finished=True)
 
-    entry = cli_mod._persist_agent_output(tmp_path, record, output, previous)
+    entry = cli_mod._persist_agent_output(tmp_path, record, output)
 
     assert not stale.exists()
     assert entry["deliverables_produced"] == []

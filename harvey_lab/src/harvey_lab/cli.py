@@ -24,6 +24,7 @@ import argparse
 import asyncio
 import json
 import logging
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -177,11 +178,18 @@ def _read_run_manifest(output_dir: Path) -> dict[str, dict[str, Any]]:
     return entries
 
 
-def _artifact_path(output_dir: Path, task_id: str, name: str) -> Path:
+def _task_output_dir(output_dir: Path, task_id: str) -> Path:
     root = output_dir.resolve()
     task_dir = (root / task_id).resolve()
+    if not task_dir.is_relative_to(root):
+        raise ValueError(f"Unsafe task output directory for {task_id}")
+    return task_dir
+
+
+def _artifact_path(output_dir: Path, task_id: str, name: str) -> Path:
+    task_dir = _task_output_dir(output_dir, task_id)
     path = (task_dir / name).resolve()
-    if not task_dir.is_relative_to(root) or not path.is_relative_to(task_dir):
+    if not path.is_relative_to(task_dir):
         raise ValueError(f"Unsafe persisted deliverable path for {task_id}: {name}")
     return path
 
@@ -233,14 +241,13 @@ def _persist_agent_output(
     output_dir: Path,
     record: HarveyLabRecord,
     output: HarveyLabAgentOutput,
-    previous: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    for name in (previous or {}).get("deliverables_produced", []):
-        if isinstance(name, str):
-            try:
-                _artifact_path(output_dir, record.task_id, name).unlink(missing_ok=True)
-            except ValueError:
-                pass
+    # Clear the whole task dir first so a re-run never leaves stale artifacts —
+    # a prior error entry carries no produced list to clean up from, and this
+    # dir only ever holds this task's deliverables.
+    task_dir = _task_output_dir(output_dir, record.task_id)
+    if task_dir.exists():
+        shutil.rmtree(task_dir)
     for name, content in output.raw_deliverables.items():
         destination = _artifact_path(output_dir, record.task_id, name)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -267,7 +274,6 @@ async def _run_and_persist(
     agent: HarveyLabAgent,
     records: list[HarveyLabRecord],
     output_dir: Path,
-    previous: dict[str, dict[str, Any]],
     max_concurrency: int,
 ) -> list[dict[str, Any]]:
     semaphore = asyncio.Semaphore(max(1, max_concurrency))
@@ -276,7 +282,7 @@ async def _run_and_persist(
         async with semaphore:
             try:
                 output = await agent.forward(record=record)
-                return _persist_agent_output(output_dir, record, output, previous.get(record.task_id))
+                return _persist_agent_output(output_dir, record, output)
             except Exception as exc:  # noqa: BLE001 - report, don't abort the batch
                 logger.warning("Task %s failed: %s", record.task_id, exc)
                 return {
@@ -347,7 +353,6 @@ def _run_run(args: argparse.Namespace) -> int:
             agent=agent,
             records=records,
             output_dir=args.output_dir,
-            previous=previous,
             max_concurrency=args.max_concurrency,
         )
     )
@@ -388,7 +393,6 @@ def _run_evaluate(args: argparse.Namespace) -> int:
                 agent=agent,
                 records=to_run,
                 output_dir=args.output_dir,
-                previous=manifest,
                 max_concurrency=args.max_concurrency,
             )
         )
