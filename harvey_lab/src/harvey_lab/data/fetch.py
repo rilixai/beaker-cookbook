@@ -225,10 +225,14 @@ def ensure_task_dirs(
 
         _download_task(tid, dest, commit, _tick)
         logger.info("  [%d/%d] %s done (%d files)", i, len(pending), tid, count)
-        partial.unlink(missing_ok=True)
         if not (dest / "task.json").is_file():
             raise FileNotFoundError(f"Fetched {tid} but no task.json — is the task id valid at {commit[:10]}?")
+        # Write the completed sentinel *before* clearing the `.partial` marker:
+        # if interrupted in between, the marker still allows a resume rather
+        # than a full re-download (a lingering marker is harmless — a matching
+        # sentinel short-circuits the task anyway).
         marker = sentinels / tid
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(commit, encoding="utf-8")
+        partial.unlink(missing_ok=True)
     return tasks_root
