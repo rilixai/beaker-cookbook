@@ -1110,8 +1110,9 @@ def test_default_model_factory_threads_reasoning_effort() -> None:
     # newly released model (not yet in litellm's reasoning map) doesn't raise
     # UnsupportedParamsError on OpenRouter.
     assert client._kwargs["allowed_openai_params"] == ["reasoning_effort"]
-    # An empty/none effort disables reasoning for non-thinking models — and does
-    # not force the param through.
-    disabled = _default_model_factory("openrouter/openai/gpt-4.1-mini", 0.0, 16_384, 120.0, "")
-    assert disabled._reasoning_effort is None
-    assert "allowed_openai_params" not in disabled._kwargs
+    # Both the empty string and the "none" CLI sentinel disable reasoning for
+    # non-thinking models — sending no reasoning param and no opt-in.
+    for sentinel in ("", "none"):
+        disabled = _default_model_factory("openrouter/openai/gpt-4.1-mini", 0.0, 16_384, 120.0, sentinel)
+        assert disabled._reasoning_effort is None
+        assert "allowed_openai_params" not in disabled._kwargs
