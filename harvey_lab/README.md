@@ -1,6 +1,6 @@
-# Harvey LAB
+# Harvey LAB Agent
 
-A self-contained **legal knowledge-worker agent** and a local rubric evaluation
+A **legal knowledge-worker agent** and a rubric evaluation
 harness for it. The agent reads a case folder, produces the requested written
 deliverables, and is graded criterion-by-criterion against Harvey's public
 [Legal Agent Benchmark (LAB)](https://www.harvey.ai/blog/introducing-harveys-legal-agent-benchmark).
@@ -10,23 +10,55 @@ deliverables, and is graded criterion-by-criterion against Harvey's public
 The agent plays a **junior lawyer**. For each task it is handed a case folder
 and a to-do list, and it must produce the requested written work.
 
-- **Input** — a per-task workspace: a read-only `documents/` tree (the source
-  record: contracts, emails, spreadsheets, PDFs) plus the task instructions and
-  a list of deliverables to produce.
-- **Tools** — a small file toolbelt over that workspace: `list_files`,
-  `read_document` (extracts text from `.docx` / `.xlsx` / `.pdf` / `.eml` /
-  plain text), `grep_documents`, `write_deliverable`, `edit_deliverable`, and
-  `finish`. Deliverables are written as text into a writable `output/` dir.
-- **Loop** — the tool-use loop, context management, and message plumbing come
-  from [Stirrup](https://github.com/ArtificialAnalysis/Stirrup), Artificial
+- **Input** — a working directory inside a code execution environment: the
+  task's documents staged at `documents/` (contracts, emails, spreadsheets,
+  PDFs) plus the task instructions and the exact filenames to produce.
+- **Tools** — a **single `code_exec` tool** that runs shell commands in that
+  directory, as LAB-AA does. There is no `read_document` / `write_deliverable`
+  helper: the agent parses inputs and produces deliverables itself, so real
+  `.docx` / `.xlsx` / `.pptx` outputs are on the table (given the tooling — see
+  the note below) and the score reflects raw model ability. Vision-capable
+  models also get Stirrup's `view_image`.
+- **Submission** — `finish` takes a summary plus the **absolute paths** of every
+  deliverable and validates each is a real file; nothing outside a successful
+  `finish` is graded. `abandon_task_finish` lets the agent give up on a task it
+  concludes is impossible.
+- **Loop** — the tool-use loop, context management (compaction rather than
+  failure at the context limit), and message plumbing come from
+  [Stirrup](https://github.com/ArtificialAnalysis/Stirrup), Artificial
   Analysis' agent harness (the one their
   [Harvey LAB-AA leaderboard](https://artificialanalysis.ai/evaluations/harvey-lab-aa)
-  runs on). This package supplies only the *domain*: the workspace, the tools,
-  and the two prompts.
+  runs on). `max_turns` defaults to **200**, matching LAB-AA.
 - **Model** — a LiteLLM model string (default `openrouter/openai/gpt-4.1-mini`),
-  so any provider LiteLLM routes to works. `max_turns` caps the loop.
-- **Prompts** — two of them, `system_prompt` and `task_template`
-  (`agent/prompts.py`).
+  so any provider LiteLLM routes to works.
+- **Prompts** — `system_prompt` and `task_template` (`agent/prompts.py`), ported
+  from [AA's published LAB-AA prompts](https://artificialanalysis.ai/methodology/intelligence-benchmarking#harvey-lab-aa),
+  adapted only where they assume AA's specific sandbox.
+
+### ⚠️ Where `code_exec` runs — read this before a real run
+
+`code_exec` runs in a **temp directory on your machine, with no isolation**. The
+model's shell commands execute as *your user*, with your filesystem and network
+reachable. Concretely:
+
+- It can do anything you can — delete files, install packages, reach the
+  internet. The prompt *asks* it to stay offline and inside its working
+  directory; nothing *enforces* that.
+- Task documents are untrusted input, and they are parsed on your host.
+
+So: run it on a machine you don't mind a model poking at, and skim the
+deliverables rather than trusting them blindly.
+
+> **Left as an extension.** LAB-AA sandboxes `code_exec` remotely and Harvey's
+> own harness containerizes it. This recipe stays local on purpose, to keep it
+> runnable with zero setup. If you want containment, `HarveyLabAgent` takes an
+> `exec_provider_factory` — return any other Stirrup `CodeExecToolProvider`
+> (the framework ships container and remote-sandbox backends) and nothing else
+> needs to change. A sandbox image would also be the right place to preinstall
+> a document toolchain (`pandoc`, `python-docx`, `openpyxl`, …): this recipe's
+> own copies of those libraries are used for *grading* on the host and are not
+> on the agent's `PATH`, so today the agent installs what it needs or falls
+> back to Markdown.
 
 Code map:
 
@@ -34,9 +66,9 @@ Standard src layout — the importable package lives under `src/harvey_lab/`:
 
 | Path | What it holds |
 |---|---|
-| `src/harvey_lab/agent/workspace.py` | the per-task workspace + the file tools |
-| `src/harvey_lab/agent/agent.py` | wires the tools into Stirrup and runs one task |
-| `src/harvey_lab/agent/prompts.py` | the two prompts |
+| `src/harvey_lab/agent/workspace.py` | per-task staging (documents in, deliverables out) + deliverable text extraction |
+| `src/harvey_lab/agent/agent.py` | wires `code_exec` + finish/abandon into Stirrup and runs one task |
+| `src/harvey_lab/agent/prompts.py` | the two prompts (ported from AA's published LAB-AA prompts) |
 | `src/harvey_lab/data/dataset.py` | loads LAB task records from a task tree + reads the splits |
 | `src/harvey_lab/data/fetch.py` | on-demand download of just the needed task folders from GitHub |
 | `src/harvey_lab/splits/{train,val,test}.txt` | frozen task-id lists (see `src/harvey_lab/splits/README.md`) |
@@ -57,16 +89,27 @@ call per criterion, criteria that share a deliverable scope are graded in
 is roughly an order of magnitude cheaper at LAB's scale with near-frontier
 agreement (see
 [LangChain](https://www.langchain.com/blog/designing-efficient-verifiers-for-legal-agents)
-and [Applied Compute](https://www.appliedcompute.com/case-studies/harvey), both
-cited in the code). The default judge is `openrouter/deepseek/deepseek-v4-flash`.
+and [Applied Compute](https://www.appliedcompute.com/case-studies/harvey)). The default judge is `openrouter/deepseek/deepseek-v4-flash`.
+
+Grading is **text-only**, as in LAB-AA: a deliverable is text-extracted (a
+`.docx` through python-docx, a `.pptx` through python-pptx, and so on) and the
+judge sees that text, the task description, and the criterion's
+`match_criteria`. Two LAB-AA rules are enforced:
+
+- **Exact filenames.** A deliverable saved under a near-miss name counts as not
+  produced — no fuzzy matching.
+- **Partial submissions are still judged.** A criterion fails outright, without
+  reaching the judge, only when *none* of its declared deliverables exist. If
+  some exist, it is judged with the absent ones marked as such.
+
 Two numbers come out per task:
 
-- `all_pass` (0/1) — the LAB headline metric: `1.0` **iff every** criterion
-  passes, else `0.0`.
-- `criterion_pass_rate` — the fraction of criteria passed (a denser view of the
-  same grading, since a single missed criterion zeroes `all_pass`).
+- `all_pass` (0/1) — `1.0` **iff every** criterion passes, else `0.0`.
+- `criterion_pass_rate` — the fraction of criteria passed (LAB-AA's default
+  headline metric, and a denser view of the same grading since a single missed
+  criterion zeroes `all_pass`).
 
-The dataset runner (`evaluation/run_eval.py`) averages both across tasks as
+The evaluation runner (`evaluation/run_eval.py`) averages both across tasks as
 `all_pass_rate` / `criterion_pass_rate`. A task whose rubric has no scoreable
 criteria is **unscoreable** and excluded from the averages; a task that errors
 counts as `0` (a real failure must deflate, not inflate, the metrics).
@@ -90,11 +133,20 @@ the benchmark's natural practice-area distribution) are the source of truth —
 see `src/harvey_lab/splits/README.md`. `--split` picks one; `--limit N` runs
 just the first N (the lists are ordered so any prefix stays representative).
 
-This is **not** the LAB-AA leaderboard setup. The leaderboard runs on Harvey's
-**private** 120-task set through AA's exact Stirrup config; this repo runs a
-slimmed, text-only agent on the **public** tasks with a cheaper judge and a
-bounded turn budget. The public data may be contamination-exposed, so treat the
-scores as a self-contained measurement on this fixed harness, **not** a
+This differs from the [LAB-AA leaderboard setup](https://artificialanalysis.ai/methodology/intelligence-benchmarking#harvey-lab-aa). The leaderboard runs on Harvey's
+**private** 120-task set through AA's exact Stirrup config. The agent side here
+tracks AA closely (single `code_exec` tool, AA's prompts, validated
+`finish` + `abandon_task_finish`, 200 turns, exact-filename grading); the
+remaining deliberate differences are:
+
+| | LAB-AA | Here |
+|---|---|---|
+| Tasks | 120 private Harvey tasks | the public task set, frozen splits |
+| Sandbox | a remote sandbox | a local temp dir, no isolation (see the warning above) |
+| Judge | a single Gemini 3.1 Pro call per criterion | a cheap batched judge (`judge_batch_size` criteria per call) |
+| Judge prompt | AA's per-criterion prompt | a batched adaptation of it |
+
+So scores here are a self-contained measurement on this harness, **not** a
 leaderboard-comparable number.
 
 ## Install
@@ -119,10 +171,6 @@ strings and set those providers' keys, e.g.
 `--task-model openai/gpt-4.1-mini` (`OPENAI_API_KEY`) and
 `--judge-model deepseek/deepseek-v4-flash` (`DEEPSEEK_API_KEY`).
 
-No dataset token is required — the LAB repo is public. Pulling a large split
-unauthenticated can hit GitHub's 60 req/hour API limit; set `GITHUB_TOKEN` to
-raise it to 5000/hour.
-
 ## Run
 
 ```bash
@@ -139,7 +187,13 @@ uv run harvey-lab evaluate \
 ```
 
 `evaluate` writes `eval_summary.json` (aggregate `all_pass_rate` /
-`criterion_pass_rate` + case counts) and `eval_outputs.json` (per-task results)
-to `--output-dir`. See `--help` for all flags (`--split {train,val,test}`,
-`--limit`, `--tasks-root`, `--cache-dir`, `--max-concurrency`, `--task-model`,
-`--judge-model`, `--judge-batch-size`, …).
+`criterion_pass_rate` + case counts) and `eval_outputs.json` (per-task results,
+including which deliverables were produced vs. missing and whether the agent
+abandoned). `run` writes each submitted deliverable **byte-for-byte under its
+original filename** plus `run_outputs.json`; evaluation separately extracts
+text from those files for the rubric judge.
+
+See `--help` for all flags (`--split {train,val,test}`, `--limit`,
+`--tasks-root`, `--cache-dir`, `--max-concurrency`, `--task-model`,
+`--judge-model`, `--judge-batch-size`, `--judge-num-retries`, `--shell-timeout`,
+`--max-turns`, `--no-view-image`, …).

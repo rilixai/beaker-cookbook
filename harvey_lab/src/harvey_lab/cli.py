@@ -49,9 +49,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     defaults = HarveyLabConfig()
     parser = argparse.ArgumentParser(
         description=(
-            "Harvey LAB legal agent: a Stirrup-harnessed agent that reads a task's "
-            "documents and writes deliverables, graded by an all-pass rubric (a "
-            "batched LLM judge with deliverable-scoped context)."
+            "Harvey LAB legal agent: a Stirrup-harnessed agent with a single "
+            "`code_exec` tool that reads a task's documents and produces the "
+            "requested deliverable files, graded criterion-by-criterion by a "
+            "batched LLM judge with deliverable-scoped context."
         ),
     )
     parser.add_argument(
@@ -98,6 +99,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--judge-batch-size", type=int, default=defaults.judge_batch_size)
     parser.add_argument("--max-turns", type=int, default=defaults.max_turns)
     parser.add_argument("--llm-timeout", type=float, default=defaults.llm_timeout)
+    parser.add_argument("--judge-num-retries", type=int, default=defaults.judge_num_retries)
+    parser.add_argument(
+        "--shell-timeout",
+        type=int,
+        default=defaults.shell_timeout_s,
+        help="Per-`code_exec`-command timeout in seconds (LAB-AA uses 1200).",
+    )
+    parser.add_argument(
+        "--no-view-image",
+        action="store_true",
+        help="Withhold the `view_image` tool (LAB-AA grants it to vision-capable models).",
+    )
     parser.add_argument("--max-concurrency", type=int, default=4)
     parser.add_argument("--output-dir", type=Path, default=Path("harvey_lab_run"))
     return parser.parse_args(argv)
@@ -111,6 +124,9 @@ def _config_from_args(args: argparse.Namespace) -> HarveyLabConfig:
         judge_batch_size=args.judge_batch_size,
         max_turns=args.max_turns,
         llm_timeout=args.llm_timeout,
+        judge_num_retries=args.judge_num_retries,
+        shell_timeout_s=args.shell_timeout,
+        enable_view_image=not args.no_view_image,
     )
 
 
@@ -133,7 +149,7 @@ def _select_records(args: argparse.Namespace) -> tuple[Path, list[HarveyLabRecor
 def _build_agent(tasks_root: Path, config: HarveyLabConfig) -> HarveyLabAgent:
     return HarveyLabAgent(
         config=config,
-        task_source=task_source_from_dir(tasks_root, max_document_chars=config.max_document_chars),
+        task_source=task_source_from_dir(tasks_root),
     )
 
 
@@ -163,14 +179,16 @@ def _run_run(args: argparse.Namespace) -> int:
                         "error": f"{type(exc).__name__}: {exc}",
                     }
                 out_dir = args.output_dir / record.task_id
-                for name, text in output.deliverables.items():
+                for name, content in output.raw_deliverables.items():
                     dest = out_dir / name
                     dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_text(text, encoding="utf-8")
+                    dest.write_bytes(content)
                 return {
                     "task_id": record.task_id,
                     "practice_area": record.practice_area,
                     "deliverables_produced": sorted(output.deliverables),
+                    "deliverables_missing": sorted(output.missing_deliverables),
+                    "abandoned": output.abandoned,
                     "total_turns": output.total_turns,
                     "wall_seconds": output.wall_seconds,
                 }
@@ -198,7 +216,11 @@ def _run_evaluate(args: argparse.Namespace) -> int:
         return 2
     config = _config_from_args(args)
     agent = _build_agent(tasks_root, config)
-    judge = build_rubric_judge(model=config.judge_model, timeout=config.llm_timeout)
+    judge = build_rubric_judge(
+        model=config.judge_model,
+        timeout=config.llm_timeout,
+        num_retries=config.judge_num_retries,
+    )
     logger.info("Starting evaluate on split=%s (%d tasks)...", args.split, len(records))
     report = asyncio.run(
         evaluate_agent_on_records(

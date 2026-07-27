@@ -1,28 +1,24 @@
-"""Per-task on-disk workspace for the Harvey LAB agent.
+"""Per-task on-disk staging area for the Harvey LAB agent.
 
-Each LAB task ships a ``documents/`` folder (the source record) and a set
-of named ``deliverables`` the agent must produce. :class:`TaskWorkspace`
-lays that out on disk exactly like Harvey's harness — a read-only
-``documents/`` subtree plus a writable ``output/`` subtree — and exposes
-the small file surface the Stirrup tools sit on top of:
+The agent itself does all of its file work inside a Stirrup code-execution
+environment (one ``code_exec`` tool, as LAB-AA does), so this module is *not*
+an agent toolbelt — it is the host-side staging area either end of that
+environment:
 
-* :meth:`list_files` — recursive listing of ``documents/`` + ``output/``.
-* :meth:`read_document` — text extraction for .docx / .xlsx / .pdf / .eml
-  / plain text, byte-capped.
-* :meth:`search_documents` — case-insensitive grep over the documents.
-* :meth:`write_deliverable` / :meth:`edit_deliverable` — create / patch an
-  ``output/`` file (relative paths are always rooted in ``output/``).
-* :meth:`collect_deliverables` — read every ``output/`` file back out for
-  the rubric judge.
+* ``documents/`` — the task's input documents, materialized locally and then
+  uploaded into the execution environment at session start.
+* ``output/`` — where deliverables are pulled back *out* of the environment
+  after the agent finishes, so the rubric judge can read them.
 
-The document parsers (python-docx / openpyxl / pypdf) are imported lazily
-so the module stays importable offline; hermetic tests build workspaces
-from a fixture directory and never touch the heavy parsers unless a test
-provides a real binary.
+Because the agent can now emit real binary deliverables (``.docx`` /
+``.xlsx`` / ``.pptx`` built with python-docx / openpyxl / python-pptx inside
+the environment), :meth:`TaskWorkspace.collect_deliverables` extracts text
+from whatever it finds rather than assuming UTF-8 — LAB-AA grades "the text
+extracted from the criterion's declared deliverable files".
 
-Deliverables are written as **text** (``write_deliverable`` takes a string),
-so this toolbelt can't produce true ``.docx`` / ``.xlsx`` redlines — some
-format-specific LAB criteria are unwinnable here by construction.
+The parsers (python-docx / openpyxl / pypdf / python-pptx) are imported
+lazily so the module stays importable offline; hermetic tests stage plain
+text fixtures and never touch the heavy parsers.
 """
 
 from __future__ import annotations
@@ -30,7 +26,7 @@ from __future__ import annotations
 import email
 import logging
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -46,20 +42,20 @@ TaskSource = Callable[[Any], "TaskWorkspace"]
 __all__ = [
     "TaskSource",
     "TaskWorkspace",
+    "extract_text",
     "task_source_from_dir",
 ]
 
 
 class TaskWorkspace:
-    """A materialized ``documents/`` + ``output/`` workspace for one task."""
+    """A materialized ``documents/`` + ``output/`` staging tree for one task."""
 
-    def __init__(self, root: str | Path, *, max_document_chars: int = 200_000) -> None:
+    def __init__(self, root: str | Path) -> None:
         self._root = Path(root).resolve()
         self._documents = self._root / "documents"
         self._output = self._root / "output"
         self._documents.mkdir(parents=True, exist_ok=True)
         self._output.mkdir(parents=True, exist_ok=True)
-        self._max_document_chars = max_document_chars
 
     @property
     def root(self) -> Path:
@@ -85,106 +81,79 @@ class TaskWorkspace:
             raise ValueError(f"Path {rel_path!r} escapes {base.name}/.")
         return candidate
 
-    # ─── read surface (documents/) ────────────────────────────────────
+    # ─── deliverable retrieval (output/) ──────────────────────────────
 
-    def list_files(self) -> list[str]:
-        """Return sorted ``documents/…`` + ``output/…`` relative paths."""
-        out: list[str] = []
-        for base in (self._documents, self._output):
-            for path in sorted(base.rglob("*")):
-                if path.is_file():
-                    out.append(path.relative_to(self._root).as_posix())
-        return out
+    def deliverable_path(self, name: str) -> Path:
+        """Absolute path a deliverable named ``name`` is pulled back down to."""
+        return self._resolve_within(self._output, name)
 
-    def read_document(self, rel_path: str) -> str:
-        """Extract text from a document under ``documents/`` (or ``output/``).
+    def collect_deliverables(self, names: Sequence[str] | None = None) -> dict[str, str]:
+        """Extract text from the deliverables pulled back into ``output/``.
 
-        A leading ``documents/`` or ``output/`` component selects the subtree;
-        a bare name defaults to ``documents/``.
+        ``names`` restricts collection to the exact filenames the task asked
+        for (LAB-AA requires exact-filename matches). Passing ``None`` walks the
+        whole ``output/`` tree instead — useful for inspection, not for grading.
+        Files that are absent are simply omitted; the caller decides what a
+        missing deliverable means for the rubric.
         """
-        path = self._route_read(rel_path)
-        if not path.is_file():
-            raise FileNotFoundError(rel_path)
-        suffix = path.suffix.lower()
-        if suffix == ".docx":
-            text = _read_docx(path)
-        elif suffix in (".xlsx", ".xlsm"):
-            text = _read_xlsx(path)
-        elif suffix == ".pdf":
-            text = _read_pdf(path)
-        elif suffix == ".eml":
-            text = _read_eml(path)
+        candidates: list[tuple[str, Path]] = []
+        if names is None:
+            candidates = [
+                (path.relative_to(self._output).as_posix(), path)
+                for path in sorted(self._output.rglob("*"))
+                if path.is_file()
+            ]
         else:
-            text = path.read_bytes().decode("utf-8", errors="replace")
-        return text[: self._max_document_chars]
-
-    def _route_read(self, rel_path: str) -> Path:
-        parts = Path(rel_path).parts
-        if parts and parts[0] == "output":
-            return self._resolve_within(self._output, str(Path(*parts[1:])))
-        if parts and parts[0] == "documents":
-            return self._resolve_within(self._documents, str(Path(*parts[1:])))
-        return self._resolve_within(self._documents, rel_path)
-
-    def search_documents(self, query: str, *, max_results: int = 50) -> list[dict[str, Any]]:
-        """Case-insensitive substring grep over readable document text."""
-        needle = query.casefold()
-        if not needle:
-            return []
-        hits: list[dict[str, Any]] = []
-        for path in sorted(self._documents.rglob("*")):
-            if not path.is_file():
-                continue
-            rel = path.relative_to(self._root).as_posix()
-            try:
-                text = self.read_document(rel)
-            except Exception:  # noqa: BLE001 - unreadable file, skip
-                continue
-            for line_no, line in enumerate(text.splitlines(), start=1):
-                if needle in line.casefold():
-                    hits.append({"file": rel, "line": line_no, "text": line.strip()[:300]})
-                    if len(hits) >= max_results:
-                        return hits
-        return hits
-
-    # ─── write surface (output/) ──────────────────────────────────────
-
-    def write_deliverable(self, rel_path: str, content: str) -> str:
-        """Write ``content`` to ``output/<rel_path>`` (parents created)."""
-        path = self._resolve_within(self._output, rel_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        return path.relative_to(self._root).as_posix()
-
-    def edit_deliverable(self, rel_path: str, old: str, new: str) -> str:
-        """Replace the first occurrence of ``old`` with ``new`` in an output file."""
-        path = self._resolve_within(self._output, rel_path)
-        if not path.is_file():
-            raise FileNotFoundError(f"output/{rel_path}")
-        text = path.read_text(encoding="utf-8")
-        if old not in text:
-            raise ValueError(f"edit_deliverable: snippet not found in output/{rel_path}.")
-        path.write_text(text.replace(old, new, 1), encoding="utf-8")
-        return path.relative_to(self._root).as_posix()
-
-    def collect_deliverables(self) -> dict[str, str]:
-        """Read every file under ``output/`` back out, keyed by filename."""
+            for name in names:
+                try:
+                    candidates.append((name, self._resolve_within(self._output, name)))
+                except ValueError:
+                    logger.warning("Deliverable name %r escapes output/; skipped.", name)
         out: dict[str, str] = {}
-        for path in sorted(self._output.rglob("*")):
+        for name, path in candidates:
             if path.is_file():
-                rel = path.relative_to(self._output).as_posix()
-                out[rel] = path.read_bytes().decode("utf-8", errors="replace")
+                out[name] = extract_text(path)
         return out
 
 
 # ─── lazy document parsers ────────────────────────────────────────────
 
 
+def extract_text(path: Path | str, *, max_chars: int | None = None) -> str:
+    """Extract gradable text from a file, dispatching on its extension.
+
+    Handles the deliverable formats LAB tasks ask for (.docx / .xlsx / .pptx /
+    .pdf / .eml) and falls back to a lenient UTF-8 decode for .md and other
+    plain text. A parser failure returns a short note rather than raising, so
+    one unreadable deliverable never aborts a grading run — the judge simply
+    sees that the file could not be read.
+    """
+    path = Path(path)
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".docx":
+            text = _read_docx(path)
+        elif suffix in (".xlsx", ".xlsm"):
+            text = _read_xlsx(path)
+        elif suffix == ".pptx":
+            text = _read_pptx(path)
+        elif suffix == ".pdf":
+            text = _read_pdf(path)
+        elif suffix == ".eml":
+            text = _read_eml(path)
+        else:
+            text = path.read_bytes().decode("utf-8", errors="replace")
+    except Exception as exc:  # noqa: BLE001 - a bad file must not abort grading
+        logger.warning("Could not extract text from %s: %s", path, exc)
+        text = f"Could not extract text from {path.name!r} ({type(exc).__name__}: {exc})."
+    return text if max_chars is None else text[:max_chars]
+
+
 def _read_docx(path: Path) -> str:
     try:
         from docx import Document
     except ImportError as exc:  # pragma: no cover - import guard
-        raise ImportError("read_document requires the optional `python-docx` dependency for .docx.") from exc
+        raise ImportError("Text extraction requires the optional `python-docx` dependency for .docx.") from exc
     try:
         doc = Document(str(path))
     except Exception as exc:  # pragma: no cover - defensive
@@ -202,7 +171,7 @@ def _read_xlsx(path: Path) -> str:
     try:
         from openpyxl import load_workbook
     except ImportError as exc:  # pragma: no cover - import guard
-        raise ImportError("read_document requires the optional `openpyxl` dependency for .xlsx.") from exc
+        raise ImportError("Text extraction requires the optional `openpyxl` dependency for .xlsx.") from exc
     workbook = load_workbook(filename=str(path), read_only=True, data_only=True)
     try:
         names = list(workbook.sheetnames)
@@ -226,7 +195,7 @@ def _read_pdf(path: Path) -> str:
     try:
         from pypdf import PdfReader
     except ImportError as exc:  # pragma: no cover - import guard
-        raise ImportError("read_document requires the optional `pypdf` dependency for .pdf.") from exc
+        raise ImportError("Text extraction requires the optional `pypdf` dependency for .pdf.") from exc
     try:
         reader = PdfReader(str(path))
     except Exception as exc:  # pragma: no cover - defensive
@@ -240,6 +209,28 @@ def _read_pdf(path: Path) -> str:
             parts.append(page.extract_text() or "")
         except Exception:  # noqa: BLE001 - defensive per-page
             parts.append("")
+    return "\n".join(parts)
+
+
+def _read_pptx(path: Path) -> str:
+    try:
+        from pptx import Presentation
+    except ImportError as exc:  # pragma: no cover - import guard
+        raise ImportError("Text extraction requires the optional `python-pptx` dependency for .pptx.") from exc
+    presentation = Presentation(str(path))
+    parts: list[str] = []
+    for index, slide in enumerate(presentation.slides, start=1):
+        parts.append(f"# Slide {index}")
+        for shape in slide.shapes:
+            text = getattr(shape, "text", "")
+            if isinstance(text, str) and text.strip():
+                parts.append(text)
+            table = getattr(shape, "table", None) if getattr(shape, "has_table", False) else None
+            if table is not None:
+                for row in table.rows:
+                    cells = [c.text.strip() for c in row.cells]
+                    if any(cells):
+                        parts.append("\t".join(cells))
     return "\n".join(parts)
 
 
@@ -263,14 +254,15 @@ def _read_eml(path: Path) -> str:
 # ─── task-source factories ────────────────────────────────────────────
 
 
-def task_source_from_dir(tasks_root: str | Path, *, max_document_chars: int = 200_000) -> TaskSource:
+def task_source_from_dir(tasks_root: str | Path) -> TaskSource:
     """Build a ``(record) -> TaskWorkspace`` factory backed by a local tree.
 
     ``tasks_root`` is the ``tasks/`` directory of a ``harveyai/harvey-labs``
     checkout; a task's ``documents/`` live at ``tasks_root/<task_id>/documents``
     (``task_id`` is the task directory's path relative to ``tasks/``, possibly
-    nested under a sub-category). Fully offline (used by the CLI + tests,
-    which point it at a fixture tree).
+    nested under a sub-category). The staged ``documents/`` tree is what gets
+    uploaded into the agent's execution environment. Fully offline (used by the
+    CLI + tests, which point it at a fixture tree).
     """
     base = Path(tasks_root)
 
@@ -279,7 +271,7 @@ def task_source_from_dir(tasks_root: str | Path, *, max_document_chars: int = 20
 
         task_id = str(getattr(record, "task_id", "") or "")
         src_docs = base / task_id / "documents"
-        ws = TaskWorkspace(tempfile.mkdtemp(prefix="harvey_lab_"), max_document_chars=max_document_chars)
+        ws = TaskWorkspace(tempfile.mkdtemp(prefix="harvey_lab_"))
         # Clean up the temp tree if the copy fails partway (don't leak on error).
         try:
             if src_docs.is_dir():

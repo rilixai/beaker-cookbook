@@ -1,24 +1,36 @@
 """The Harvey LAB legal agent, driven through the Stirrup harness.
 
 Stirrup (Artificial Analysis' agent framework) supplies the tool-use loop,
-context management, and message plumbing; this module supplies the
-*domain*: a per-task :class:`~harvey_lab.agent.workspace.TaskWorkspace` and
-the file tools a legal knowledge worker uses over it (read documents,
-search, write / edit deliverables).
+context management, and message plumbing. This module wires it up the way
+AA's Harvey LAB-AA leaderboard does:
 
-Why Stirrup rather than a hand-rolled ReAct loop (as ``apex_agents`` uses)?
-It is the harness Artificial Analysis' Harvey LAB-AA leaderboard runs on,
-so building on it keeps the agent's control flow aligned with the
-benchmark's published numbers. The LLM client is pluggable: production
-uses Stirrup's LiteLLM client (so any ``provider/model`` string LiteLLM
-routes to works); tests inject a scripted client and never hit the network.
+* **One tool.** The agent gets a single ``code_exec`` tool over a code
+  execution environment — no curated ``read_document`` / ``write_deliverable``
+  helpers. It must list, parse, and produce files itself (``pandoc``,
+  ``python-docx``, ``openpyxl``, ``python-pptx``, …), which is what makes real
+  ``.docx`` / ``.xlsx`` / ``.pptx`` deliverables possible and what LAB-AA means
+  by "raw model ability".
+* **AA's finish contract.** ``finish`` takes a summary plus the absolute paths
+  of every deliverable, and *validates* that each path is a real file;
+  ``abandon_task_finish`` lets the agent give up on a genuinely impossible
+  task. Nothing outside a successful ``finish`` is graded.
+* **Vision.** Stirrup's ``view_image`` tool is attached when enabled, reading
+  images out of the environment as native image tokens.
+
+``code_exec`` runs in a temp directory on this machine (Stirrup's local
+backend) — **no isolation**; see the README. Both the execution environment and
+the LLM client are injected through factories, so a sandboxed backend can be
+dropped in without touching this module, and tests use a scripted client that
+never hits the network.
 """
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -29,51 +41,89 @@ from .prompts import load_harvey_lab_prompts
 from .workspace import TaskSource, TaskWorkspace
 
 
+logger = logging.getLogger(__name__)
+
+FINISH_TOOL_NAME = "finish"
+ABANDON_TOOL_NAME = "abandon_task_finish"
+
+
 @dataclass
 class HarveyLabAgentOutput:
     """Per-case result returned by the Harvey LAB Stirrup agent.
 
-    ``deliverables`` maps each ``output/`` filename the agent produced to its
-    text content — this is what the rubric judge grades (criteria are scoped to
-    named deliverables). The rubric score is NOT computed here; the evaluator
-    runs the judge after the agent terminates. ``total_turns`` / ``wall_seconds``
-    are recorded into ``run_outputs.json`` for cost/latency inspection.
+    ``deliverables`` maps each submitted, requested filename to its extracted
+    text for the rubric judge; ``raw_deliverables`` holds the original bytes for
+    ``run`` mode. Filenames are matched exactly, so ``missing_deliverables``
+    lists what the task asked for and never received through ``finish``.
+    ``submitted_paths`` records that finish call and ``abandoned`` records an
+    ``abandon_task_finish`` give-up. Scoring happens in the evaluator.
     """
 
     final_answer: str
     deliverables: dict[str, str] = field(default_factory=dict)
+    raw_deliverables: dict[str, bytes] = field(default_factory=dict)
+    missing_deliverables: list[str] = field(default_factory=list)
+    submitted_paths: list[str] = field(default_factory=list)
+    abandoned: bool = False
     total_turns: int = 0
     wall_seconds: float = 0.0
 
 
-# Factory that builds a Stirrup ``LLMClient`` from ``(model, temperature,
-# max_tokens)``. Kept behind a factory so tests inject a scripted client and
-# the real (litellm-backed) client is imported lazily.
-ModelFactory = Callable[[str, float, int], Any]
+# Factory that builds a Stirrup ``LLMClient`` from model settings. Kept behind
+# a factory so tests inject a scripted client and avoid network calls.
+ModelFactory = Callable[[str, float, int, float], Any]
+
+# Factory that builds the Stirrup ``CodeExecToolProvider`` used for each task.
+# Kept injectable for tests and callers extending the local-only default.
+ExecProviderFactory = Callable[[HarveyLabConfig], Any]
 
 
-def _default_model_factory(model: str, temperature: float, max_tokens: int) -> Any:
+def _default_model_factory(model: str, temperature: float, max_tokens: int, timeout: float) -> Any:
     """Build Stirrup's LiteLLM client (imported lazily; needs ``stirrup[litellm]``)."""
     from stirrup.clients.litellm_client import LiteLLMClient
 
-    return LiteLLMClient(model=model, max_tokens=max_tokens, kwargs={"temperature": temperature})
+    return LiteLLMClient(
+        model=model,
+        max_tokens=max_tokens,
+        kwargs={"temperature": temperature, "timeout": timeout},
+    )
 
 
-def _render_task_template(task_template: str, *, instructions: str, deliverables: str) -> str:
-    """Substitute the ``{{instructions}}`` + ``{{deliverables}}`` Jinja2 vars.
+def _default_exec_provider_factory(config: HarveyLabConfig) -> Any:
+    """Build the local (temp-directory) code-execution environment for one task.
 
-    If the template is missing a variable, its raw value is appended so the
-    agent still receives it (mirrors the apex ``{{task}}`` fallback).
+    A fresh provider is built per task: each owns its own temp directory, which
+    is where the task's documents are staged and the deliverables are produced.
+
+    **No isolation.** Stirrup's local backend runs the model's shell commands as
+    the current user. That is a deliberate simplification — see the README.
+    To harden it, pass your own ``exec_provider_factory`` to ``HarveyLabAgent``
+    returning any other Stirrup ``CodeExecToolProvider``; the agent only uses
+    the provider's generic file surface, so nothing else changes.
     """
-    rendered = task_template
-    for name, value in (("instructions", instructions), ("deliverables", deliverables)):
+    from stirrup.tools.code_backends.local import LocalCodeExecToolProvider
+
+    return LocalCodeExecToolProvider(shell_timeout=config.shell_timeout_s)
+
+
+def _render_template(template: str, variables: dict[str, str]) -> str:
+    """Substitute ``{{name}}`` (or ``{{ name }}``) Jinja2-style variables.
+
+    A variable the template never mentions is dropped rather than appended:
+    unlike the old two-variable template, these prompts carry structural
+    context (paths, tool names) that is meaningless out of position. The task
+    ``instructions`` are the exception — the agent must always receive them, so
+    a template missing them still gets them appended.
+    """
+    rendered = template
+    for name, value in variables.items():
         placeholder = "{{%s}}" % name
         spaced = "{{ %s }}" % name
         if placeholder in rendered:
             rendered = rendered.replace(placeholder, value)
         elif spaced in rendered:
             rendered = rendered.replace(spaced, value)
-        else:
+        elif name == "instructions":
             rendered = f"{rendered}\n\n{value}"
     return rendered
 
@@ -81,115 +131,87 @@ def _render_task_template(task_template: str, *, instructions: str, deliverables
 # ─── tool parameter models ────────────────────────────────────────────
 
 
-class _ReadParams(BaseModel):
-    path: str = Field(description="Path of the document to read, e.g. 'documents/contract.docx'.")
+class FinishParams(BaseModel):
+    """AA's LAB-AA finish contract: a summary plus every deliverable path."""
 
-
-class _GrepParams(BaseModel):
-    query: str = Field(description="Case-insensitive substring to search for across the documents.")
-
-
-class _WriteParams(BaseModel):
-    path: str = Field(description="Output filename to write, e.g. 'memo.docx' (rooted in output/).")
-    content: str = Field(description="Full text content of the deliverable.")
-
-
-class _EditParams(BaseModel):
-    path: str = Field(description="Output filename to edit (rooted in output/).")
-    old: str = Field(description="Exact snippet to replace.")
-    new: str = Field(description="Replacement text.")
-
-
-class _FinishParams(BaseModel):
-    reason: str = Field(description="Why the task is complete (all requested deliverables written).")
-
-
-def _build_finish_tool() -> Any:
-    """A ``reason``-only finish tool.
-
-    Stirrup's default ``SIMPLE_FINISH_TOOL`` requires a ``paths`` list it
-    validates against a code-exec env; this recipe manages the ``output/``
-    tree itself (deliverables are collected off disk), so a lighter finish
-    tool that just records the agent's closing reason is a better fit.
-    """
-    from stirrup import Tool, ToolResult
-
-    return Tool(
-        name="finish",
-        description="Signal the task is complete once every requested deliverable exists in output/.",
-        parameters=_FinishParams,
-        executor=lambda params: ToolResult(content=params.reason),
+    summary: str = Field(description="Brief summary of what you accomplished, including any assumptions you made.")
+    paths: list[str] = Field(
+        description="Absolute paths to every deliverable file you produced. Files only, not directories."
     )
 
 
-def _build_workspace_tools(workspace: TaskWorkspace) -> list[Any]:
-    """Build the Stirrup file tools bound to ``workspace``."""
+class AbandonParams(BaseModel):
+    """Give-up contract: a reason, no deliverables."""
+
+    reason: str = Field(description="Why the task is genuinely impossible to complete.")
+
+
+def _build_finish_tools(exec_env: Any) -> list[Any]:
+    """Build LAB-AA's ``finish`` + ``abandon_task_finish`` pair.
+
+    ``finish`` mirrors AA's validated submission: every submitted path must
+    resolve to a real file in the execution environment, otherwise the call is
+    rejected (``success=False``) and the agent gets another turn to fix it.
+    Stirrup terminates the loop on whichever finish tool succeeds, and hands
+    back its parameters — so the caller tells a completion from a give-up by
+    the type of the returned params.
+    """
     from stirrup import Tool, ToolResult
 
-    def _list(_: BaseModel) -> Any:
-        files = workspace.list_files()
-        return ToolResult(content="\n".join(files) if files else "(workspace is empty)")
-
-    def _read(params: _ReadParams) -> Any:
-        try:
-            return ToolResult(content=workspace.read_document(params.path))
-        except FileNotFoundError:
-            return ToolResult(content=f"No such document: {params.path!r}.", success=False)
-        except Exception as exc:  # noqa: BLE001 - surface parse errors to the agent
-            return ToolResult(content=f"Could not read {params.path!r}: {exc}", success=False)
-
-    def _grep(params: _GrepParams) -> Any:
-        hits = workspace.search_documents(params.query)
-        if not hits:
-            return ToolResult(content=f"No matches for {params.query!r}.")
-        return ToolResult(content="\n".join(f"{h['file']}:{h['line']}: {h['text']}" for h in hits))
-
-    def _write(params: _WriteParams) -> Any:
-        rel = workspace.write_deliverable(params.path, params.content)
-        return ToolResult(content=f"Wrote {rel} ({len(params.content)} chars).")
-
-    def _edit(params: _EditParams) -> Any:
-        try:
-            rel = workspace.edit_deliverable(params.path, params.old, params.new)
-            return ToolResult(content=f"Edited {rel}.")
-        except (FileNotFoundError, ValueError) as exc:
-            return ToolResult(content=str(exc), success=False)
+    async def _finish(params: FinishParams) -> Any:
+        invalid: list[str] = []
+        for path in params.paths:
+            if not Path(path).is_absolute():
+                invalid.append(path)
+                continue
+            try:
+                exists = await exec_env.file_exists(path)
+                is_dir = await exec_env.is_directory(path) if exists else False
+            except Exception as exc:  # noqa: BLE001 - failed validation must reject finish
+                logger.warning("finish could not stat %r: %s", path, exc)
+                invalid.append(path)
+                continue
+            if not exists or is_dir:
+                invalid.append(path)
+        if invalid:
+            return ToolResult(
+                content=(
+                    f"ERROR: these submitted paths are not absolute paths to existing files: {invalid}. "
+                    "Verify the paths, save every deliverable as a real file under the exact "
+                    "requested filename, then call finish again."
+                ),
+                success=False,
+            )
+        return ToolResult(content=params.summary)
 
     return [
-        Tool(name="list_files", description="List the files in documents/ and output/.", executor=_list),
         Tool(
-            name="read_document",
-            description="Read a source document (.docx/.xlsx/.pdf/.eml/text) from documents/.",
-            parameters=_ReadParams,
-            executor=_read,
+            name=FINISH_TOOL_NAME,
+            description=(
+                "Submit your work: a brief summary plus the absolute paths of every deliverable "
+                "file. Anything not submitted here is not graded."
+            ),
+            parameters=FinishParams,
+            executor=_finish,
         ),
         Tool(
-            name="grep_documents",
-            description="Case-insensitive search across the task documents.",
-            parameters=_GrepParams,
-            executor=_grep,
-        ),
-        Tool(
-            name="write_deliverable",
-            description="Write the full text of an output deliverable (rooted in output/).",
-            parameters=_WriteParams,
-            executor=_write,
-        ),
-        Tool(
-            name="edit_deliverable",
-            description="Replace a snippet in a deliverable you already wrote.",
-            parameters=_EditParams,
-            executor=_edit,
+            name=ABANDON_TOOL_NAME,
+            description=(
+                "Give up on the task, with a brief reason. Use only when you have concluded the "
+                "work is genuinely impossible — not to escape difficulty."
+            ),
+            parameters=AbandonParams,
+            executor=lambda params: ToolResult(content=params.reason),
         ),
     ]
 
 
 class HarveyLabAgent:
-    """A Stirrup-driven legal agent with a per-task file workspace.
+    """A Stirrup-driven legal agent over a single ``code_exec`` tool.
 
-    ``forward`` materializes the task workspace, runs the Stirrup loop under
-    the agent's ``system_prompt`` + ``task_template``, and returns the produced
-    deliverables for the rubric judge.
+    ``forward`` stages the task's documents, spins up a code execution
+    environment, runs the Stirrup loop under AA's LAB-AA prompts, and pulls the
+    requested deliverables back out for the rubric judge.
     """
 
     def __init__(
@@ -198,14 +220,23 @@ class HarveyLabAgent:
         config: HarveyLabConfig,
         task_source: TaskSource,
         model_factory: ModelFactory | None = None,
+        exec_provider_factory: ExecProviderFactory | None = None,
         system_prompt: str | None = None,
         task_template: str | None = None,
     ) -> None:
         self._config = config
         self._task_source = task_source
         self._model_factory = model_factory or _default_model_factory
+        self._exec_provider_factory = exec_provider_factory or _default_exec_provider_factory
         default_system, default_task = load_harvey_lab_prompts()
-        self._system_prompt = system_prompt if system_prompt is not None else default_system
+        self._system_prompt = _render_template(
+            system_prompt if system_prompt is not None else default_system,
+            {
+                "max_turns": str(config.max_turns),
+                "finish_tool": FINISH_TOOL_NAME,
+                "abandon_tool": ABANDON_TOOL_NAME,
+            },
+        )
         self._task_template = task_template if task_template is not None else default_task
 
     @property
@@ -216,41 +247,78 @@ class HarveyLabAgent:
     def task_template(self) -> str:
         return self._task_template
 
+    def render_task_prompt(self, record: HarveyLabRecord, *, workspace_dir: str, documents_dir: str) -> str:
+        """Render AA's task prompt for ``record`` against the live env paths.
+
+        The working directory only exists once the execution environment is up,
+        so the prompt is rendered inside the session rather than at construction.
+        """
+        names = record.deliverable_names or ("response.md",)
+        return _render_template(
+            self._task_template,
+            {
+                "workspace_dir": workspace_dir,
+                "documents_dir": documents_dir,
+                "command_timeout_minutes": str(max(1, round(self._config.shell_timeout_s / 60))),
+                "finish_tool": FINISH_TOOL_NAME,
+                "abandon_tool": ABANDON_TOOL_NAME,
+                "title": record.title or record.task_id,
+                "instructions": record.instructions,
+                "deliverables": "\n".join(f"- `{name}`" for name in names),
+            },
+        )
+
     async def forward(self, *, record: HarveyLabRecord) -> HarveyLabAgentOutput:
         from stirrup import Agent
-
-        deliverable_lines = "\n".join(f"- `{name}`" for name in record.deliverable_names)
-        user_prompt = _render_task_template(
-            self._task_template,
-            instructions=record.instructions,
-            deliverables=deliverable_lines or "- `response.md`",
-        )
 
         workspace = self._task_source(record)
         started = time.monotonic()
         try:
+            exec_env = self._exec_provider_factory(self._config)
+            tools: list[Any] = [exec_env]
+            if self._config.enable_view_image:
+                from stirrup.tools.view_image import ViewImageToolProvider
+
+                tools.append(ViewImageToolProvider(exec_env))
             client = self._model_factory(
                 self._config.task_model,
                 self._config.task_temperature,
                 self._config.max_output_tokens,
+                self._config.llm_timeout,
             )
             agent: Any = Agent(
                 client=client,
                 name="harvey-lab",
                 system_prompt=self._system_prompt,
-                tools=_build_workspace_tools(workspace),
-                finish_tool=_build_finish_tool(),
+                tools=tools,
+                finish_tool=_build_finish_tools(exec_env),
                 max_turns=self._config.max_turns,
             )
             # cache_on_interrupt=False: the eval may run cases in worker threads,
             # where Stirrup's default SIGINT handler raises "signal only works in
             # main thread of the main interpreter".
             async with agent.session(output_dir=workspace.output_dir, cache_on_interrupt=False) as session:
+                # Stage documents explicitly at `documents/`; uploading the
+                # workspace root would add an unwanted directory level.
+                await _upload_documents(exec_env, workspace)
+                work_dir = _env_working_dir(exec_env)
+                user_prompt = self.render_task_prompt(
+                    record,
+                    workspace_dir=work_dir,
+                    documents_dir="documents",
+                )
                 finish_params, history, _metadata = await session.run(user_prompt)
-            deliverables = workspace.collect_deliverables()
+            abandoned = isinstance(finish_params, AbandonParams)
+            submitted_paths = list(getattr(finish_params, "paths", []) or [])
+            deliverables = workspace.collect_deliverables(record.deliverable_names)
+            raw_deliverables = {name: workspace.deliverable_path(name).read_bytes() for name in deliverables}
             return HarveyLabAgentOutput(
-                final_answer=str(getattr(finish_params, "reason", "")),
+                final_answer=_finish_message(finish_params),
                 deliverables=deliverables,
+                raw_deliverables=raw_deliverables,
+                missing_deliverables=[n for n in record.deliverable_names if n not in deliverables],
+                submitted_paths=submitted_paths,
+                abandoned=abandoned,
                 total_turns=len(history),
                 wall_seconds=time.monotonic() - started,
             )
@@ -258,4 +326,32 @@ class HarveyLabAgent:
             workspace.close()
 
 
-__all__ = ["HarveyLabAgent", "HarveyLabAgentOutput", "ModelFactory"]
+def _finish_message(finish_params: Any) -> str:
+    """The agent's closing text: a ``finish`` summary or an abandon reason."""
+    if finish_params is None:  # max_turns exhausted without any finish call
+        return ""
+    return str(getattr(finish_params, "summary", None) or getattr(finish_params, "reason", "") or "")
+
+
+def _env_working_dir(exec_env: Any) -> str:
+    """Return the absolute directory of a live local execution environment."""
+    value = getattr(exec_env, "temp_dir", None)
+    if value is None:
+        raise RuntimeError("Local code execution environment has no working directory.")
+    return str(value)
+
+
+async def _upload_documents(exec_env: Any, workspace: TaskWorkspace) -> None:
+    """Copy the task's staged documents into the local environment at ``documents/``."""
+    result = await exec_env.upload_files(workspace.documents_dir, dest_dir="documents")
+    failed = getattr(result, "failed", None)
+    if failed:
+        raise RuntimeError(f"Failed to stage task documents: {failed}")
+
+
+__all__ = [
+    "ExecProviderFactory",
+    "HarveyLabAgent",
+    "HarveyLabAgentOutput",
+    "ModelFactory",
+]

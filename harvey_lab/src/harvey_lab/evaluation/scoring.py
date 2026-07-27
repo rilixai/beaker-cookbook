@@ -18,10 +18,19 @@ cheaper at LAB's scale, at near-frontier agreement:
 
 Two numbers come out per task:
 
-* ``all_pass`` (0/1) — the LAB-AA headline metric.
+* ``all_pass`` (0/1) — the share of tasks where every criterion passes.
 * ``criterion_pass_rate`` (continuous) — the fraction of criteria that
-  passed. It is a denser view of the same grading (all-pass is very sparse
-  on a ~60-criterion task: one missed criterion zeroes the whole task).
+  passed; LAB-AA's default headline metric, and a denser view of the same
+  grading (all-pass is very sparse on a ~60-criterion task: one missed
+  criterion zeroes the whole task).
+
+Two LAB-AA grading rules are enforced here:
+
+* Deliverable filenames match **exactly** — a near-miss filename counts as not
+  produced.
+* A criterion fails outright, without reaching the judge, only when *none* of
+  its declared deliverables exist. A partial submission is still judged, with
+  the absent files marked as such.
 """
 
 from __future__ import annotations
@@ -42,7 +51,9 @@ CRITERION_PASS_RATE_FIELD = "criterion_pass_rate"
 DEFAULT_JUDGE_MODEL = "openrouter/deepseek/deepseek-v4-flash"
 DEFAULT_JUDGE_BATCH_SIZE = 8
 DEFAULT_JUDGE_TIMEOUT_S = 120.0
-DEFAULT_JUDGE_NUM_RETRIES = 2
+# LAB-AA retries API failures aggressively rather than letting a transient
+# outage silently score a criterion FAIL.
+DEFAULT_JUDGE_NUM_RETRIES = 8
 DEFAULT_MAX_DELIVERABLE_CHARS = 40_000
 
 
@@ -222,25 +233,25 @@ def _scope_deliverables(
 ) -> str:
     """Concatenate only the deliverables a criterion names (deliverable-scoping).
 
-    Matches by exact filename, then by basename. A criterion that names no
-    deliverable (or names ones the agent never produced) falls back to every
-    produced deliverable so the judge still has context.
+    Filenames are matched **exactly** — LAB-AA counts a near-miss filename as
+    not produced, which is stricter than Harvey's best-effort matching. A file
+    the criterion declares but the agent never produced is included as an
+    explicit *absent* marker rather than silently dropped, so the judge grades a
+    partial submission on what is actually there (AA judges a criterion whenever
+    at least one of its files exists, marking the rest absent).
+
+    A criterion that names no deliverable at all falls back to every produced
+    deliverable so the judge still has context.
     """
     wanted = [str(d) for d in criterion_deliverables if d]
-    selected: dict[str, str] = {}
+    if not wanted:
+        return "\n\n".join(f"### {name}\n{text[:max_chars]}" for name, text in deliverables.items())
+    parts: list[str] = []
     for name in wanted:
         if name in deliverables:
-            selected[name] = deliverables[name]
-            continue
-        base = name.rsplit("/", 1)[-1]
-        for produced, text in deliverables.items():
-            if produced.rsplit("/", 1)[-1] == base:
-                selected[produced] = text
-    if not selected:
-        selected = dict(deliverables)
-    parts: list[str] = []
-    for name, text in selected.items():
-        parts.append(f"### {name}\n{text[:max_chars]}")
+            parts.append(f"### {name}\n{deliverables[name][:max_chars]}")
+        else:
+            parts.append(f"### {name}\n(this deliverable was not produced)")
     return "\n\n".join(parts)
 
 
@@ -279,6 +290,14 @@ def score_rubric(
 
     passed_by_id: dict[str, bool] = {}
     for scope, group in groups.items():
+        # AA's rule: a criterion fails outright, WITHOUT being shown to the
+        # judge, only when none of its declared deliverables were produced. A
+        # partial submission is still judged, with the missing files marked
+        # absent by ``_scope_deliverables``.
+        if scope and not any(name in deliverables for name in scope):
+            for c in group:
+                passed_by_id[str(c.get("id"))] = False
+            continue
         scoped_output = _scope_deliverables(scope, deliverables, max_chars=max_deliverable_chars)
         for start in range(0, len(group), max(1, batch_size)):
             batch = group[start : start + max(1, batch_size)]

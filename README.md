@@ -14,10 +14,14 @@ production setups.*
 ## Recipes
 
 ```
-harvey_lab/       Legal-research agent over the Harvey/LegalBench-style corpus
+harvey_lab/       Legal-research agent over the Harvey LABs corpus
 hotpotqa/         Multi-hop QA — PydanticAI tool-using agent (retrieve_k + summarize)
 apex_agents/      Professional knowledge-work tasks — ReAct toolbelt agent, LLM rubric judge
 ```
+
+> [!WARNING]
+> `harvey_lab` hands the model a **shell**, and runs it on your machine with no
+> isolation. See that recipe's README before running it for real.
 
 Each folder contains everything you need to reproduce the recipe: a
 README with the canonical reproduce commands and expected scores, a

@@ -1,23 +1,27 @@
 """Hermetic unit + integration tests for the Harvey LAB agent.
 
-Zero network: the agent runs on a scripted Stirrup client, the rubric judge
-is a stub, and task documents come from a fixture tree on disk. Covers the
-data loader (incl. nested task discovery), the frozen splits, the workspace
-file surface, the batched verdict parser + all-pass aggregation, and one
-full agent -> judge evaluation pass.
+Zero network: the agent runs on a scripted Stirrup client over the *local*
+code-execution backend (a temp directory — real shell, no network), the rubric
+judge is a stub, and task documents come from a fixture tree on disk. Covers
+the data loader (incl. nested task discovery), the frozen splits, the
+workspace staging + deliverable text extraction, the batched verdict parser,
+LAB-AA's exact-filename / partial-submission scoring rules, the finish and
+abandon tools, and one full agent -> judge evaluation pass.
 """
 
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from harvey_lab.agent.agent import HarveyLabAgent, _render_task_template
-from harvey_lab.agent.workspace import TaskWorkspace, task_source_from_dir
+from harvey_lab.agent.agent import FinishParams, HarveyLabAgent, _build_finish_tools, _render_template
+from harvey_lab.agent.workspace import TaskWorkspace, extract_text, task_source_from_dir
 from harvey_lab.config import HarveyLabConfig
 from harvey_lab.data import fetch as fetch_mod
 from harvey_lab.data.dataset import load_records, read_split
@@ -80,12 +84,14 @@ def tasks_root(tmp_path: Path) -> Path:
 class _ScriptedClient:
     """A Stirrup ``LLMClient`` that replays a fixed tool-call script.
 
-    Turn 1 writes a deliverable naming the fee + source; turn 2 finishes.
-    Never touches the network.
+    Turn 1 writes the deliverable through ``code_exec`` (as the real agent
+    must — there is no ``write_deliverable`` tool); turn 2 submits it via
+    ``finish``. Never touches the network.
     """
 
-    def __init__(self, *, deliverable_body: str) -> None:
+    def __init__(self, *, deliverable_body: str, deliverable_name: str = "memo.md") -> None:
         self._deliverable_body = deliverable_body
+        self._deliverable_name = deliverable_name
         self._turn = 0
 
     @property
@@ -99,34 +105,55 @@ class _ScriptedClient:
     async def generate(self, messages: list[Any], tools: dict[str, Any]) -> Any:
         from stirrup.core.models import AssistantMessage, ToolCall
 
+        workspace = _workspace_from_messages(messages)
         self._turn += 1
         if self._turn == 1:
+            heredoc = f"cat > {self._deliverable_name} <<'HLEOF'\n{self._deliverable_body}\nHLEOF"
             call = ToolCall(
-                name="write_deliverable",
-                arguments=json.dumps({"path": "memo.md", "content": self._deliverable_body}),
+                name="code_exec",
+                arguments=json.dumps({"cmd": heredoc}),
                 tool_call_id="tc-1",
             )
         else:
             call = ToolCall(
                 name="finish",
-                arguments=json.dumps({"reason": "Deliverable written."}),
+                arguments=json.dumps(
+                    {"summary": "Deliverable written.", "paths": [f"{workspace}/{self._deliverable_name}"]},
+                ),
                 tool_call_id="tc-2",
             )
         return AssistantMessage(content="", tool_calls=[call])
 
 
-def _scripted_model_factory(body: str) -> Any:
-    def _factory(_model: str, _temp: float, _max_tokens: int) -> Any:
-        return _ScriptedClient(deliverable_body=body)
+def _workspace_from_messages(messages: list[Any]) -> str:
+    for message in messages:
+        content = str(getattr(message, "content", ""))
+        match = re.search(r"working directory, `([^`]+)`", content)
+        if match:
+            return match.group(1)
+    raise AssertionError("Task prompt did not include the execution working directory.")
+
+
+def _scripted_model_factory(body: str, name: str = "memo.md") -> Any:
+    def _factory(_model: str, _temp: float, _max_tokens: int, _timeout: float) -> Any:
+        return _ScriptedClient(deliverable_body=body, deliverable_name=name)
 
     return _factory
 
 
-def _build_agent(tasks_root: Path, body: str, **cfg: Any) -> HarveyLabAgent:
+def _local_exec_factory(config: Any) -> Any:
+    """A local (temp-dir) code-exec backend with a short per-command timeout."""
+    from stirrup.tools.code_backends.local import LocalCodeExecToolProvider
+
+    return LocalCodeExecToolProvider(shell_timeout=30)
+
+
+def _build_agent(tasks_root: Path, body: str, name: str = "memo.md", **cfg: Any) -> HarveyLabAgent:
     return HarveyLabAgent(
-        config=HarveyLabConfig(max_turns=5, **cfg),
+        config=HarveyLabConfig(max_turns=5, enable_view_image=False, **cfg),
         task_source=task_source_from_dir(tasks_root),
-        model_factory=_scripted_model_factory(body),
+        model_factory=_scripted_model_factory(body, name),
+        exec_provider_factory=_local_exec_factory,
     )
 
 
@@ -337,23 +364,37 @@ def test_frozen_splits_are_disjoint_and_capped() -> None:
 # ─── workspace ────────────────────────────────────────────────────────
 
 
-def test_workspace_read_write_search_collect(tmp_path: Path) -> None:
+def test_workspace_stages_documents_and_collects_named_deliverables(tmp_path: Path) -> None:
     ws = TaskWorkspace(tmp_path / "ws")
-    (ws.documents_dir / "a.txt").write_text("hello WORLD line\nsecond line", encoding="utf-8")
-    assert "documents/a.txt" in ws.list_files()
-    assert "hello WORLD" in ws.read_document("a.txt")
-    hits = ws.search_documents("world")
-    assert hits and hits[0]["file"] == "documents/a.txt"
-    ws.write_deliverable("out.md", "draft")
-    assert ws.collect_deliverables() == {"out.md": "draft"}
-    ws.edit_deliverable("out.md", "draft", "final")
-    assert ws.collect_deliverables()["out.md"] == "final"
+    (ws.documents_dir / "a.txt").write_text("hello WORLD line", encoding="utf-8")
+
+    # Deliverables are pulled back into output/ by the agent, then collected
+    # by EXACT requested filename — anything else the agent left behind is not
+    # graded.
+    ws.deliverable_path("memo.md").write_text("final", encoding="utf-8")
+    ws.deliverable_path("scratch.md").write_text("ignore me", encoding="utf-8")
+    assert ws.collect_deliverables(["memo.md"]) == {"memo.md": "final"}
+    # A requested file the agent never produced is simply absent.
+    assert ws.collect_deliverables(["memo.md", "missing.docx"]) == {"memo.md": "final"}
 
 
 def test_workspace_rejects_escape(tmp_path: Path) -> None:
     ws = TaskWorkspace(tmp_path / "ws")
     with pytest.raises(ValueError):
-        ws.write_deliverable("../escape.txt", "x")
+        ws.deliverable_path("../escape.txt")
+
+
+def test_extract_text_falls_back_and_survives_bad_binaries(tmp_path: Path) -> None:
+    plain = tmp_path / "note.md"
+    plain.write_text("# Memo\nbody", encoding="utf-8")
+    assert "# Memo" in extract_text(plain)
+    assert extract_text(plain, max_chars=3) == "# M"
+
+    # A file claiming to be .docx but containing garbage must yield a note, not
+    # raise — one unreadable deliverable cannot abort a grading run.
+    broken = tmp_path / "broken.docx"
+    broken.write_bytes(b"not a docx at all")
+    assert "broken.docx" in extract_text(broken)
 
 
 # ─── batched verdict parsing + scoring ────────────────────────────────
@@ -409,9 +450,45 @@ def test_scope_deliverables_selects_named_only() -> None:
     assert "A" in scoped and "B" not in scoped
 
 
-def test_scope_deliverables_falls_back_to_all_when_unmatched() -> None:
-    scoped = _scope_deliverables(["missing.md"], {"memo.md": "A"}, max_chars=100)
+def test_scope_deliverables_marks_partial_submission_absent() -> None:
+    """A criterion spanning two files, only one produced, is still judged — with
+    the missing file explicitly marked absent (LAB-AA's partial-submission rule)."""
+    scoped = _scope_deliverables(["memo.md", "schedule.xlsx"], {"memo.md": "A"}, max_chars=100)
     assert "A" in scoped
+    assert "schedule.xlsx" in scoped
+    assert "not produced" in scoped
+
+
+def test_scope_deliverables_does_not_fuzzy_match_filenames() -> None:
+    """LAB-AA requires EXACT filenames: a near-miss counts as not produced."""
+    scoped = _scope_deliverables(["memo.md"], {"my-memo.md": "A"}, max_chars=100)
+    assert "A" not in scoped
+    assert "not produced" in scoped
+
+
+def test_score_rubric_fails_unproduced_scope_without_calling_judge() -> None:
+    """When NONE of a criterion's deliverables exist it fails outright, and the
+    judge is never invoked for it."""
+    criteria = [
+        {"id": "C1", "title": "t", "match_criteria": "x", "deliverables": ["memo.md"]},
+        {"id": "C2", "title": "t", "match_criteria": "y", "deliverables": ["schedule.xlsx"]},
+    ]
+    seen: list[str] = []
+
+    def _judge(_desc: str, crits: list[dict], _out: str) -> dict[str, bool]:
+        seen.extend(str(c["id"]) for c in crits)
+        return {str(c["id"]): True for c in crits}
+
+    result = score_rubric(
+        criteria=criteria,
+        deliverables={"memo.md": "body"},
+        task_description="t",
+        judge=_judge,
+    )
+    assert seen == ["C1"]  # C2's only deliverable is missing -> never judged
+    assert result["passed"] == 1
+    assert result[CRITERION_PASS_RATE_FIELD] == 0.5
+    assert result[ALL_PASS_FIELD] == 0.0
 
 
 def test_score_rubric_all_and_partial() -> None:
@@ -457,12 +534,17 @@ def test_score_rubric_empty_rubric_is_unscoreable() -> None:
     assert result["total_criteria"] == 0
 
 
-def test_render_task_template_substitutes_and_falls_back() -> None:
-    rendered = _render_task_template("{{instructions}}\n\n{{deliverables}}", instructions="do it", deliverables="- x")
+def test_render_template_substitutes_and_appends_instructions() -> None:
+    rendered = _render_template(
+        "{{instructions}}\n\n{{ deliverables }}",
+        {"instructions": "do it", "deliverables": "- x"},
+    )
     assert "do it" in rendered and "- x" in rendered
-    # A template that drops a var still gets the raw value appended.
-    dropped = _render_task_template("only instructions: {{instructions}}", instructions="I", deliverables="- d")
-    assert "I" in dropped and "- d" in dropped
+    # A template that drops `instructions` still receives them (the agent must
+    # always see the task); other unreferenced vars are simply not injected.
+    dropped = _render_template("no vars here", {"instructions": "I", "workspace_dir": "/tmp/x"})
+    assert "I" in dropped
+    assert "/tmp/x" not in dropped
 
 
 # ─── full agent → judge integration ──────────────────────────────────
@@ -485,38 +567,159 @@ def test_evaluate_record_fail_when_judge_rejects(tasks_root: Path) -> None:
     assert result[CRITERION_PASS_RATE_FIELD] == 0.0
 
 
+class _CapturingClient:
+    """Records every message/tool set it sees, then replays ``script`` calls."""
+
+    def __init__(self, script: list[tuple[str, dict[str, Any]]]) -> None:
+        self._script = script
+        self._turn = 0
+        self.messages: list[Any] = []
+        self.tool_names: list[str] = []
+
+    @property
+    def model_slug(self) -> str:
+        return "scripted/test"
+
+    @property
+    def max_tokens(self) -> int:
+        return 100_000
+
+    async def generate(self, messages: list[Any], tools: dict[str, Any]) -> Any:
+        from stirrup.core.models import AssistantMessage, ToolCall
+
+        if not self.messages:
+            self.messages = list(messages)
+            self.tool_names = sorted(tools)
+        name, args = self._script[min(self._turn, len(self._script) - 1)]
+        args = dict(args)
+        if name == "finish":
+            workspace = _workspace_from_messages(messages)
+            args["paths"] = [p if Path(p).is_absolute() else f"{workspace}/{p}" for p in args.get("paths", [])]
+        self._turn += 1
+        return AssistantMessage(
+            content="",
+            tool_calls=[ToolCall(name=name, arguments=json.dumps(args), tool_call_id=f"tc-{self._turn}")],
+        )
+
+
+def _run_with_client(tasks_root: Path, client: _CapturingClient, task_id: str = "contracts/t1", **kw: Any) -> Any:
+    agent = HarveyLabAgent(
+        config=HarveyLabConfig(max_turns=4, enable_view_image=False),
+        task_source=task_source_from_dir(tasks_root),
+        model_factory=lambda *_: client,
+        exec_provider_factory=_local_exec_factory,
+        **kw,
+    )
+    record = load_records(tasks_root, task_ids=[task_id])[0]
+    return asyncio.run(agent.forward(record=record))
+
+
 def test_forward_uses_configured_prompts(tasks_root: Path) -> None:
     """The system prompt the LLM sees is the agent's configured prompt."""
-    captured: dict[str, str] = {}
+    client = _CapturingClient([("abandon_task_finish", {"reason": "done"})])
+    _run_with_client(tasks_root, client, system_prompt="MY-CUSTOM-SYSTEM-PROMPT")
+    assert "MY-CUSTOM-SYSTEM-PROMPT" in str(getattr(client.messages[0], "content", ""))
 
-    class _CapturingClient:
-        @property
-        def model_slug(self) -> str:
-            return "scripted/test"
 
-        @property
-        def max_tokens(self) -> int:
-            return 100_000
+def test_forward_exposes_only_code_exec_and_finish_tools(tasks_root: Path) -> None:
+    """LAB-AA gives the model a single code-execution tool plus the finish pair —
+    no curated read/write/grep helpers."""
+    client = _CapturingClient([("abandon_task_finish", {"reason": "nothing to do"})])
+    _run_with_client(tasks_root, client)
+    assert client.tool_names == ["abandon_task_finish", "code_exec", "finish"]
 
-        async def generate(self, messages: list[Any], tools: dict[str, Any]) -> Any:
-            from stirrup.core.models import AssistantMessage, ToolCall
 
-            if "system" not in captured and messages:
-                captured["system"] = str(getattr(messages[0], "content", ""))
-            return AssistantMessage(
-                content="",
-                tool_calls=[ToolCall(name="finish", arguments=json.dumps({"reason": "done"}), tool_call_id="tc-1")],
-            )
-
-    agent = HarveyLabAgent(
-        config=HarveyLabConfig(max_turns=3),
-        task_source=task_source_from_dir(tasks_root),
-        model_factory=lambda *_: _CapturingClient(),
-        system_prompt="MY-CUSTOM-SYSTEM-PROMPT",
+def test_forward_uploads_documents_into_the_environment(tasks_root: Path) -> None:
+    """The task's documents must be readable through `code_exec` at documents/."""
+    client = _CapturingClient(
+        [
+            ("code_exec", {"cmd": "cp documents/notes.txt memo.md"}),
+            ("finish", {"summary": "copied", "paths": ["memo.md"]}),
+        ]
     )
+    output = _run_with_client(tasks_root, client)
+    assert "$50,000" in output.deliverables["memo.md"]
+    assert output.raw_deliverables["memo.md"] == (tasks_root / "contracts/t1/documents/notes.txt").read_bytes()
+
+
+def test_forward_records_abandonment(tasks_root: Path) -> None:
+    client = _CapturingClient(
+        [
+            ("code_exec", {"cmd": "printf 'unsubmitted' > memo.md"}),
+            ("abandon_task_finish", {"reason": "inputs are missing"}),
+        ]
+    )
+    output = _run_with_client(tasks_root, client)
+    assert output.abandoned is True
+    assert output.final_answer == "inputs are missing"
+    assert output.deliverables == {}
+    assert output.raw_deliverables == {}
+    assert output.missing_deliverables == ["memo.md"]
+
+
+def test_forward_does_not_grade_unsubmitted_files(tasks_root: Path) -> None:
+    client = _CapturingClient(
+        [
+            ("code_exec", {"cmd": "printf 'unsubmitted' > memo.md"}),
+            ("finish", {"summary": "done", "paths": []}),
+        ]
+    )
+    output = _run_with_client(tasks_root, client)
+    assert output.submitted_paths == []
+    assert output.deliverables == {}
+    assert output.raw_deliverables == {}
+    assert output.missing_deliverables == ["memo.md"]
+
+
+def test_forward_does_not_grade_files_after_max_turns(tasks_root: Path) -> None:
+    client = _CapturingClient([("code_exec", {"cmd": "printf 'unfinished' > memo.md"})])
+    output = _run_with_client(tasks_root, client)
+    assert output.final_answer == ""
+    assert output.submitted_paths == []
+    assert output.deliverables == {}
+    assert output.raw_deliverables == {}
+    assert output.missing_deliverables == ["memo.md"]
+
+
+def test_finish_rejects_relative_paths_and_stat_errors() -> None:
+    class _BrokenEnv:
+        async def file_exists(self, _path: str) -> bool:
+            raise RuntimeError("stat failed")
+
+        async def is_directory(self, _path: str) -> bool:
+            return False
+
+    async def _run(path: str) -> Any:
+        finish = _build_finish_tools(_BrokenEnv())[0]
+        result = finish.executor(FinishParams(summary="done", paths=[path]))
+        return await result if inspect.isawaitable(result) else result
+
+    assert asyncio.run(_run("memo.md")).success is False
+    assert asyncio.run(_run("/tmp/memo.md")).success is False
+
+
+def test_finish_rejects_paths_that_are_not_files(tasks_root: Path) -> None:
+    """A submitted path that does not resolve to a real file is rejected, and the
+    agent gets another turn (AA validates finish paths)."""
+    client = _CapturingClient(
+        [
+            ("finish", {"summary": "premature", "paths": ["memo.md"]}),
+            ("code_exec", {"cmd": "printf 'fee $50,000' > memo.md"}),
+            ("finish", {"summary": "now for real", "paths": ["memo.md"]}),
+        ]
+    )
+    output = _run_with_client(tasks_root, client)
+    assert output.final_answer == "now for real"
+    assert "memo.md" in output.deliverables
+
+
+def test_forward_ignores_near_miss_filenames(tasks_root: Path) -> None:
+    """A deliverable saved under the wrong filename counts as not produced."""
+    agent = _build_agent(tasks_root, "Termination fee is $50,000.", name="my-memo.md")
     record = load_records(tasks_root, task_ids=["contracts/t1"])[0]
-    asyncio.run(agent.forward(record=record))
-    assert "MY-CUSTOM-SYSTEM-PROMPT" in captured.get("system", "")
+    output = asyncio.run(agent.forward(record=record))
+    assert output.deliverables == {}
+    assert output.missing_deliverables == ["memo.md"]
 
 
 def test_forward_succeeds_in_worker_thread(tasks_root: Path) -> None:
@@ -568,9 +771,10 @@ def test_evaluate_agent_contains_errors_and_excludes_unscoreable(tasks_root: Pat
             return await super().forward(record=record)
 
     flaky = _FlakyAgent(
-        config=HarveyLabConfig(max_turns=5),
+        config=HarveyLabConfig(max_turns=5, enable_view_image=False),
         task_source=task_source_from_dir(tasks_root),
         model_factory=_scripted_model_factory("Termination fee is $50,000, per notes.txt."),
+        exec_provider_factory=_local_exec_factory,
     )
     report = asyncio.run(evaluate_agent_on_records(agent=flaky, records=records, judge=_fee_judge, max_concurrency=2))
     assert report.num_cases == 7

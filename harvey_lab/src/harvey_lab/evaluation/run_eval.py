@@ -66,8 +66,13 @@ async def evaluate_record(
 
     The returned dict always carries ``task_id`` + ``practice_area`` and a
     ``kind`` in ``{"scored", "unscoreable"}``. A ``scored`` result also carries
-    ``all_pass`` / ``criterion_pass_rate`` / ``passed`` / ``total_criteria`` and
-    the agent's ``final_answer`` + produced ``deliverables``.
+    ``all_pass`` / ``criterion_pass_rate`` / ``passed`` / ``total_criteria``, the
+    agent's ``final_answer``, which requested deliverables it produced vs.
+    ``deliverables_missing``, and whether it called ``abandon_task_finish``.
+
+    An abandoned task is *not* special-cased: it is graded like any other run,
+    which — with no deliverables — fails every criterion. That matches LAB-AA,
+    where giving up simply means submitting nothing.
     """
     output = await agent.forward(record=record)
     criteria_payload = [
@@ -95,6 +100,9 @@ async def evaluate_record(
         "passed": scored["passed"],
         "total_criteria": scored["total_criteria"],
         "deliverables_produced": sorted(output.deliverables),
+        "deliverables_missing": sorted(output.missing_deliverables),
+        "abandoned": output.abandoned,
+        "total_turns": output.total_turns,
         "final_answer": output.final_answer,
     }
 
