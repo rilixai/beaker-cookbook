@@ -24,7 +24,6 @@ import argparse
 import asyncio
 import json
 import logging
-import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -247,18 +246,27 @@ def _persist_agent_output(
     record: HarveyLabRecord,
     output: HarveyLabAgentOutput,
 ) -> dict[str, Any]:
-    # Clear the whole task dir first so a re-run never leaves stale artifacts —
-    # a prior error entry carries no produced list to clean up from, and this
-    # dir only ever holds this task's deliverables.
+    # Write the new deliverables first (atomically), *then* prune whatever this
+    # task dir held before — never the reverse. Wiping up front would let a
+    # failed write destroy the previous run's files and drop the just-produced
+    # output; writing first means a prior run survives a write failure, and the
+    # post-write prune still clears stale leftovers (this dir only ever holds
+    # this task's deliverables) so a produce-nothing rerun leaves none behind.
     task_dir = _task_output_dir(output_dir, record.task_id)
-    if task_dir.exists():
-        shutil.rmtree(task_dir)
+    written: set[Path] = set()
     for name, content in output.raw_deliverables.items():
         destination = _artifact_path(output_dir, record.task_id, name)
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(f".{destination.name}.tmp")
         temporary.write_bytes(content)
         temporary.replace(destination)
+        written.add(destination)
+    if task_dir.exists():
+        for path in sorted(task_dir.rglob("*"), reverse=True):
+            if path.is_file() and path not in written:
+                path.unlink()
+            elif path.is_dir() and not any(path.iterdir()):
+                path.rmdir()
     return {
         "task_id": record.task_id,
         "practice_area": record.practice_area,

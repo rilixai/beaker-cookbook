@@ -951,6 +951,22 @@ def test_persisted_rerun_removes_stale_deliverables(tasks_root: Path, tmp_path: 
     assert cli_mod._is_reusable(tmp_path, record, entry)
 
 
+def test_persist_write_failure_preserves_prior_deliverables(tasks_root: Path, tmp_path: Path) -> None:
+    """Persist writes new files before pruning, so a mid-write failure never
+    destroys the previous run's deliverables (they'd be lost by a wipe-first)."""
+    record = load_records(tasks_root, task_ids=["contracts/t1"])[0]
+    prior = tmp_path / "contracts/t1/memo.md"
+    prior.parent.mkdir(parents=True)
+    prior.write_text("good prior run")
+    # An unsafe deliverable name makes _artifact_path raise partway through.
+    output = HarveyLabAgentOutput(final_answer="x", raw_deliverables={"../escape.md": b"x"}, finished=True)
+
+    with pytest.raises(ValueError):
+        cli_mod._persist_agent_output(tmp_path, record, output)
+
+    assert prior.read_text() == "good prior run"
+
+
 def test_max_turn_and_stale_task_entries_are_not_reusable(tasks_root: Path, tmp_path: Path) -> None:
     record = load_records(tasks_root, task_ids=["contracts/t1"])[0]
     entry = {
