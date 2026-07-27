@@ -120,21 +120,10 @@ the benchmark's natural practice-area distribution) are the source of truth —
 see `src/harvey_lab/splits/README.md`. `--split` picks one; `--limit N` runs
 just the first N (the lists are ordered so any prefix stays representative).
 
-This differs from the [LAB-AA leaderboard setup](https://artificialanalysis.ai/methodology/intelligence-benchmarking#harvey-lab-aa). The leaderboard runs on Harvey's
-**private** 120-task set through AA's exact Stirrup config. The agent side here
-tracks AA closely (single `code_exec` tool, AA's prompts, validated
-`finish` + `abandon_task_finish`, 200 turns, exact-filename grading); the
-remaining deliberate differences are:
-
-| | LAB-AA | Here |
-|---|---|---|
-| Tasks | 120 private Harvey tasks | the public task set, frozen splits |
-| Sandbox | a remote sandbox | a local temp dir, no isolation (see the warning above) |
-| Judge | a single Gemini 3.1 Pro call per criterion | a cheap batched judge (`judge_batch_size` criteria per call) |
-| Judge prompt | AA's per-criterion prompt | a batched adaptation of it |
-
-So scores here are a self-contained measurement on this harness, **not** a
-leaderboard-comparable number.
+This is not the [LAB-AA leaderboard](https://artificialanalysis.ai/methodology/intelligence-benchmarking#harvey-lab-aa): that runs on Harvey's **private** 120-task set,
+whereas this runs on the **public** tasks with a local (unsandboxed) `code_exec`
+and a cheaper batched judge. Treat the scores as a self-contained measurement on
+this harness, not a leaderboard-comparable number.
 
 ## Install
 
