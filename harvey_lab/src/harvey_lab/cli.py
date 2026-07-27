@@ -6,9 +6,8 @@ Subcommands:
 * ``run`` — run the agent on a split's tasks and write the produced
   deliverables to ``--output-dir`` (agent only; needs the task model's
   provider key).
-* ``evaluate`` — run the agent AND grade every rubric criterion with the
-  batched LLM judge, reporting ``all_pass_rate`` / ``criterion_pass_rate``
-  (needs the task model's and the judge model's provider keys).
+* ``evaluate`` — reuse completed outputs in ``--output-dir``, run and persist
+  any missing tasks, then grade every rubric criterion with the batched judge.
 
 Tasks come from the frozen ``splits/{train,val,test}.txt`` lists (see
 ``splits/README.md``). By default only the needed task folders are fetched
@@ -23,26 +22,30 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
-from .agent.agent import HarveyLabAgent
-from .agent.workspace import task_source_from_dir
+from .agent.agent import HarveyLabAgent, HarveyLabAgentOutput
+from .agent.workspace import extract_text, task_source_from_dir
 from .config import HarveyLabConfig
 from .data.dataset import HarveyLabRecord, load_records, read_split
 from .data.fetch import ensure_task_dirs
 from .evaluation import (
     ALL_PASS_RATE_FIELD,
     CRITERION_PASS_RATE_FIELD,
+    JudgeCallError,
     build_rubric_judge,
     eval_summary,
-    evaluate_agent_on_records,
+    evaluate_outputs_on_records,
     write_json,
 )
 
 
 logger = logging.getLogger("harvey_lab")
+RUN_OUTPUTS_FILENAME = "run_outputs.json"
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -58,7 +61,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "command",
         choices=("run", "evaluate"),
-        help="`run` executes the agent and dumps deliverables; `evaluate` also grades them.",
+        help="`run` executes and saves; `evaluate` resumes saved outputs and grades them.",
     )
     parser.add_argument(
         "--tasks-root",
@@ -113,6 +116,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--max-concurrency", type=int, default=4)
     parser.add_argument("--output-dir", type=Path, default=Path("harvey_lab_run"))
+    parser.add_argument(
+        "--rerun",
+        action="store_true",
+        help="With `evaluate`, rerun selected tasks instead of reusing completed saved outputs.",
+    )
     return parser.parse_args(argv)
 
 
@@ -153,6 +161,160 @@ def _build_agent(tasks_root: Path, config: HarveyLabConfig) -> HarveyLabAgent:
     )
 
 
+def _read_run_manifest(output_dir: Path) -> dict[str, dict[str, Any]]:
+    path = output_dir / RUN_OUTPUTS_FILENAME
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text())
+    if not isinstance(payload, list):
+        raise ValueError(f"{path} must contain a JSON list.")
+    entries: dict[str, dict[str, Any]] = {}
+    for value in payload:
+        if not isinstance(value, dict) or not str(value.get("task_id") or ""):
+            raise ValueError(f"{path} contains an invalid run entry.")
+        entry = dict(value)
+        entries[str(entry["task_id"])] = entry
+    return entries
+
+
+def _artifact_path(output_dir: Path, task_id: str, name: str) -> Path:
+    root = output_dir.resolve()
+    task_dir = (root / task_id).resolve()
+    path = (task_dir / name).resolve()
+    if not task_dir.is_relative_to(root) or not path.is_relative_to(task_dir):
+        raise ValueError(f"Unsafe persisted deliverable path for {task_id}: {name}")
+    return path
+
+
+def _is_reusable(output_dir: Path, record: HarveyLabRecord, entry: dict[str, Any] | None) -> bool:
+    if entry is None or "error" in entry:
+        return False
+    finished = entry.get("finished") is True
+    abandoned = entry.get("abandoned") is True
+    if finished == abandoned or entry.get("max_turns_reached") is True:
+        return False
+    if entry.get("task_fingerprint") != record.task_fingerprint:
+        return False
+    produced = entry.get("deliverables_produced")
+    missing = entry.get("deliverables_missing")
+    if not isinstance(produced, list) or not isinstance(missing, list):
+        return False
+    if not all(isinstance(name, str) for name in [*produced, *missing]):
+        return False
+    expected = set(record.deliverable_names or ("response.md",))
+    produced_names = set(produced)
+    missing_names = set(missing)
+    if produced_names & missing_names or produced_names | missing_names != expected:
+        return False
+    try:
+        return all(_artifact_path(output_dir, record.task_id, name).is_file() for name in produced)
+    except (OSError, ValueError):
+        return False
+
+
+def _persist_agent_output(
+    output_dir: Path,
+    record: HarveyLabRecord,
+    output: HarveyLabAgentOutput,
+    previous: dict[str, Any] | None,
+) -> dict[str, Any]:
+    for name in (previous or {}).get("deliverables_produced", []):
+        if isinstance(name, str):
+            try:
+                _artifact_path(output_dir, record.task_id, name).unlink(missing_ok=True)
+            except ValueError:
+                pass
+    for name, content in output.raw_deliverables.items():
+        destination = _artifact_path(output_dir, record.task_id, name)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f".{destination.name}.tmp")
+        temporary.write_bytes(content)
+        temporary.replace(destination)
+    return {
+        "task_id": record.task_id,
+        "practice_area": record.practice_area,
+        "task_fingerprint": record.task_fingerprint,
+        "deliverables_produced": sorted(output.deliverables),
+        "deliverables_missing": sorted(output.missing_deliverables),
+        "finished": output.finished,
+        "abandoned": output.abandoned,
+        "max_turns_reached": output.max_turns_reached,
+        "total_turns": output.total_turns,
+        "wall_seconds": output.wall_seconds,
+        "final_answer": output.final_answer,
+    }
+
+
+async def _run_and_persist(
+    *,
+    agent: HarveyLabAgent,
+    records: list[HarveyLabRecord],
+    output_dir: Path,
+    previous: dict[str, dict[str, Any]],
+    max_concurrency: int,
+) -> list[dict[str, Any]]:
+    semaphore = asyncio.Semaphore(max(1, max_concurrency))
+
+    async def _one(record: HarveyLabRecord) -> dict[str, Any]:
+        async with semaphore:
+            try:
+                output = await agent.forward(record=record)
+                return _persist_agent_output(output_dir, record, output, previous.get(record.task_id))
+            except Exception as exc:  # noqa: BLE001 - report, don't abort the batch
+                logger.warning("Task %s failed: %s", record.task_id, exc)
+                return {
+                    "task_id": record.task_id,
+                    "practice_area": record.practice_area,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+
+    return list(await asyncio.gather(*[_one(record) for record in records]))
+
+
+def _merge_and_write_manifest(
+    output_dir: Path,
+    previous: dict[str, dict[str, Any]],
+    results: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    merged = dict(previous)
+    merged.update((str(result["task_id"]), result) for result in results)
+    write_json(output_dir / RUN_OUTPUTS_FILENAME, list(merged.values()))
+    return merged
+
+
+def _load_persisted_outputs(
+    output_dir: Path,
+    records: list[HarveyLabRecord],
+    manifest: dict[str, dict[str, Any]],
+) -> tuple[dict[str, HarveyLabAgentOutput], dict[str, str]]:
+    outputs: dict[str, HarveyLabAgentOutput] = {}
+    errors: dict[str, str] = {}
+    for record in records:
+        entry = manifest.get(record.task_id)
+        if entry is None:
+            errors[record.task_id] = "No persisted run output is available."
+            continue
+        if "error" in entry:
+            errors[record.task_id] = str(entry["error"])
+            continue
+        if not _is_reusable(output_dir, record, entry):
+            errors[record.task_id] = "Persisted run metadata or deliverable files are incomplete."
+            continue
+        produced = [str(name) for name in entry["deliverables_produced"]]
+        deliverables = {name: extract_text(_artifact_path(output_dir, record.task_id, name)) for name in produced}
+        outputs[record.task_id] = HarveyLabAgentOutput(
+            final_answer=str(entry.get("final_answer") or ""),
+            deliverables=deliverables,
+            missing_deliverables=[str(name) for name in entry["deliverables_missing"]],
+            finished=bool(entry.get("finished", False)),
+            abandoned=bool(entry.get("abandoned", False)),
+            max_turns_reached=bool(entry.get("max_turns_reached", False)),
+            total_turns=int(entry.get("total_turns", 0)),
+            wall_seconds=float(entry.get("wall_seconds", 0.0)),
+        )
+    return outputs, errors
+
+
 def _run_run(args: argparse.Namespace) -> int:
     tasks_root, records = _select_records(args)
     if not records:
@@ -161,44 +323,19 @@ def _run_run(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
     agent = _build_agent(tasks_root, config)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    async def _run_all() -> list[dict[str, object]]:
-        semaphore = asyncio.Semaphore(max(1, args.max_concurrency))
-
-        async def _one(record: HarveyLabRecord) -> dict[str, object]:
-            async with semaphore:
-                # Contain per-task failures so one erroring task does not
-                # cancel the batch (mirrors evaluate_agent_on_records).
-                try:
-                    output = await agent.forward(record=record)
-                except Exception as exc:  # noqa: BLE001 - report, don't abort
-                    logger.warning("Task %s failed: %s", record.task_id, exc)
-                    return {
-                        "task_id": record.task_id,
-                        "practice_area": record.practice_area,
-                        "error": f"{type(exc).__name__}: {exc}",
-                    }
-                out_dir = args.output_dir / record.task_id
-                for name, content in output.raw_deliverables.items():
-                    dest = out_dir / name
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_bytes(content)
-                return {
-                    "task_id": record.task_id,
-                    "practice_area": record.practice_area,
-                    "deliverables_produced": sorted(output.deliverables),
-                    "deliverables_missing": sorted(output.missing_deliverables),
-                    "abandoned": output.abandoned,
-                    "total_turns": output.total_turns,
-                    "wall_seconds": output.wall_seconds,
-                }
-
-        return list(await asyncio.gather(*[_one(r) for r in records]))
-
+    previous = _read_run_manifest(args.output_dir)
     logger.info("Running the agent on %d task(s) from split=%s...", len(records), args.split)
-    results = asyncio.run(_run_all())
-    write_json(args.output_dir / "run_outputs.json", results)
-    num_errored = sum(1 for r in results if "error" in r)
+    results = asyncio.run(
+        _run_and_persist(
+            agent=agent,
+            records=records,
+            output_dir=args.output_dir,
+            previous=previous,
+            max_concurrency=args.max_concurrency,
+        )
+    )
+    _merge_and_write_manifest(args.output_dir, previous, results)
+    num_errored = sum(1 for result in results if "error" in result)
     logger.info(
         "Wrote outputs for %d task(s) under %s (%d succeeded, %d errored)",
         len(results),
@@ -215,27 +352,60 @@ def _run_evaluate(args: argparse.Namespace) -> int:
         logger.error("evaluate got no tasks for --split %s.", args.split)
         return 2
     config = _config_from_args(args)
-    agent = _build_agent(tasks_root, config)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    manifest = _read_run_manifest(args.output_dir)
+    to_run = [
+        record
+        for record in records
+        if args.rerun or not _is_reusable(args.output_dir, record, manifest.get(record.task_id))
+    ]
+    if to_run:
+        logger.info(
+            "Running and saving %d task(s); reusing %d completed output(s)...",
+            len(to_run),
+            len(records) - len(to_run),
+        )
+        agent = _build_agent(tasks_root, config)
+        results = asyncio.run(
+            _run_and_persist(
+                agent=agent,
+                records=to_run,
+                output_dir=args.output_dir,
+                previous=manifest,
+                max_concurrency=args.max_concurrency,
+            )
+        )
+        manifest = _merge_and_write_manifest(args.output_dir, manifest, results)
+    else:
+        logger.info("Reusing all %d completed output(s); no agent run needed.", len(records))
+
+    outputs, errors = _load_persisted_outputs(args.output_dir, records, manifest)
     judge = build_rubric_judge(
         model=config.judge_model,
         timeout=config.llm_timeout,
         num_retries=config.judge_num_retries,
     )
-    logger.info("Starting evaluate on split=%s (%d tasks)...", args.split, len(records))
-    report = asyncio.run(
-        evaluate_agent_on_records(
-            agent=agent,
-            records=records,
-            judge=judge,
-            batch_size=config.judge_batch_size,
-            max_deliverable_chars=config.max_deliverable_chars,
-            max_concurrency=args.max_concurrency,
+    summary_path = args.output_dir / "eval_summary.json"
+    outputs_path = args.output_dir / "eval_outputs.json"
+    summary_path.unlink(missing_ok=True)
+    outputs_path.unlink(missing_ok=True)
+    try:
+        report = asyncio.run(
+            evaluate_outputs_on_records(
+                records=records,
+                outputs=outputs,
+                errors=errors,
+                judge=judge,
+                batch_size=config.judge_batch_size,
+                max_concurrency=args.max_concurrency,
+            )
         )
-    )
+    except JudgeCallError as exc:
+        logger.error("Evaluation aborted because rubric grading is incomplete: %s", exc)
+        return 1
     summary = eval_summary(report, split=args.split)
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    write_json(args.output_dir / "eval_summary.json", summary)
-    write_json(args.output_dir / "eval_outputs.json", report.per_case)
+    write_json(summary_path, summary)
+    write_json(outputs_path, report.per_case)
     logger.info(
         "Split=%s | %s=%.4f %s=%.4f over %d task(s) (%d scored, %d errored, %d unscoreable)",
         args.split,

@@ -12,7 +12,9 @@ from .run_eval import EvalReport
 def write_json(path: Path, payload: Any) -> None:
     """Write ``payload`` as pretty JSON, creating parent dirs as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, default=str))
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, default=str))
+    temporary.replace(path)
 
 
 def eval_summary(report: EvalReport, *, split: str) -> dict[str, Any]:

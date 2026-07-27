@@ -64,7 +64,9 @@ class HarveyLabAgentOutput:
     raw_deliverables: dict[str, bytes] = field(default_factory=dict)
     missing_deliverables: list[str] = field(default_factory=list)
     submitted_paths: list[str] = field(default_factory=list)
+    finished: bool = False
     abandoned: bool = False
+    max_turns_reached: bool = False
     total_turns: int = 0
     wall_seconds: float = 0.0
 
@@ -345,12 +347,19 @@ class HarveyLabAgent:
                 raw_deliverables=raw_deliverables,
                 missing_deliverables=[n for n in names if n not in deliverables],
                 submitted_paths=submitted_paths,
+                finished=isinstance(finish_params, FinishParams),
                 abandoned=abandoned,
-                total_turns=len(history),
+                max_turns_reached=finish_params is None,
+                total_turns=_count_turns(history),
                 wall_seconds=time.monotonic() - started,
             )
         finally:
             workspace.close()
+
+
+def _count_turns(history: list[list[Any]]) -> int:
+    """Count accepted assistant turns across Stirrup's compacted history chunks."""
+    return sum(1 for chunk in history for message in chunk if getattr(message, "role", None) == "assistant")
 
 
 def _finish_message(finish_params: Any) -> str:

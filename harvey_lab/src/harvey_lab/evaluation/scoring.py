@@ -54,12 +54,15 @@ DEFAULT_JUDGE_TIMEOUT_S = 120.0
 # LAB-AA retries API failures aggressively rather than letting a transient
 # outage silently score a criterion FAIL.
 DEFAULT_JUDGE_NUM_RETRIES = 8
-DEFAULT_MAX_DELIVERABLE_CHARS = 40_000
 
 
 # A batched judge: ``judge(task_description, criteria, agent_output) ->
 # {criterion_id: passed}`` for the criteria in one same-scope batch.
 BatchJudge = Callable[[str, Sequence[Mapping[str, Any]], str], dict[str, bool]]
+
+
+class JudgeCallError(RuntimeError):
+    """The rubric judge request failed before returning usable verdicts."""
 
 
 # Batched adaptation of Harvey's reference judge prompt
@@ -217,9 +220,8 @@ def build_rubric_judge(
         )
         try:
             reply = _call_llm([{"role": "user", "content": prompt}])
-        except Exception as exc:  # pragma: no cover - judge outage is a batch of FAILs
-            logger.warning("Rubric judge call failed (scoring FAIL): %s", exc)
-            return dict.fromkeys(ids, False)
+        except Exception as exc:
+            raise JudgeCallError(f"Rubric judge request failed: {exc}") from exc
         return _parse_batch_verdicts(reply, ids)
 
     return _judge
@@ -228,8 +230,6 @@ def build_rubric_judge(
 def _scope_deliverables(
     criterion_deliverables: Sequence[str],
     deliverables: Mapping[str, str],
-    *,
-    max_chars: int,
 ) -> str:
     """Concatenate only the deliverables a criterion names (deliverable-scoping).
 
@@ -245,11 +245,11 @@ def _scope_deliverables(
     """
     wanted = [str(d) for d in criterion_deliverables if d]
     if not wanted:
-        return "\n\n".join(f"### {name}\n{text[:max_chars]}" for name, text in deliverables.items())
+        return "\n\n".join(f"### {name}\n{text}" for name, text in deliverables.items())
     parts: list[str] = []
     for name in wanted:
         if name in deliverables:
-            parts.append(f"### {name}\n{deliverables[name][:max_chars]}")
+            parts.append(f"### {name}\n{deliverables[name]}")
         else:
             parts.append(f"### {name}\n(this deliverable was not produced)")
     return "\n\n".join(parts)
@@ -267,7 +267,6 @@ def score_rubric(
     task_description: str,
     judge: BatchJudge,
     batch_size: int = DEFAULT_JUDGE_BATCH_SIZE,
-    max_deliverable_chars: int = DEFAULT_MAX_DELIVERABLE_CHARS,
 ) -> dict[str, Any]:
     """Grade every criterion and aggregate into the LAB all-pass result.
 
@@ -298,14 +297,10 @@ def score_rubric(
             for c in group:
                 passed_by_id[str(c.get("id"))] = False
             continue
-        scoped_output = _scope_deliverables(scope, deliverables, max_chars=max_deliverable_chars)
+        scoped_output = _scope_deliverables(scope, deliverables)
         for start in range(0, len(group), max(1, batch_size)):
             batch = group[start : start + max(1, batch_size)]
-            try:
-                verdicts = judge(task_description, batch, scoped_output)
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.debug("Rubric judge raised on a batch: %s", exc)
-                verdicts = {str(c.get("id")): False for c in batch}
+            verdicts = judge(task_description, batch, scoped_output)
             for c in batch:
                 passed_by_id[str(c.get("id"))] = bool(verdicts.get(str(c.get("id")), False))
 
@@ -326,8 +321,8 @@ __all__ = [
     "CRITERION_PASS_RATE_FIELD",
     "DEFAULT_JUDGE_BATCH_SIZE",
     "DEFAULT_JUDGE_MODEL",
-    "DEFAULT_MAX_DELIVERABLE_CHARS",
     "BatchJudge",
+    "JudgeCallError",
     "build_rubric_judge",
     "score_rubric",
 ]

@@ -20,15 +20,24 @@ from typing import Any
 
 import pytest
 
-from harvey_lab.agent.agent import FinishParams, HarveyLabAgent, _build_finish_tools, _render_template
+from harvey_lab import cli as cli_mod
+from harvey_lab.agent.agent import (
+    FinishParams,
+    HarveyLabAgent,
+    HarveyLabAgentOutput,
+    _build_finish_tools,
+    _count_turns,
+    _render_template,
+)
 from harvey_lab.agent.workspace import TaskWorkspace, extract_text, task_source_from_dir
 from harvey_lab.config import HarveyLabConfig
 from harvey_lab.data import fetch as fetch_mod
 from harvey_lab.data.dataset import load_records, read_split
-from harvey_lab.evaluation.run_eval import evaluate_agent_on_records, evaluate_record
+from harvey_lab.evaluation.run_eval import evaluate_agent_on_records, evaluate_outputs_on_records, evaluate_record
 from harvey_lab.evaluation.scoring import (
     ALL_PASS_FIELD,
     CRITERION_PASS_RATE_FIELD,
+    JudgeCallError,
     _parse_batch_verdicts,
     _scope_deliverables,
     build_rubric_judge,
@@ -195,6 +204,23 @@ def test_load_records_by_task_ids_preserves_order(tasks_root: Path) -> None:
     ids = ["tax/t1", "contracts/t1"]
     records = load_records(tasks_root, task_ids=ids)
     assert [r.task_id for r in records] == ids
+
+
+def test_task_fingerprint_tracks_metadata_and_document_content(tasks_root: Path) -> None:
+    task_id = "contracts/t1"
+    first = load_records(tasks_root, task_ids=[task_id])[0].task_fingerprint
+
+    notes = tasks_root / task_id / "documents/notes.txt"
+    notes.write_text(notes.read_text() + "changed")
+    second = load_records(tasks_root, task_ids=[task_id])[0].task_fingerprint
+
+    task_path = tasks_root / task_id / "task.json"
+    task = json.loads(task_path.read_text())
+    task["instructions"] += " changed"
+    task_path.write_text(json.dumps(task))
+    third = load_records(tasks_root, task_ids=[task_id])[0].task_fingerprint
+
+    assert len({first, second, third}) == 3
 
 
 def test_load_records_raises_on_missing_split_task(tasks_root: Path) -> None:
@@ -445,15 +471,30 @@ def test_build_rubric_judge_uses_injected_llm() -> None:
     assert len(calls) == 1  # both criteria graded in a single batched call
 
 
+def test_build_rubric_judge_propagates_provider_errors() -> None:
+    def _broken_llm(**_kwargs: Any) -> str:
+        raise RuntimeError("context window exceeded")
+
+    judge = build_rubric_judge(model="stub/test", llm=_broken_llm)
+    with pytest.raises(RuntimeError, match="context window exceeded"):
+        judge("task", [{"id": "C1", "match_criteria": "x"}], "output")
+
+
 def test_scope_deliverables_selects_named_only() -> None:
-    scoped = _scope_deliverables(["memo.md"], {"memo.md": "A", "appendix.md": "B"}, max_chars=100)
+    scoped = _scope_deliverables(["memo.md"], {"memo.md": "A", "appendix.md": "B"})
     assert "A" in scoped and "B" not in scoped
+
+
+def test_scope_deliverables_preserves_full_text() -> None:
+    content = "A" * 50_000 + "evidence at the end"
+    scoped = _scope_deliverables(["memo.md"], {"memo.md": content})
+    assert scoped.endswith("evidence at the end")
 
 
 def test_scope_deliverables_marks_partial_submission_absent() -> None:
     """A criterion spanning two files, only one produced, is still judged — with
     the missing file explicitly marked absent (LAB-AA's partial-submission rule)."""
-    scoped = _scope_deliverables(["memo.md", "schedule.xlsx"], {"memo.md": "A"}, max_chars=100)
+    scoped = _scope_deliverables(["memo.md", "schedule.xlsx"], {"memo.md": "A"})
     assert "A" in scoped
     assert "schedule.xlsx" in scoped
     assert "not produced" in scoped
@@ -461,7 +502,7 @@ def test_scope_deliverables_marks_partial_submission_absent() -> None:
 
 def test_scope_deliverables_does_not_fuzzy_match_filenames() -> None:
     """LAB-AA requires EXACT filenames: a near-miss counts as not produced."""
-    scoped = _scope_deliverables(["memo.md"], {"my-memo.md": "A"}, max_chars=100)
+    scoped = _scope_deliverables(["memo.md"], {"my-memo.md": "A"})
     assert "A" not in scoped
     assert "not produced" in scoped
 
@@ -532,6 +573,19 @@ def test_score_rubric_batches_by_size() -> None:
 def test_score_rubric_empty_rubric_is_unscoreable() -> None:
     result = score_rubric(criteria=[], deliverables={}, task_description="t", judge=_all_pass_judge)
     assert result["total_criteria"] == 0
+
+
+def test_score_rubric_propagates_judge_errors() -> None:
+    def _broken_judge(_desc: str, _criteria: list[dict], _output: str) -> dict[str, bool]:
+        raise RuntimeError("context window exceeded")
+
+    with pytest.raises(RuntimeError, match="context window exceeded"):
+        score_rubric(
+            criteria=[{"id": "C1", "match_criteria": "x", "deliverables": ["memo.md"]}],
+            deliverables={"memo.md": "body"},
+            task_description="t",
+            judge=_broken_judge,
+        )
 
 
 def test_render_template_substitutes_and_appends_instructions() -> None:
@@ -679,6 +733,20 @@ def test_forward_does_not_grade_files_after_max_turns(tasks_root: Path) -> None:
     assert output.deliverables == {}
     assert output.raw_deliverables == {}
     assert output.missing_deliverables == ["memo.md"]
+    assert output.finished is False
+    assert output.abandoned is False
+    assert output.max_turns_reached is True
+    assert output.total_turns == 4
+
+
+def test_count_turns_counts_messages_across_compacted_history() -> None:
+    from stirrup.core.models import AssistantMessage, UserMessage
+
+    history = [
+        [UserMessage(content="task"), AssistantMessage(content="one"), AssistantMessage(content="two")],
+        [UserMessage(content="summary"), AssistantMessage(content="three")],
+    ]
+    assert _count_turns(history) == 3
 
 
 def test_forward_collects_response_md_when_task_names_no_deliverable(tmp_path: Path) -> None:
@@ -802,6 +870,144 @@ def test_evaluate_agent_on_records_aggregates(tasks_root: Path) -> None:
     assert report.num_errored == 0
     assert report.all_pass_rate == 1.0
     assert report.criterion_pass_rate == 1.0
+
+
+def test_evaluate_persists_reuses_and_reruns_outputs(
+    tasks_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = load_records(tasks_root, task_ids=["contracts/t1"])[0]
+    output_dir = tmp_path / "outputs"
+
+    class _FakeAgent:
+        calls = 0
+
+        async def forward(self, *, record: Any) -> HarveyLabAgentOutput:
+            self.calls += 1
+            return HarveyLabAgentOutput(
+                final_answer="done",
+                deliverables={"memo.md": "not the persisted content"},
+                raw_deliverables={"memo.md": b"Termination fee is $50,000."},
+                missing_deliverables=[],
+                finished=True,
+                total_turns=2,
+            )
+
+    agent = _FakeAgent()
+    monkeypatch.setattr(cli_mod, "_select_records", lambda _args: (tasks_root, [record]))
+    monkeypatch.setattr(cli_mod, "_build_agent", lambda _root, _config: agent)
+    monkeypatch.setattr(cli_mod, "build_rubric_judge", lambda **_kwargs: _fee_judge)
+    args = cli_mod._parse_args(["evaluate", "--output-dir", str(output_dir), "--no-view-image"])
+
+    assert cli_mod._run_evaluate(args) == 0
+    assert agent.calls == 1
+    assert (output_dir / "contracts/t1/memo.md").read_bytes() == b"Termination fee is $50,000."
+    assert json.loads((output_dir / "eval_summary.json").read_text())["all_pass_rate"] == 1.0
+
+    assert cli_mod._run_evaluate(args) == 0
+    assert agent.calls == 1
+
+    (output_dir / "contracts/t1/memo.md").unlink()
+    assert cli_mod._run_evaluate(args) == 0
+    assert agent.calls == 2
+
+    args.rerun = True
+    assert cli_mod._run_evaluate(args) == 0
+    assert agent.calls == 3
+
+
+def test_completed_empty_submission_is_reusable(tasks_root: Path, tmp_path: Path) -> None:
+    record = load_records(tasks_root, task_ids=["contracts/t1"])[0]
+    entry = {
+        "task_id": record.task_id,
+        "task_fingerprint": record.task_fingerprint,
+        "deliverables_produced": [],
+        "deliverables_missing": ["memo.md"],
+        "abandoned": True,
+    }
+    assert cli_mod._is_reusable(tmp_path, record, entry)
+
+
+def test_persisted_rerun_removes_stale_deliverables(tasks_root: Path, tmp_path: Path) -> None:
+    record = load_records(tasks_root, task_ids=["contracts/t1"])[0]
+    stale = tmp_path / "contracts/t1/memo.md"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("old run")
+    previous = {"task_id": record.task_id, "deliverables_produced": ["memo.md"]}
+    output = HarveyLabAgentOutput(final_answer="none", missing_deliverables=["memo.md"], finished=True)
+
+    entry = cli_mod._persist_agent_output(tmp_path, record, output, previous)
+
+    assert not stale.exists()
+    assert entry["deliverables_produced"] == []
+    assert cli_mod._is_reusable(tmp_path, record, entry)
+
+
+def test_max_turn_and_stale_task_entries_are_not_reusable(tasks_root: Path, tmp_path: Path) -> None:
+    record = load_records(tasks_root, task_ids=["contracts/t1"])[0]
+    entry = {
+        "task_id": record.task_id,
+        "task_fingerprint": record.task_fingerprint,
+        "deliverables_produced": [],
+        "deliverables_missing": ["memo.md"],
+        "finished": False,
+        "abandoned": False,
+        "max_turns_reached": True,
+    }
+    assert not cli_mod._is_reusable(tmp_path, record, entry)
+
+    entry.update(finished=True, max_turns_reached=False, task_fingerprint="stale")
+    assert not cli_mod._is_reusable(tmp_path, record, entry)
+
+
+def test_judge_failure_aborts_evaluation(tasks_root: Path) -> None:
+    records = load_records(tasks_root, task_ids=["contracts/t1", "tax/t1"])
+    outputs = {
+        record.task_id: HarveyLabAgentOutput(
+            final_answer="done", deliverables={"memo.md": "$50,000 in notes.txt"}, finished=True
+        )
+        for record in records
+    }
+
+    def _mixed_judge(desc: str, criteria: list[dict], _output: str) -> dict[str, bool]:
+        if "tax/t1" in desc:
+            raise JudgeCallError("context window exceeded")
+        return {str(criterion["id"]): True for criterion in criteria}
+
+    with pytest.raises(JudgeCallError, match="context window exceeded"):
+        asyncio.run(evaluate_outputs_on_records(records=records, outputs=outputs, errors={}, judge=_mixed_judge))
+
+
+def test_cli_judge_failure_returns_nonzero_without_partial_reports(
+    tasks_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = load_records(tasks_root, task_ids=["contracts/t1"])[0]
+    output_dir = tmp_path / "outputs"
+
+    class _FakeAgent:
+        async def forward(self, *, record: Any) -> HarveyLabAgentOutput:
+            return HarveyLabAgentOutput(
+                final_answer="done",
+                deliverables={"memo.md": "body"},
+                raw_deliverables={"memo.md": b"body"},
+                finished=True,
+            )
+
+    def _broken_judge(_desc: str, _criteria: list[dict], _output: str) -> dict[str, bool]:
+        raise JudgeCallError("context window exceeded")
+
+    output_dir.mkdir()
+    (output_dir / "eval_summary.json").write_text("stale")
+    (output_dir / "eval_outputs.json").write_text("stale")
+    monkeypatch.setattr(cli_mod, "_select_records", lambda _args: (tasks_root, [record]))
+    monkeypatch.setattr(cli_mod, "_build_agent", lambda _root, _config: _FakeAgent())
+    monkeypatch.setattr(cli_mod, "build_rubric_judge", lambda **_kwargs: _broken_judge)
+    args = cli_mod._parse_args(["evaluate", "--output-dir", str(output_dir), "--no-view-image"])
+
+    assert cli_mod._run_evaluate(args) == 1
+    assert (output_dir / "run_outputs.json").is_file()
+    assert (output_dir / "contracts/t1/memo.md").read_bytes() == b"body"
+    assert not (output_dir / "eval_summary.json").exists()
+    assert not (output_dir / "eval_outputs.json").exists()
 
 
 def test_evaluate_agent_contains_errors_and_excludes_unscoreable(tasks_root: Path) -> None:

@@ -36,9 +36,8 @@ class HarveyLabConfig:
     task_model: str = "openrouter/openai/gpt-4.1-mini"
     task_temperature: float = 0.0
     # Per-call completion-token cap handed to the Stirrup client (litellm's
-    # ``max_tokens``). Must stay within the task model's output limit —
-    # gpt-4.1-mini caps completions at 32768, so the default leaves headroom.
-    max_output_tokens: int = 16_000
+    # ``max_tokens``). Must stay within the task model's output limit
+    max_output_tokens: int = 16_384
 
     # The rubric judge. Graded in BATCHES of ``judge_batch_size`` criteria per
     # LLM call rather than one call per criterion — batched verification is an
@@ -82,8 +81,3 @@ class HarveyLabConfig:
     # image file out of the execution environment as native image tokens
     # (LAB-AA does this for models that support vision).
     enable_view_image: bool = True
-
-    # Cap on the text pulled from ONE deliverable into a judge prompt. LAB
-    # criteria are deliverable-scoped, so the judge only ever sees the files a
-    # criterion names — this bounds each of those.
-    max_deliverable_chars: int = 40_000

@@ -24,6 +24,7 @@ train / val / test task-id lists in ``splits/`` (see ``splits/README.md``).
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -64,6 +65,7 @@ class HarveyLabRecord:
     criteria: tuple[RubricCriterion, ...]
     documents: tuple[str, ...]
     raw_task: Mapping[str, Any]
+    task_fingerprint: str
 
     @property
     def deliverable_names(self) -> tuple[str, ...]:
@@ -111,6 +113,21 @@ def _coerce_deliverables(value: Any) -> dict[str, str]:
     return {}
 
 
+def _task_fingerprint(task_dir: Path) -> str:
+    digest = hashlib.sha256()
+    paths = [task_dir / "task.json"]
+    docs_dir = task_dir / "documents"
+    paths.extend(sorted((path for path in docs_dir.rglob("*") if path.is_file()), key=lambda path: path.as_posix()))
+    for path in paths:
+        relative = path.relative_to(task_dir).as_posix().encode()
+        content = path.read_bytes()
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+    return digest.hexdigest()
+
+
 def _load_task_dir(task_dir: Path, task_id: str) -> HarveyLabRecord:
     raw = json.loads((task_dir / "task.json").read_text(encoding="utf-8"))
     docs_dir = task_dir / "documents"
@@ -126,6 +143,7 @@ def _load_task_dir(task_dir: Path, task_id: str) -> HarveyLabRecord:
         criteria=_coerce_criteria(raw.get("criteria")),
         documents=tuple(documents),
         raw_task=dict(raw),
+        task_fingerprint=_task_fingerprint(task_dir),
     )
 
 

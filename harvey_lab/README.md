@@ -99,7 +99,8 @@ Two numbers come out per task:
 The evaluation runner (`evaluation/run_eval.py`) averages both across tasks as
 `all_pass_rate` / `criterion_pass_rate`. A task whose rubric has no scoreable
 criteria is **unscoreable** and excluded from the averages; a task that errors
-counts as `0` (a real failure must deflate, not inflate, the metrics).
+counts as `0` (a real failure must deflate, not inflate, the metrics). A judge API
+or context-window failure aborts grading instead of publishing partial rates.
 
 ## The data (and what it is *not*)
 
@@ -156,20 +157,26 @@ uv run harvey-lab run \
     --split test --limit 10 \
     --output-dir harvey_lab_run
 
-# Run the agent AND grade every rubric criterion:
+# Grade everything (reuse saved outputs, run and save if any missing tasks):
 uv run harvey-lab evaluate \
     --split test --limit 10 \
     --output-dir harvey_lab_run
 ```
 
-`evaluate` writes `eval_summary.json` (aggregate `all_pass_rate` /
-`criterion_pass_rate` + case counts) and `eval_outputs.json` (per-task results,
-including which deliverables were produced vs. missing and whether the agent
-abandoned). `run` writes each submitted deliverable **byte-for-byte under its
-original filename** plus `run_outputs.json`; evaluation separately extracts
-text from those files for the rubric judge.
+`run` writes each submitted deliverable **byte-for-byte under its original
+filename** plus `run_outputs.json`. `evaluate` uses that manifest as a resume
+point: successfully finished or explicitly abandoned tasks are reused only when
+their files are still present and their task metadata and source-document
+fingerprint is unchanged. Missing, errored, changed, or max-turn-exhausted tasks
+are run and saved. It then reloads every selected output from disk before grading
+and writes `eval_summary.json` (aggregate `all_pass_rate` /
+`criterion_pass_rate` + case counts) and `eval_outputs.json` (per-task results).
+Judge API and context-window failures abort with a nonzero exit and no partial
+`eval_summary.json` or `eval_outputs.json`; persisted agent outputs remain
+available for a retry. Use `--rerun` to force all selected tasks to run again,
+for example after changing the task model or agent settings.
 
 See `--help` for all flags (`--split {train,val,test}`, `--limit`,
 `--tasks-root`, `--cache-dir`, `--max-concurrency`, `--task-model`,
 `--judge-model`, `--judge-batch-size`, `--judge-num-retries`, `--shell-timeout`,
-`--max-turns`, `--no-view-image`, …).
+`--max-turns`, `--no-view-image`, `--rerun`, …).
