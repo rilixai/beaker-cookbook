@@ -31,8 +31,8 @@ and a to-do list, and it must produce the requested written work.
   runs on). `max_turns` defaults to **200**, matching LAB-AA.
 - **Model** — a LiteLLM model string (default `openrouter/deepseek/deepseek-v4-pro`
   run at max reasoning), so any provider LiteLLM routes to works. Reasoning
-  budget is `--task-reasoning-effort` (default `high`; set `none` for a
-  non-reasoning model).
+  budget is `--task-reasoning-effort` (default `xhigh`, the top tier; set `none`
+  for a non-reasoning model).
 - **Prompts** — `system_prompt` and `task_template` (`agent/prompts.py`), ported
   from [AA's published LAB-AA prompts](https://artificialanalysis.ai/methodology/intelligence-benchmarking#harvey-lab-aa),
   adapted only where they assume AA's specific sandbox.

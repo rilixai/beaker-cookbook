@@ -1098,12 +1098,13 @@ def test_evaluate_agent_contains_errors_and_excludes_unscoreable(tasks_root: Pat
 def test_default_config_targets_deepseek_v4_pro_max_reasoning() -> None:
     config = HarveyLabConfig()
     assert config.task_model == "openrouter/deepseek/deepseek-v4-pro"
-    assert config.task_reasoning_effort == "high"
-    assert cli_mod._parse_args(["run"]).task_reasoning_effort == "high"
+    # xhigh is the top tier the Stirrup LiteLLM client exposes (max reasoning).
+    assert config.task_reasoning_effort == "xhigh"
+    assert cli_mod._parse_args(["run"]).task_reasoning_effort == "xhigh"
 
 
 def test_default_model_factory_threads_reasoning_effort() -> None:
-    client = _default_model_factory("openrouter/deepseek/deepseek-v4-pro", 0.0, 16_384, 120.0, "high")
-    assert client._reasoning_effort == "high"
+    client = _default_model_factory("openrouter/deepseek/deepseek-v4-pro", 0.0, 16_384, 120.0, "xhigh")
+    assert client._reasoning_effort == "xhigh"
     # An empty/none effort disables reasoning for non-thinking models.
     assert _default_model_factory("openrouter/openai/gpt-4.1-mini", 0.0, 16_384, 120.0, "")._reasoning_effort is None
