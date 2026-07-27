@@ -190,8 +190,10 @@ def _fake_github(tree: dict[str, bytes]) -> Any:
     def _request(url: str) -> bytes:
         if url.startswith("raw://"):
             return tree[url[len("raw://") :]]
-        # contents API: ".../contents/<path>?ref=..."
-        path = url.split("/contents/", 1)[1].split("?", 1)[0]
+        # contents API: ".../contents/<path>?ref=..." (path is percent-encoded)
+        import urllib.parse
+
+        path = urllib.parse.unquote(url.split("/contents/", 1)[1].split("?", 1)[0])
         prefix = path + "/"
         children: dict[str, str] = {}
         for fpath in tree:
@@ -214,6 +216,8 @@ def test_ensure_task_dirs_fetches_and_caches(tmp_path: Path, monkeypatch: pytest
         "tasks/contracts/t1/task.json": b'{"title": "T1"}',
         "tasks/contracts/t1/documents/notes.txt": b"hello",
         "tasks/contracts/t1/documents/sub/deep.txt": b"deep",
+        # LAB folders can contain spaces; the contents-API path must be encoded.
+        "tasks/contracts/t1/documents/1.0 Transaction Documents/spa ced.txt": b"x",
     }
     calls = {"n": 0}
 
@@ -226,9 +230,14 @@ def test_ensure_task_dirs_fetches_and_caches(tmp_path: Path, monkeypatch: pytest
 
     assert (tasks_root / "contracts/t1/task.json").read_bytes() == b'{"title": "T1"}'
     assert (tasks_root / "contracts/t1/documents/sub/deep.txt").read_bytes() == b"deep"
+    assert (tasks_root / "contracts/t1/documents/1.0 Transaction Documents/spa ced.txt").read_bytes() == b"x"
     # The fetched tree loads through the normal record loader + workspace factory.
     records = load_records(tasks_root, task_ids=["contracts/t1"])
-    assert records[0].documents == ("notes.txt", "sub/deep.txt")
+    assert records[0].documents == (
+        "1.0 Transaction Documents/spa ced.txt",
+        "notes.txt",
+        "sub/deep.txt",
+    )
 
     # A second call hits the sentinel and makes zero network requests.
     calls["n"] = 0
