@@ -99,11 +99,25 @@ def _default_exec_provider_factory(config: HarveyLabConfig) -> Any:
     the current user. That is a deliberate simplification — see the README.
     To harden it, pass your own ``exec_provider_factory`` to ``HarveyLabAgent``
     returning any other Stirrup ``CodeExecToolProvider``; the agent only uses
-    the provider's generic file surface, so nothing else changes.
+    the provider's generic file surface. The one backend-specific touchpoint is
+    :func:`_env_working_dir` (the directory ``finish`` paths are built from),
+    which reads the local backend's ``temp_dir`` — see its docstring.
     """
     from stirrup.tools.code_backends.local import LocalCodeExecToolProvider
 
     return LocalCodeExecToolProvider(shell_timeout=config.shell_timeout_s)
+
+
+def _effective_deliverable_names(record: HarveyLabRecord) -> tuple[str, ...]:
+    """Filenames the agent must produce, with a default when the task names none.
+
+    A handful of LAB tasks declare no deliverable; AA still expects a single
+    freeform ``response.md``. The task prompt, the deliverables collected for
+    grading, and the ``missing_deliverables`` list all derive from this one
+    helper, so a submitted ``response.md`` is graded rather than silently
+    dropped (and correctly reported missing when absent).
+    """
+    return record.deliverable_names or ("response.md",)
 
 
 def _render_template(template: str, variables: dict[str, str]) -> str:
@@ -253,7 +267,7 @@ class HarveyLabAgent:
         The working directory only exists once the execution environment is up,
         so the prompt is rendered inside the session rather than at construction.
         """
-        names = record.deliverable_names or ("response.md",)
+        names = _effective_deliverable_names(record)
         return _render_template(
             self._task_template,
             {
@@ -310,13 +324,14 @@ class HarveyLabAgent:
                 finish_params, history, _metadata = await session.run(user_prompt)
             abandoned = isinstance(finish_params, AbandonParams)
             submitted_paths = list(getattr(finish_params, "paths", []) or [])
-            deliverables = workspace.collect_deliverables(record.deliverable_names)
+            names = _effective_deliverable_names(record)
+            deliverables = workspace.collect_deliverables(names)
             raw_deliverables = {name: workspace.deliverable_path(name).read_bytes() for name in deliverables}
             return HarveyLabAgentOutput(
                 final_answer=_finish_message(finish_params),
                 deliverables=deliverables,
                 raw_deliverables=raw_deliverables,
-                missing_deliverables=[n for n in record.deliverable_names if n not in deliverables],
+                missing_deliverables=[n for n in names if n not in deliverables],
                 submitted_paths=submitted_paths,
                 abandoned=abandoned,
                 total_turns=len(history),
@@ -334,10 +349,21 @@ def _finish_message(finish_params: Any) -> str:
 
 
 def _env_working_dir(exec_env: Any) -> str:
-    """Return the absolute directory of a live local execution environment."""
-    value = getattr(exec_env, "temp_dir", None)
+    """Absolute path the agent's shell runs in, used to build ``finish`` paths.
+
+    Resolving this is the *one* backend-specific touchpoint: the local backend
+    exposes it as ``temp_dir``; a container/remote backend runs commands in its
+    own working directory (e.g. Stirrup's Docker backend uses ``/workspace``),
+    so a swapped-in ``exec_provider_factory`` must also make that directory
+    discoverable here. Prefers an explicit ``working_dir`` if a backend
+    provides one, else falls back to ``temp_dir``.
+    """
+    value = getattr(exec_env, "working_dir", None) or getattr(exec_env, "temp_dir", None)
     if value is None:
-        raise RuntimeError("Local code execution environment has no working directory.")
+        raise RuntimeError(
+            f"{type(exec_env).__name__} exposes no working directory (no `working_dir`/`temp_dir`). "
+            "If you injected a custom exec_provider_factory, teach _env_working_dir its working directory."
+        )
     return str(value)
 
 

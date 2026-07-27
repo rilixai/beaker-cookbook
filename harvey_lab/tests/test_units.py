@@ -681,6 +681,35 @@ def test_forward_does_not_grade_files_after_max_turns(tasks_root: Path) -> None:
     assert output.missing_deliverables == ["memo.md"]
 
 
+def test_forward_collects_response_md_when_task_names_no_deliverable(tmp_path: Path) -> None:
+    """A task with no declared deliverables defaults to `response.md` — and that
+    fallback must drive collection + missing, not just the prompt, so a produced
+    `response.md` is graded rather than silently dropped."""
+    root = tmp_path / "tasks"
+    _write_task(
+        root,
+        "contracts/freeform",
+        criteria=[{"id": "C1", "title": "t", "match_criteria": "m", "deliverables": []}],
+        deliverables={},
+    )
+    agent = HarveyLabAgent(
+        config=HarveyLabConfig(max_turns=4, enable_view_image=False),
+        task_source=task_source_from_dir(root),
+        model_factory=lambda *_: _CapturingClient(
+            [
+                ("code_exec", {"cmd": "printf 'the answer' > response.md"}),
+                ("finish", {"summary": "done", "paths": ["response.md"]}),
+            ]
+        ),
+        exec_provider_factory=_local_exec_factory,
+    )
+    record = load_records(root, task_ids=["contracts/freeform"])[0]
+    output = asyncio.run(agent.forward(record=record))
+    assert output.deliverables == {"response.md": "the answer"}
+    assert output.raw_deliverables == {"response.md": b"the answer"}
+    assert output.missing_deliverables == []
+
+
 def test_finish_rejects_relative_paths_and_stat_errors() -> None:
     class _BrokenEnv:
         async def file_exists(self, _path: str) -> bool:

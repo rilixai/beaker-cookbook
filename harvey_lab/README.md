@@ -53,8 +53,12 @@ deliverables rather than trusting them blindly.
 > own harness containerizes it. This recipe stays local on purpose, to keep it
 > runnable with zero setup. If you want containment, `HarveyLabAgent` takes an
 > `exec_provider_factory` — return any other Stirrup `CodeExecToolProvider`
-> (the framework ships container and remote-sandbox backends) and nothing else
-> needs to change. A sandbox image would also be the right place to preinstall
+> (the framework ships container and remote-sandbox backends). The one
+> backend-specific touchpoint is `_env_working_dir` (the directory the model's
+> shell runs in, used to build the absolute `finish` paths): it reads the local
+> backend's `temp_dir`, so a container/remote backend that runs commands
+> elsewhere (e.g. `/workspace`) needs that directory made discoverable there.
+> A sandbox image would also be the right place to preinstall
 > a document toolchain (`pandoc`, `python-docx`, `openpyxl`, …): this recipe's
 > own copies of those libraries are used for *grading* on the host and are not
 > on the agent's `PATH`, so today the agent installs what it needs or falls
