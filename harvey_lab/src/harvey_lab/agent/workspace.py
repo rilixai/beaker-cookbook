@@ -19,6 +19,10 @@ The document parsers (python-docx / openpyxl / pypdf) are imported lazily
 so the module stays importable offline; hermetic tests build workspaces
 from a fixture directory and never touch the heavy parsers unless a test
 provides a real binary.
+
+Deliverables are written as **text** (``write_deliverable`` takes a string),
+so this toolbelt can't produce true ``.docx`` / ``.xlsx`` redlines — some
+format-specific LAB criteria are unwinnable here by construction.
 """
 
 from __future__ import annotations

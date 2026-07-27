@@ -19,6 +19,7 @@ import pytest
 from harvey_lab.agent.agent import HarveyLabAgent, _render_task_template
 from harvey_lab.agent.workspace import TaskWorkspace, task_source_from_dir
 from harvey_lab.config import HarveyLabConfig
+from harvey_lab.data import fetch as fetch_mod
 from harvey_lab.data.dataset import load_records, read_split
 from harvey_lab.evaluation.run_eval import evaluate_agent_on_records, evaluate_record
 from harvey_lab.evaluation.scoring import (
@@ -174,6 +175,85 @@ def test_load_records_raises_on_missing_split_task(tasks_root: Path) -> None:
     # not silently shrink the run.
     with pytest.raises(FileNotFoundError, match="no-such/task"):
         load_records(tasks_root, task_ids=["contracts/t1", "no-such/task"])
+
+
+# ─── on-demand task fetch ─────────────────────────────────────────────
+
+
+def _fake_github(tree: dict[str, bytes]) -> Any:
+    """Return a fake ``_request`` serving one task's contents API + raw blobs.
+
+    ``tree`` maps repo-relative file paths (e.g. ``tasks/x/task.json``) to bytes.
+    Directory listings are synthesized from the paths; raw urls are ``raw://<path>``.
+    """
+
+    def _request(url: str) -> bytes:
+        if url.startswith("raw://"):
+            return tree[url[len("raw://") :]]
+        # contents API: ".../contents/<path>?ref=..."
+        path = url.split("/contents/", 1)[1].split("?", 1)[0]
+        prefix = path + "/"
+        children: dict[str, str] = {}
+        for fpath in tree:
+            if fpath.startswith(prefix):
+                rest = fpath[len(prefix) :]
+                head = rest.split("/", 1)
+                children[head[0]] = "dir" if len(head) > 1 else "file"
+        return json.dumps(
+            [
+                {"name": name, "type": kind, "download_url": f"raw://{path}/{name}"}
+                for name, kind in sorted(children.items())
+            ]
+        ).encode()
+
+    return _request
+
+
+def test_ensure_task_dirs_fetches_and_caches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    tree = {
+        "tasks/contracts/t1/task.json": b'{"title": "T1"}',
+        "tasks/contracts/t1/documents/notes.txt": b"hello",
+        "tasks/contracts/t1/documents/sub/deep.txt": b"deep",
+    }
+    calls = {"n": 0}
+
+    def _counting(url: str) -> bytes:
+        calls["n"] += 1
+        return _fake_github(tree)(url)
+
+    monkeypatch.setattr(fetch_mod, "_request", _counting)
+    tasks_root = fetch_mod.ensure_task_dirs(["contracts/t1"], cache_dir=tmp_path)
+
+    assert (tasks_root / "contracts/t1/task.json").read_bytes() == b'{"title": "T1"}'
+    assert (tasks_root / "contracts/t1/documents/sub/deep.txt").read_bytes() == b"deep"
+    # The fetched tree loads through the normal record loader + workspace factory.
+    records = load_records(tasks_root, task_ids=["contracts/t1"])
+    assert records[0].documents == ("notes.txt", "sub/deep.txt")
+
+    # A second call hits the sentinel and makes zero network requests.
+    calls["n"] = 0
+    fetch_mod.ensure_task_dirs(["contracts/t1"], cache_dir=tmp_path)
+    assert calls["n"] == 0
+
+
+def test_ensure_task_dirs_refetches_on_commit_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A reused --cache-dir must not serve a stale tree after a pin bump: the
+    # sentinel records the commit, and a mismatch forces a refetch.
+    old_tree = {"tasks/contracts/t1/task.json": b'{"title": "old"}'}
+    monkeypatch.setattr(fetch_mod, "_request", _fake_github(old_tree))
+    fetch_mod.ensure_task_dirs(["contracts/t1"], commit="aaa", cache_dir=tmp_path)
+
+    new_tree = {"tasks/contracts/t1/task.json": b'{"title": "new"}'}
+    calls = {"n": 0}
+
+    def _counting(url: str) -> bytes:
+        calls["n"] += 1
+        return _fake_github(new_tree)(url)
+
+    monkeypatch.setattr(fetch_mod, "_request", _counting)
+    root = fetch_mod.ensure_task_dirs(["contracts/t1"], commit="bbb", cache_dir=tmp_path)
+    assert calls["n"] > 0
+    assert (root / "contracts/t1/task.json").read_bytes() == b'{"title": "new"}'
 
 
 # ─── frozen splits ────────────────────────────────────────────────────

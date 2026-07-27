@@ -23,8 +23,8 @@ and a to-do list, and it must produce the requested written work.
   [Harvey LAB-AA leaderboard](https://artificialanalysis.ai/evaluations/harvey-lab-aa)
   runs on). This package supplies only the *domain*: the workspace, the tools,
   and the two prompts.
-- **Model** — a LiteLLM model string (default `openai/gpt-4.1-mini`), so any
-  provider LiteLLM routes to works. `max_turns` caps the loop.
+- **Model** — a LiteLLM model string (default `openrouter/openai/gpt-4.1-mini`),
+  so any provider LiteLLM routes to works. `max_turns` caps the loop.
 - **Prompts** — two of them, `system_prompt` and `task_template`
   (`agent/prompts.py`).
 
@@ -37,8 +37,9 @@ Standard src layout — the importable package lives under `src/harvey_lab/`:
 | `src/harvey_lab/agent/workspace.py` | the per-task workspace + the file tools |
 | `src/harvey_lab/agent/agent.py` | wires the tools into Stirrup and runs one task |
 | `src/harvey_lab/agent/prompts.py` | the two prompts |
-| `src/harvey_lab/data/dataset.py` | loads LAB task records from a local checkout + reads the splits |
-| `src/harvey_lab/splits/{train,val,test}.txt` | frozen task-id lists (see `splits/README.md`) |
+| `src/harvey_lab/data/dataset.py` | loads LAB task records from a task tree + reads the splits |
+| `src/harvey_lab/data/fetch.py` | on-demand download of just the needed task folders from GitHub |
+| `src/harvey_lab/splits/{train,val,test}.txt` | frozen task-id lists (see `src/harvey_lab/splits/README.md`) |
 | `src/harvey_lab/evaluation/scoring.py` | grades ONE task: the batched judge + all-pass aggregation |
 | `src/harvey_lab/evaluation/run_eval.py` | runs the agent + scoring across the dataset (bounded concurrency) |
 | `src/harvey_lab/evaluation/utils.py` | JSON + summary serialization for the CLI |
@@ -57,8 +58,8 @@ is roughly an order of magnitude cheaper at LAB's scale with near-frontier
 agreement (see
 [LangChain](https://www.langchain.com/blog/designing-efficient-verifiers-for-legal-agents)
 and [Applied Compute](https://www.appliedcompute.com/case-studies/harvey), both
-cited in the code). The default judge is `deepseek/deepseek-v4-flash`. Two
-numbers come out per task:
+cited in the code). The default judge is `openrouter/deepseek/deepseek-v4-flash`.
+Two numbers come out per task:
 
 - `all_pass` (0/1) — the LAB headline metric: `1.0` **iff every** criterion
   passes, else `0.0`.
@@ -73,15 +74,18 @@ counts as `0` (a real failure must deflate, not inflate, the metrics).
 ## The data (and what it is *not*)
 
 Tasks come from the **public** GitHub repo
-[`harveyai/harvey-labs`](https://github.com/harveyai/harvey-labs). Clone it at
-the pinned `config.HARVEY_LABS_COMMIT` and point `--tasks-root` at its `tasks/`
-directory. Task directories are discovered recursively (larger areas nest
-sub-categories, e.g. `contracts/banking/<slug>`), so a task ID is the directory
-path under `tasks/`. The train / val / test partition is **frozen**: the
-committed `splits/{train,val,test}.txt` lists (1560 / 100 / 100 tasks, drawn to
-follow the benchmark's natural practice-area distribution) are the source of
-truth — see `splits/README.md`. `--split` picks one; `--limit N` runs just the
-first N (the lists are ordered so any prefix stays representative).
+[`harveyai/harvey-labs`](https://github.com/harveyai/harvey-labs) at the pinned
+`config.HARVEY_LABS_COMMIT`. The full tree is ~2.7 GB, so by default a run
+**fetches only the task folders it needs** (the chosen split, capped by
+`--limit`) from GitHub into a local cache — no manual clone. Pass
+`--tasks-root` to point at an existing local checkout's `tasks/` dir instead.
+Task directories nest (larger areas add sub-categories, e.g.
+`contracts/banking/<slug>`), so a task ID is the directory path under `tasks/`.
+The train / val / test partition is **frozen**: the committed
+`splits/{train,val,test}.txt` lists (1560 / 100 / 100 tasks, drawn to follow
+the benchmark's natural practice-area distribution) are the source of truth —
+see `src/harvey_lab/splits/README.md`. `--split` picks one; `--limit N` runs
+just the first N (the lists are ordered so any prefix stays representative).
 
 This is **not** the LAB-AA leaderboard setup. The leaderboard runs on Harvey's
 **private** 120-task set through AA's exact Stirrup config; this repo runs a
@@ -100,30 +104,33 @@ cd harvey_lab
 uv sync --group dev
 ```
 
-Provider keys (needed for any run that calls a model):
+One provider key covers everything — both the agent and the judge default to
+OpenRouter routes, so a single key is enough:
 
 ```bash
-export OPENAI_API_KEY=sk-...    # agent (gpt-4.1-mini default)
-export DEEPSEEK_API_KEY=...     # judge (deepseek-v4-flash default)
+export OPENROUTER_API_KEY=sk-or-...
 ```
 
-No dataset token is required — the LAB repo is public.
+Prefer calling providers directly? Override the models with direct LiteLLM
+strings and set those providers' keys, e.g.
+`--task-model openai/gpt-4.1-mini` (`OPENAI_API_KEY`) and
+`--judge-model deepseek/deepseek-v4-flash` (`DEEPSEEK_API_KEY`).
+
+No dataset token is required — the LAB repo is public. Pulling a large split
+unauthenticated can hit GitHub's 60 req/hour API limit; set `GITHUB_TOKEN` to
+raise it to 5000/hour.
 
 ## Run
 
 ```bash
-git clone https://github.com/harveyai/harvey-labs
-git -C harvey-labs checkout 1da4750171bc5a534960b3d82d15ba7fd2cf653f
-
-# Run the agent and dump its deliverables (no grading), on 10 test tasks:
+# Run the agent and dump its deliverables (no grading), on 10 test tasks.
+# The 10 task folders are fetched from GitHub on first use and cached.
 uv run harvey-lab run \
-    --tasks-root harvey-labs/tasks \
     --split test --limit 10 \
     --output-dir harvey_lab_run
 
 # Run the agent AND grade every rubric criterion:
 uv run harvey-lab evaluate \
-    --tasks-root harvey-labs/tasks \
     --split test --limit 10 \
     --output-dir harvey_lab_run
 ```
@@ -131,21 +138,5 @@ uv run harvey-lab evaluate \
 `evaluate` writes `eval_summary.json` (aggregate `all_pass_rate` /
 `criterion_pass_rate` + case counts) and `eval_outputs.json` (per-task results)
 to `--output-dir`. See `--help` for all flags (`--split {train,val,test}`,
-`--limit`, `--max-concurrency`, `--task-model`, `--judge-model`,
-`--judge-batch-size`, …).
-
-## Tests
-
-```bash
-uv run python -m pytest -q
-```
-
-Hermetic — a fixture task tree + a scripted Stirrup client + a stub judge, no
-network.
-
-## Notes
-
-- `max_turns=40` is a smoke-run budget; raise it for parity with a full LAB-AA
-  harness.
-- The text-only toolbelt can't produce real `.docx`/`.xlsx` redlines, so some
-  format-specific LAB criteria are unwinnable here by construction.
+`--limit`, `--tasks-root`, `--cache-dir`, `--max-concurrency`, `--task-model`,
+`--judge-model`, `--judge-batch-size`, …).
