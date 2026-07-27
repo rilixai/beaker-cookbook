@@ -69,7 +69,21 @@ async def evaluate_output(
     has_scoreable = any(str(c.get("match_criteria") or "").strip() for c in criteria_payload)
     base = {"task_id": record.task_id, "practice_area": record.practice_area}
     if not has_scoreable:
+        logger.info("Skipping unscoreable task %s: no scoreable rubric criteria.", record.task_id)
         return {**base, "kind": "unscoreable", "final_answer": output.final_answer}
+    total_criteria = sum(1 for criterion in criteria_payload if str(criterion.get("match_criteria") or "").strip())
+    logger.info(
+        "Grading task %s (%d criteria, %d produced deliverables)...",
+        record.task_id,
+        total_criteria,
+        len(output.deliverables),
+    )
+
+    def _log_judge_batch(start: int, end: int, total: int) -> None:
+        logger.info(
+            "Grading task %s: submitting criteria %d-%d of %d to the judge...", record.task_id, start, end, total
+        )
+
     scored = await asyncio.to_thread(
         score_rubric,
         criteria=criteria_payload,
@@ -77,6 +91,13 @@ async def evaluate_output(
         task_description=_task_description(record),
         judge=judge,
         batch_size=batch_size,
+        judge_batch_callback=_log_judge_batch,
+    )
+    logger.info(
+        "Finished grading task %s: %d/%d criteria passed.",
+        record.task_id,
+        scored["passed"],
+        scored["total_criteria"],
     )
     return {
         **base,

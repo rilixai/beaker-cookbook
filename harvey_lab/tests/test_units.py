@@ -437,13 +437,14 @@ def test_parse_batch_verdicts_missing_ids_default_fail() -> None:
     assert _parse_batch_verdicts(reply, ["C1", "C2"]) == {"C1": True, "C2": False}
 
 
-def test_parse_batch_verdicts_garbage_is_all_fail() -> None:
-    assert _parse_batch_verdicts("no json here", ["C1"]) == {"C1": False}
+def test_parse_batch_verdicts_garbage_is_judge_error() -> None:
+    with pytest.raises(JudgeCallError, match="no usable verdicts"):
+        _parse_batch_verdicts("no json here", ["C1"])
 
 
-def test_parse_batch_verdicts_null_verdicts_is_all_fail() -> None:
-    # ``verdicts`` present but JSON null must not crash the iterator.
-    assert _parse_batch_verdicts('{"verdicts": null}', ["C1"]) == {"C1": False}
+def test_parse_batch_verdicts_null_verdicts_is_judge_error() -> None:
+    with pytest.raises(JudgeCallError, match="no usable verdicts"):
+        _parse_batch_verdicts('{"verdicts": null}', ["C1"])
 
 
 def test_parse_batch_verdicts_tolerates_surrounding_prose_and_fences() -> None:
@@ -558,16 +559,23 @@ def test_score_rubric_batches_by_size() -> None:
     """Same-scope criteria are chunked into batches of ``batch_size``."""
     criteria = [{"id": f"C{i}", "title": "t", "match_criteria": "x", "deliverables": ["m.md"]} for i in range(5)]
     batch_sizes: list[int] = []
+    progress: list[tuple[int, int, int]] = []
 
     def _judge(_desc: str, crits: list[dict], _out: str) -> dict[str, bool]:
         batch_sizes.append(len(crits))
         return {str(c["id"]): True for c in crits}
 
     result = score_rubric(
-        criteria=criteria, deliverables={"m.md": "b"}, task_description="t", judge=_judge, batch_size=2
+        criteria=criteria,
+        deliverables={"m.md": "b"},
+        task_description="t",
+        judge=_judge,
+        batch_size=2,
+        judge_batch_callback=lambda start, end, total: progress.append((start, end, total)),
     )
     assert result[ALL_PASS_FIELD] == 1.0
     assert batch_sizes == [2, 2, 1]  # 5 criteria, one scope, chunks of 2
+    assert progress == [(1, 2, 5), (3, 4, 5), (5, 5, 5)]
 
 
 def test_score_rubric_empty_rubric_is_unscoreable() -> None:

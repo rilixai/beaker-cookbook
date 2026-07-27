@@ -115,7 +115,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Withhold the `view_image` tool (LAB-AA grants it to vision-capable models).",
     )
-    parser.add_argument("--max-concurrency", type=int, default=4)
+    parser.add_argument(
+        "--max-concurrency",
+        type=int,
+        default=4,
+        help="Maximum agent tasks and grading cases processed concurrently; use 1 for fully sequential execution.",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("harvey_lab_run"))
     parser.add_argument(
         "--rerun",
@@ -410,6 +415,11 @@ def _run_evaluate(args: argparse.Namespace) -> int:
     outputs_path = args.output_dir / "eval_outputs.json"
     summary_path.unlink(missing_ok=True)
     outputs_path.unlink(missing_ok=True)
+    logger.info(
+        "Grading %d task(s) with up to %d concurrent case(s)...",
+        len(records),
+        max(1, args.max_concurrency),
+    )
     try:
         report = asyncio.run(
             evaluate_outputs_on_records(

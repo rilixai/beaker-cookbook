@@ -168,6 +168,8 @@ def _parse_batch_verdicts(text: str, ids: Sequence[str]) -> dict[str, bool]:
         verdict = str(entry.get("verdict") or "").strip().lower()
         result[cid] = verdict == "pass"
         seen += 1
+    if ids and seen == 0:
+        raise JudgeCallError(f"Rubric judge returned no usable verdicts for {len(ids)} criteria.")
     if seen < len(ids):
         logger.warning("Judge returned %d/%d verdicts; missing ones scored FAIL.", seen, len(ids))
     return result
@@ -267,6 +269,7 @@ def score_rubric(
     task_description: str,
     judge: BatchJudge,
     batch_size: int = DEFAULT_JUDGE_BATCH_SIZE,
+    judge_batch_callback: Callable[[int, int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Grade every criterion and aggregate into the LAB all-pass result.
 
@@ -288,6 +291,7 @@ def score_rubric(
         groups.setdefault(_scope_key(c), []).append(c)
 
     passed_by_id: dict[str, bool] = {}
+    processed = 0
     for scope, group in groups.items():
         # AA's rule: a criterion fails outright, WITHOUT being shown to the
         # judge, only when none of its declared deliverables were produced. A
@@ -296,13 +300,17 @@ def score_rubric(
         if scope and not any(name in deliverables for name in scope):
             for c in group:
                 passed_by_id[str(c.get("id"))] = False
+            processed += len(group)
             continue
         scoped_output = _scope_deliverables(scope, deliverables)
         for start in range(0, len(group), max(1, batch_size)):
             batch = group[start : start + max(1, batch_size)]
+            if judge_batch_callback is not None:
+                judge_batch_callback(processed + 1, processed + len(batch), total_criteria)
             verdicts = judge(task_description, batch, scoped_output)
             for c in batch:
                 passed_by_id[str(c.get("id"))] = bool(verdicts.get(str(c.get("id")), False))
+            processed += len(batch)
 
     verdicts_out = [{"id": c.get("id"), "passed": passed_by_id.get(str(c.get("id")), False)} for c in scoreable]
     n_passed = sum(1 for v in verdicts_out if v["passed"])
