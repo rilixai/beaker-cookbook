@@ -209,7 +209,7 @@ def _fake_github(tree: dict[str, bytes]) -> Any:
                     if d not in seen:
                         seen.add(d)
                         items.append({"path": d, "type": "tree"})
-                items.append({"path": rel, "type": "blob"})
+                items.append({"path": rel, "type": "blob", "size": len(tree[fpath])})
             return json.dumps({"tree": items, "truncated": False}).encode()
         # contents API: ".../contents/<path>?ref=..." (path is percent-encoded)
         path = urllib.parse.unquote(url.split("/contents/", 1)[1].split("?", 1)[0])
@@ -219,9 +219,13 @@ def _fake_github(tree: dict[str, bytes]) -> Any:
             if fpath.startswith(prefix):
                 head = fpath[len(prefix) :].split("/", 1)
                 children[head[0]] = "dir" if len(head) > 1 else "file"
-        return json.dumps(
-            [{"name": name, "type": kind, "sha": f"{path}/{name}"} for name, kind in sorted(children.items())]
-        ).encode()
+        entries = []
+        for name, kind in sorted(children.items()):
+            entry = {"name": name, "type": kind, "sha": f"{path}/{name}"}
+            if kind == "file":
+                entry["size"] = len(tree[f"{path}/{name}"])
+            entries.append(entry)
+        return json.dumps(entries).encode()
 
     return _request
 
@@ -258,6 +262,41 @@ def test_ensure_task_dirs_fetches_and_caches(tmp_path: Path, monkeypatch: pytest
     calls["n"] = 0
     fetch_mod.ensure_task_dirs(["contracts/t1"], cache_dir=tmp_path)
     assert calls["n"] == 0
+
+
+def test_ensure_task_dirs_resumes_partial(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # An interrupted task (no `.fetched` sentinel, but a `.partial` marker for
+    # this commit + some files already on disk) resumes: correctly-sized files
+    # are not re-downloaded, only the missing ones are.
+    tree = {
+        "tasks/contracts/t1/task.json": b'{"title": "T1"}',
+        "tasks/contracts/t1/documents/a.txt": b"aaa",
+        "tasks/contracts/t1/documents/b.txt": b"bbbb",
+    }
+    # Simulate a prior interrupted run: task.json already fetched, plus the marker.
+    commit = fetch_mod.HARVEY_LABS_COMMIT
+    (tmp_path / "tasks/contracts/t1").mkdir(parents=True)
+    (tmp_path / "tasks/contracts/t1/task.json").write_bytes(b'{"title": "T1"}')
+    (tmp_path / ".partial/contracts").mkdir(parents=True)
+    (tmp_path / ".partial/contracts/t1").write_text(commit)
+
+    fetched: list[str] = []
+    base = _fake_github(tree)
+
+    def _record(url: str) -> bytes:
+        if url.startswith("https://raw.githubusercontent.com/"):
+            fetched.append(url.rsplit("/", 1)[1])
+        return base(url)
+
+    monkeypatch.setattr(fetch_mod, "_request", _record)
+    root = fetch_mod.ensure_task_dirs(["contracts/t1"], cache_dir=tmp_path)
+
+    # task.json was already on disk at the right size -> not re-downloaded.
+    assert "task.json" not in fetched
+    assert sorted(fetched) == ["a.txt", "b.txt"]
+    assert (root / "contracts/t1/documents/b.txt").read_bytes() == b"bbbb"
+    # The partial marker is cleared once the task completes.
+    assert not (tmp_path / ".partial/contracts/t1").exists()
 
 
 def test_ensure_task_dirs_refetches_on_commit_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

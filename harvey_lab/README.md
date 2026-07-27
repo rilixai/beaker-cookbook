@@ -79,8 +79,11 @@ Tasks come from the **public** GitHub repo
 **fetches only the task folders it needs** (the chosen split, capped by
 `--limit`) from GitHub into a local cache — no manual clone. Pass
 `--tasks-root` to point at an existing local checkout's `tasks/` dir instead.
-Task directories nest (larger areas add sub-categories, e.g.
-`contracts/banking/<slug>`), so a task ID is the directory path under `tasks/`.
+Most tasks are tiny (a handful of files); a few diligence data-rooms have
+thousands, so downloads run in parallel and **resume** if interrupted
+(files already on disk are skipped on the next run). Task directories nest
+(larger areas add sub-categories, e.g. `contracts/banking/<slug>`), so a task
+ID is the directory path under `tasks/`.
 The train / val / test partition is **frozen**: the committed
 `splits/{train,val,test}.txt` lists (1560 / 100 / 100 tasks, drawn to follow
 the benchmark's natural practice-area distribution) are the source of truth —

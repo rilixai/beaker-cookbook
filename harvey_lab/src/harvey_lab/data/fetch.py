@@ -107,51 +107,59 @@ def _subtree_sha(task_id: str, ref: str) -> str:
     raise FileNotFoundError(f"Task {task_id!r} not found under tasks/ at {ref[:10]}.")
 
 
-def _walk_blob_paths(repo_path: str, ref: str, prefix: str = "") -> list[str]:
-    """Enumerate file paths (relative to ``repo_path``) via the contents API."""
-    paths: list[str] = []
+def _walk_blob_paths(repo_path: str, ref: str, prefix: str = "") -> list[tuple[str, int]]:
+    """Enumerate ``(path, size)`` (path relative to ``repo_path``) via contents."""
+    blobs: list[tuple[str, int]] = []
     for entry in _list_contents(repo_path, ref):
         rel = f"{prefix}{entry['name']}"
         if entry["type"] == "dir":
-            paths.extend(_walk_blob_paths(f"{repo_path}/{entry['name']}", ref, rel + "/"))
+            blobs.extend(_walk_blob_paths(f"{repo_path}/{entry['name']}", ref, rel + "/"))
         elif entry["type"] == "file":
-            paths.append(rel)
-    return paths
+            blobs.append((rel, int(entry.get("size", 0))))
+    return blobs
 
 
-def _blob_paths(task_id: str, ref: str) -> list[str]:
-    """File paths under ``tasks/<task_id>`` (relative to it), via the Trees API.
+def _blob_paths(task_id: str, ref: str) -> list[tuple[str, int]]:
+    """``(path, size)`` for files under ``tasks/<task_id>``, via the Trees API.
 
     One recursive Trees call lists the whole subtree regardless of nesting;
     falls back to a per-directory walk only if GitHub truncates the response
-    (subtrees over ~100k entries — no LAB task is that large).
+    (subtrees over ~100k entries — no LAB task is that large). ``size`` lets the
+    downloader skip files already fully on disk so an interrupted big task
+    (the ~11 diligence data-rooms have 3k–4k files) resumes instead of restarts.
     """
     tree = json.loads(_request(_TREES_API.format(repo=REPO, sha=_subtree_sha(task_id, ref))))
     if tree.get("truncated"):
         return _walk_blob_paths(f"tasks/{task_id}", ref)
-    return [item["path"] for item in tree.get("tree", []) if item["type"] == "blob"]
+    return [(item["path"], int(item.get("size", 0))) for item in tree.get("tree", []) if item["type"] == "blob"]
 
 
 def _download_task(task_id: str, dest: Path, ref: str, on_file: Callable[[], None] | None = None) -> None:
     """Download every file under ``tasks/<task_id>`` into ``dest`` in parallel.
 
-    ``on_file`` is called once per downloaded file (for progress reporting).
+    Resumable: a file already on disk at its expected byte size is skipped, and
+    each download lands via a temp file + atomic rename, so a file with the
+    final name is always complete. ``on_file`` is called once per file (skipped
+    or downloaded) for progress reporting.
     """
-    rel_paths = _blob_paths(task_id, ref)
+    blobs = _blob_paths(task_id, ref)
     dest.mkdir(parents=True, exist_ok=True)
 
-    def _fetch_one(rel: str) -> None:
-        repo_path = f"tasks/{task_id}/{rel}"
-        url = _RAW_URL.format(repo=REPO, ref=ref, path=urllib.parse.quote(repo_path, safe="/"))
-        data = _request(url)
+    def _fetch_one(rel: str, size: int) -> None:
         target = dest / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
+        if not (target.is_file() and target.stat().st_size == size):
+            repo_path = f"tasks/{task_id}/{rel}"
+            url = _RAW_URL.format(repo=REPO, ref=ref, path=urllib.parse.quote(repo_path, safe="/"))
+            data = _request(url)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_name(target.name + ".part")
+            tmp.write_bytes(data)
+            tmp.replace(target)
         if on_file is not None:
             on_file()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=_DOWNLOAD_WORKERS) as pool:
-        for fut in concurrent.futures.as_completed([pool.submit(_fetch_one, rel) for rel in rel_paths]):
+        for fut in concurrent.futures.as_completed([pool.submit(_fetch_one, rel, size) for rel, size in blobs]):
             fut.result()  # surface the first download error
 
 
@@ -164,12 +172,15 @@ def ensure_task_dirs(
     """Download each ``tasks/<task_id>`` folder into the cache; return the tasks root.
 
     Only missing tasks are fetched (a ``.fetched/<task_id>`` sentinel marks a
-    completed download). The returned path is a ``tasks/`` directory usable as
-    ``--tasks-root`` — ``<tasks_root>/<task_id>/{task.json,documents/…}``.
+    completed download). A partially-downloaded task (interrupted before its
+    sentinel is written) resumes on the next run rather than restarting. The
+    returned path is a ``tasks/`` directory usable as ``--tasks-root`` —
+    ``<tasks_root>/<task_id>/{task.json,documents/…}``.
     """
     root = cache_dir or default_cache_dir()
     tasks_root = root / "tasks"
     sentinels = root / ".fetched"
+    partials = root / ".partial"
 
     def _cached_for(tid: str) -> bool:
         # The sentinel records the commit it was fetched at; a mismatch (e.g. a
@@ -186,9 +197,16 @@ def ensure_task_dirs(
         logger.info("Fetching %d task(s) from %s@%s into %s ...", len(pending), REPO, commit[:10], root)
     for i, tid in enumerate(pending, start=1):
         dest = tasks_root / tid
-        # Drop any stale tree (different commit) so removed files don't linger.
-        if dest.exists():
+        # A `.partial/<tid>` marker (written before downloading) records the
+        # commit of an in-progress tree. If it matches, keep what's on disk and
+        # resume; otherwise the tree is stale (a different commit, or unknown
+        # provenance) so drop it and start clean.
+        partial = partials / tid
+        resuming = partial.is_file() and partial.read_text(encoding="utf-8") == commit
+        if dest.exists() and not resuming:
             shutil.rmtree(dest)
+        partial.parent.mkdir(parents=True, exist_ok=True)
+        partial.write_text(commit, encoding="utf-8")
         logger.info("  [%d/%d] %s ...", i, len(pending), tid)
 
         # Log a running file count so a big task (some have thousands of
@@ -207,6 +225,7 @@ def ensure_task_dirs(
 
         _download_task(tid, dest, commit, _tick)
         logger.info("  [%d/%d] %s done (%d files)", i, len(pending), tid, count)
+        partial.unlink(missing_ok=True)
         if not (dest / "task.json").is_file():
             raise FileNotFoundError(f"Fetched {tid} but no task.json — is the task id valid at {commit[:10]}?")
         marker = sentinels / tid
