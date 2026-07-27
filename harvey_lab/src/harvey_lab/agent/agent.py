@@ -30,7 +30,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from pydantic import BaseModel, Field
