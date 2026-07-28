@@ -44,10 +44,13 @@ model's shell runs as your user, so treat it like any script you'd run locally:
 prefer a dev box or VM. For real isolation, pass `HarveyLabAgent` an
 `exec_provider_factory` returning any other Stirrup `CodeExecToolProvider`
 (the framework ships container and remote-sandbox backends); the one
-backend-specific touchpoint is `_env_working_dir`. A sandbox image is also the
-natural place to preinstall a document toolchain (`pandoc`, `python-docx`,
-`openpyxl`, …) — this recipe's copies are used for *grading* on the host, not on
-the agent's `PATH`, so today it installs what it needs or falls back to Markdown.
+backend-specific touchpoint is `_env_working_dir`.
+
+`pyproject.toml` installs the Python document stack (`python-docx`, `openpyxl`,
+`python-pptx`, `pypdf`, `pdfplumber`, `markitdown`) into the same venv the agent
+runs from, so those packages are importable from `code_exec`. System binaries
+(`pandoc`, `pdftotext`, `soffice`/`libreoffice`) must be installed separately —
+see **Install** below.
 
 Code map:
 
@@ -137,6 +140,20 @@ directory:
 cd harvey_lab
 uv sync --group dev
 ```
+
+The agent also needs a few system binaries on `PATH` so it can read and convert
+Office/PDF documents. On macOS:
+
+```bash
+brew install pandoc poppler
+brew install --cask libreoffice
+ln -s /Applications/LibreOffice.app/Contents/MacOS/soffice /usr/local/bin/soffice
+```
+
+(The `pandoc`, `pdftotext`, and `soffice` binaries are referenced directly in
+the task prompt, so they must be available in the agent's shell. `pdfplumber`,
+`markitdown`, `python-docx`, `openpyxl`, and `python-pptx` are installed by `uv
+sync` from `pyproject.toml`.)
 
 One provider key covers everything — both the agent and the judge default to
 OpenRouter routes, so a single key is enough:
