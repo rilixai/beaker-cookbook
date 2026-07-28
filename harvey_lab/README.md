@@ -47,10 +47,10 @@ prefer a dev box or VM. For real isolation, pass `HarveyLabAgent` an
 backend-specific touchpoint is `_env_working_dir`.
 
 `pyproject.toml` installs the Python document stack (`python-docx`, `openpyxl`,
-`python-pptx`, `pypdf`, `pdfplumber`, `markitdown`) into the same venv the agent
-runs from, so those packages are importable from `code_exec`. System binaries
-(`pandoc`, `pdftotext`, `soffice`/`libreoffice`) must be installed separately —
-see **Install** below.
+`python-pptx`, `pypdf`, `pdfplumber`, `markitdown[all]`) into the same venv the
+agent runs from, so those packages are importable from `code_exec`. System
+binaries (`pandoc`, `pdftotext`, `soffice`/`libreoffice`) must be installed
+separately — see **Install** below.
 
 Code map:
 
@@ -152,8 +152,8 @@ ln -s /Applications/LibreOffice.app/Contents/MacOS/soffice /usr/local/bin/soffic
 
 (The `pandoc`, `pdftotext`, and `soffice` binaries are referenced directly in
 the task prompt, so they must be available in the agent's shell. `pdfplumber`,
-`markitdown`, `python-docx`, `openpyxl`, and `python-pptx` are installed by `uv
-sync` from `pyproject.toml`.)
+`markitdown[all]`, `python-docx`, `openpyxl`, and `python-pptx` are installed by
+`uv sync` from `pyproject.toml`.)
 
 One provider key covers everything — both the agent and the judge default to
 OpenRouter routes, so a single key is enough:
