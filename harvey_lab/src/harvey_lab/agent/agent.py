@@ -86,11 +86,22 @@ def _default_model_factory(
     """Build Stirrup's LiteLLM client (imported lazily; needs ``stirrup[litellm]``)."""
     from stirrup.clients.litellm_client import LiteLLMClient, ReasoningEffort
 
+    # ``none``/empty is the documented "non-reasoning model" sentinel: send no
+    # reasoning param at all.
+    effort = reasoning_effort if reasoning_effort not in ("", "none") else None
+    kwargs: dict[str, Any] = {"temperature": temperature, "timeout": timeout}
+    if effort is not None:
+        # litellm only forwards ``reasoning_effort`` for models it already knows
+        # are reasoning-capable; a newly released model (e.g. deepseek-v4-pro on
+        # OpenRouter) isn't in that map yet, so litellm raises
+        # ``UnsupportedParamsError`` even though OpenRouter accepts it. Opting in
+        # via ``allowed_openai_params`` forwards the param as-is to the provider.
+        kwargs["allowed_openai_params"] = ["reasoning_effort"]
     return LiteLLMClient(
         model=model,
         max_tokens=max_tokens,
-        reasoning_effort=cast("ReasoningEffort | None", reasoning_effort or None),
-        kwargs={"temperature": temperature, "timeout": timeout},
+        reasoning_effort=cast("ReasoningEffort | None", effort),
+        kwargs=kwargs,
     )
 
 
