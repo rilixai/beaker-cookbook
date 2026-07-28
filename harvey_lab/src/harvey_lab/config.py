@@ -42,8 +42,11 @@ class HarveyLabConfig:
     # empty) if you swap in a non-reasoning model.
     task_reasoning_effort: str = "xhigh"
     # Per-call completion-token cap handed to the Stirrup client (litellm's
-    # ``max_tokens``). Must stay within the task model's output limit
-    max_output_tokens: int = 16_384
+    # ``max_tokens``). For reasoning models this should be the maximum output
+    # allowed by the model creator (AA's LAB-AA protocol). DeepSeek V4 Pro/Flash
+    # support up to 384,000 output tokens within their 1M context window. Use a
+    # non-reasoning model if you want a smaller cap (16,384 per AA protocol).
+    max_output_tokens: int = 384_000
 
     # The rubric judge. Graded in BATCHES of ``judge_batch_size`` criteria per
     # LLM call rather than one call per criterion — batched verification is an
