@@ -190,10 +190,9 @@ fingerprint is unchanged. Missing, errored, changed, or max-turn-exhausted tasks
 are run and saved. It then reloads every selected output from disk before grading
 and writes `eval_summary.json` (aggregate `all_pass_rate` /
 `criterion_pass_rate` + case counts) and `eval_outputs.json` (per-task results).
-Judge API and context-window failures abort with a nonzero exit and no partial
-`eval_summary.json` or `eval_outputs.json`; persisted agent outputs remain
-available for a retry. Use `--rerun` to force all selected tasks to run again,
-for example after changing the task model or agent settings.
+Persisted agent outputs remain available for a retry. Use `--rerun` to force
+all selected tasks to run again, for example after changing the task model or
+agent settings.
 
 See `--help` for all flags (`--split {train,val,test}`, `--limit`,
 `--tasks-root`, `--cache-dir`, `--max-concurrency`, `--task-model`,

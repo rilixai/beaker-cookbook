@@ -54,6 +54,10 @@ DEFAULT_JUDGE_TIMEOUT_S = 120.0
 # LAB-AA retries API failures aggressively rather than letting a transient
 # outage silently score a criterion FAIL.
 DEFAULT_JUDGE_NUM_RETRIES = 8
+# Extra retries applied when the rubric judge returns a response but it contains
+# no usable verdicts. This catches transient formatting / API hiccups without
+# aborting the whole evaluation.
+DEFAULT_JUDGE_BATCH_RETRIES = 3
 
 
 # A batched judge: ``judge(task_description, criteria, agent_output) ->
@@ -262,6 +266,42 @@ def _scope_key(criterion: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(sorted(str(d) for d in (criterion.get("deliverables") or ()) if d))
 
 
+def _call_judge_with_fallback(
+    judge: BatchJudge,
+    task_description: str,
+    batch: Sequence[Mapping[str, Any]],
+    agent_output: str,
+    max_retries: int,
+) -> dict[str, bool]:
+    """Call the rubric judge, retry on transient failure, and fall back to FAIL.
+
+    A judge batch may fail because of an API error, a malformed response, or a
+    context-window issue. Rather than aborting the whole evaluation, we retry
+    ``max_retries`` times and, if the batch still cannot be graded, conservatively
+    score every criterion in the batch as FAIL while logging the error.
+    """
+    ids = [str(c.get("id")) for c in batch]
+    last_error: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            return judge(task_description, batch, agent_output)
+        except Exception as exc:  # noqa: BLE001 - judge failures are expected to be retried
+            last_error = exc
+            logger.warning(
+                "Rubric judge batch failed (attempt %d/%d): %s",
+                attempt + 1,
+                max_retries,
+                exc,
+            )
+    logger.error(
+        "Rubric judge failed after %d attempts; scoring %d criteria as FAIL: %s",
+        max_retries,
+        len(ids),
+        last_error,
+    )
+    return dict.fromkeys(ids, False)
+
+
 def score_rubric(
     *,
     criteria: Sequence[Mapping[str, Any]],
@@ -307,7 +347,9 @@ def score_rubric(
             batch = group[start : start + max(1, batch_size)]
             if judge_batch_callback is not None:
                 judge_batch_callback(processed + 1, processed + len(batch), total_criteria)
-            verdicts = judge(task_description, batch, scoped_output)
+            verdicts = _call_judge_with_fallback(
+                judge, task_description, batch, scoped_output, DEFAULT_JUDGE_BATCH_RETRIES
+            )
             for c in batch:
                 passed_by_id[str(c.get("id"))] = bool(verdicts.get(str(c.get("id")), False))
             processed += len(batch)
