@@ -478,7 +478,7 @@ def test_build_rubric_judge_propagates_provider_errors() -> None:
         raise RuntimeError("context window exceeded")
 
     judge = build_rubric_judge(model="stub/test", llm=_broken_llm)
-    with pytest.raises(RuntimeError, match="context window exceeded"):
+    with pytest.raises(JudgeCallError, match="context window exceeded"):
         judge("task", [{"id": "C1", "match_criteria": "x"}], "output")
 
 
@@ -584,17 +584,22 @@ def test_score_rubric_empty_rubric_is_unscoreable() -> None:
     assert result["total_criteria"] == 0
 
 
-def test_score_rubric_propagates_judge_errors() -> None:
+def test_score_rubric_survives_judge_errors() -> None:
+    """A judge batch that raises is retried; unrecoverable failures score FAIL."""
+
     def _broken_judge(_desc: str, _criteria: list[dict], _output: str) -> dict[str, bool]:
         raise RuntimeError("context window exceeded")
 
-    with pytest.raises(RuntimeError, match="context window exceeded"):
-        score_rubric(
-            criteria=[{"id": "C1", "match_criteria": "x", "deliverables": ["memo.md"]}],
-            deliverables={"memo.md": "body"},
-            task_description="t",
-            judge=_broken_judge,
-        )
+    result = score_rubric(
+        criteria=[{"id": "C1", "match_criteria": "x", "deliverables": ["memo.md"]}],
+        deliverables={"memo.md": "body"},
+        task_description="t",
+        judge=_broken_judge,
+    )
+    assert result["passed"] == 0
+    assert result["total_criteria"] == 1
+    assert result[ALL_PASS_FIELD] == 0.0
+    assert result[CRITERION_PASS_RATE_FIELD] == 0.0
 
 
 def test_render_template_substitutes_and_appends_instructions() -> None:
@@ -1014,7 +1019,9 @@ def test_max_turn_run_is_graded_not_errored(tasks_root: Path, tmp_path: Path) ->
     assert graded.deliverables == {"memo.md": "partial memo body"}
 
 
-def test_judge_failure_aborts_evaluation(tasks_root: Path) -> None:
+def test_judge_failure_scores_affected_criteria_as_fail(tasks_root: Path) -> None:
+    """A judge call that fails is retried, then the affected criteria are marked FAIL;
+    other tasks are still graded normally and an aggregate is produced."""
     records = load_records(tasks_root, task_ids=["contracts/t1", "tax/t1"])
     outputs = {
         record.task_id: HarveyLabAgentOutput(
@@ -1028,13 +1035,21 @@ def test_judge_failure_aborts_evaluation(tasks_root: Path) -> None:
             raise JudgeCallError("context window exceeded")
         return {str(criterion["id"]): True for criterion in criteria}
 
-    with pytest.raises(JudgeCallError, match="context window exceeded"):
-        asyncio.run(evaluate_outputs_on_records(records=records, outputs=outputs, errors={}, judge=_mixed_judge))
+    report = asyncio.run(evaluate_outputs_on_records(records=records, outputs=outputs, errors={}, judge=_mixed_judge))
+    tax_results = [r for r in report.per_case if r["task_id"].endswith("tax/t1")]
+    assert len(tax_results) == 1
+    assert tax_results[0]["passed"] == 0
+    assert tax_results[0]["criterion_pass_rate"] == 0.0
+    contracts_results = [r for r in report.per_case if r["task_id"].endswith("contracts/t1")]
+    assert len(contracts_results) == 1
+    assert contracts_results[0]["passed"] == contracts_results[0]["total_criteria"]
 
 
-def test_cli_judge_failure_returns_nonzero_without_partial_reports(
+def test_cli_judge_failure_completes_with_failed_criteria(
     tasks_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A judge call that fails is retried and then scored as FAIL; evaluation still
+    writes the aggregate report and returns 0."""
     record = load_records(tasks_root, task_ids=["contracts/t1"])[0]
     output_dir = tmp_path / "outputs"
 
@@ -1058,11 +1073,12 @@ def test_cli_judge_failure_returns_nonzero_without_partial_reports(
     monkeypatch.setattr(cli_mod, "build_rubric_judge", lambda **_kwargs: _broken_judge)
     args = cli_mod._parse_args(["evaluate", "--output-dir", str(output_dir), "--no-view-image"])
 
-    assert cli_mod._run_evaluate(args) == 1
+    assert cli_mod._run_evaluate(args) == 0
     assert (output_dir / "run_outputs.json").is_file()
     assert (output_dir / "contracts/t1/memo.md").read_bytes() == b"body"
-    assert not (output_dir / "eval_summary.json").exists()
-    assert not (output_dir / "eval_outputs.json").exists()
+    assert (output_dir / "eval_summary.json").is_file()
+    assert (output_dir / "eval_outputs.json").is_file()
+    # The old reports are archived before grading regardless of success.
     assert (output_dir / "eval_summary.previous.json").read_text() == "stale"
     assert (output_dir / "eval_outputs.previous.json").read_text() == "stale"
 

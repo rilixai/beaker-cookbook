@@ -46,6 +46,12 @@ _USER_AGENT = "harvey-lab-cookbook"
 _MAX_RETRIES = 3
 _DOWNLOAD_WORKERS = 8
 
+# Many LAB task ids share the same parent directory (e.g.
+# contracts/commercial-vendor-customer/...), so the contents listing for that
+# directory can be reused across tasks rather than re-fetched.
+_contents_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
+_contents_lock = threading.Lock()
+
 
 def default_cache_dir() -> Path:
     """Root of the local task cache (``$HARVEY_LAB_CACHE`` or ``~/.cache``)."""
@@ -87,13 +93,25 @@ def _request(url: str) -> bytes:
 
 
 def _list_contents(repo_path: str, ref: str) -> list[dict[str, Any]]:
-    """Return the GitHub contents-API listing for directory ``repo_path``."""
+    """Return the GitHub contents-API listing for directory ``repo_path``.
+
+    Results are cached per ``(repo_path, ref)`` so sibling tasks fetched in the
+    same run share one API call.
+    """
+    key = (repo_path, ref)
+    with _contents_lock:
+        if key in _contents_cache:
+            return _contents_cache[key]
+
     # Percent-encode the path (LAB folders can contain spaces, e.g.
     # "1.0 Transaction Documents"); keep "/" as the path separator.
     quoted = urllib.parse.quote(repo_path, safe="/")
     listing = json.loads(_request(_CONTENTS_API.format(repo=REPO, path=quoted, ref=ref)))
     if not isinstance(listing, list):
         raise RuntimeError(f"Expected a directory listing at {repo_path!r}, got a file.")
+
+    with _contents_lock:
+        _contents_cache[key] = listing
     return listing
 
 
