@@ -34,7 +34,7 @@ class HarveyLabConfig:
     # the agent and the judge; override with a direct ``deepseek/…`` (+ that
     # provider's key) if you'd rather call the provider straight.
     task_model: str = "openrouter/deepseek/deepseek-v4-pro"
-    task_temperature: float = 0.0
+    task_temperature: float = 0.6
     # Reasoning budget for a thinking-capable task model, passed through to
     # LiteLLM's ``reasoning_effort``. ``xhigh`` is the top tier the Stirrup
     # LiteLLM client exposes (``none``/``minimal``/``low``/``medium``/``high``/
