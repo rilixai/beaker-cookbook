@@ -199,3 +199,30 @@ See `--help` for all flags (`--split {train,val,test}`, `--limit`,
 `--task-reasoning-effort`, `--judge-model`, `--judge-batch-size`,
 `--judge-num-retries`, `--shell-timeout`, `--max-turns`, `--no-view-image`,
 `--rerun`, …).
+
+## Prompt optimization (RilixAI)
+
+`.rilix-ai/` wires this recipe up as a RilixAI prompt-optimization target. What
+is optimized is the pair of prompts in `agent/prompts.py` — the LAB-AA
+`system_prompt` and `task_template` — and nothing else: a candidate bundle is
+threaded into the real `HarveyLabAgent`, the real task runs, and the real rubric
+judge scores it, so an optimization score means the same thing `harvey-lab
+evaluate` means (`criterion_pass_rate` is the objective; `all_pass` is reported
+but too sparse to steer a search).
+
+```bash
+# Export real LAB tasks (frozen splits, pinned commit) into the JSONL layout
+# RilixAI reads. Rows carry the task instructions + that task's own rubric.
+uv run python .rilix-ai/export_dataset.py --train 8 --val 4
+
+# Build the spec, run one train case end to end and score it.
+uv run rilixai run dry-run
+```
+
+The dry-run performs a full agent rollout, so it needs the same
+`OPENROUTER_API_KEY` (or direct-provider key) as `harvey-lab run`. Source
+documents are deliberately not inlined into the JSONL: each row records its
+`task_id` and the rollout fetches that task folder from `harveyai/harvey-labs` at
+`HARVEY_LABS_COMMIT`, reusing the same cache as the CLI. A row's rubric is
+frozen at export time, and a fetched task tree that no longer matches the row's
+fingerprint fails the case instead of scoring it against moved labels.
