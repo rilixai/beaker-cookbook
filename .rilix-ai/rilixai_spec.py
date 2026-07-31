@@ -28,10 +28,18 @@ stays deterministic and only aggregates them.
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
+
+# The spec image mounts the cookbook repo at ``/spec``. Ensure the sibling
+# ``harvey_lab/src`` package is importable inside the baked image (it is
+# installed in local dev, so the path is a no-op there).
+_HARVEY_LAB_SRC = Path(__file__).resolve().parents[1] / "harvey_lab" / "src"
+if str(_HARVEY_LAB_SRC) not in sys.path:
+    sys.path.insert(0, str(_HARVEY_LAB_SRC))
 
 from rilixai import (
     Case,
