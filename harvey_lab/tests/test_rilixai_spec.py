@@ -51,6 +51,20 @@ def spec_module() -> ModuleType:
     return module
 
 
+@pytest.fixture(autouse=True)
+def offline_preflight(spec_module: ModuleType, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+    """Record the loader's pre-flight fetches instead of hitting GitHub."""
+    calls: list[tuple[str, str]] = []
+
+    def _fake(task_ids: Any, *, commit: str, cache_dir: Path | None = None) -> Path:
+        del cache_dir
+        calls.extend((str(task_id), commit) for task_id in task_ids)
+        return Path("/nonexistent-tasks-root")
+
+    monkeypatch.setattr(spec_module, "ensure_task_dirs", _fake)
+    return calls
+
+
 @pytest.fixture
 def lab_task_root(tmp_path: Path) -> Path:
     root = tmp_path / "tasks"
@@ -117,6 +131,37 @@ def test_loader_builds_cases_from_a_row(spec_module: ModuleType) -> None:
     assert case.group_key == "contracts"
     assert case.input["instructions"].startswith("Summarize")
     assert [criterion["id"] for criterion in case.ground_truth["criteria"]] == ["C1"]
+
+
+def test_loader_materializes_the_task_before_any_rollout(
+    spec_module: ModuleType, offline_preflight: list[tuple[str, str]]
+) -> None:
+    """Building the cases is what downloads the tasks, not running them.
+
+    Dataset loading finishes before the engine schedules a single rollout, so a
+    fetch here is the run's one-time pre-flight; a fetch inside ``run_case``
+    would instead be dozens of rollouts racing on the same task tree.
+    """
+    loader = spec_module.LabTaskDataLoader()
+    context = DatasetRowContext(split="train", line_number=1)
+    row = _row(metadata={"practice_area": "contracts", "harvey_labs_commit": "deadbeef"})
+    list(loader.iter_cases(loader.parse_row(row, context), context))
+    assert offline_preflight == [("contracts/t1", "deadbeef")]
+
+
+def test_loader_pre_flight_failure_does_not_abort_dataset_loading(
+    spec_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A task that cannot be pre-fetched must fail its own case in run_case, not
+    # take the whole run down while the dataset is still being read.
+    def _boom(*_args: Any, **_kwargs: Any) -> Path:
+        raise RuntimeError("github is down")
+
+    monkeypatch.setattr(spec_module, "ensure_task_dirs", _boom)
+    loader = spec_module.LabTaskDataLoader()
+    context = DatasetRowContext(split="train", line_number=1)
+    cases = list(loader.iter_cases(loader.parse_row(_row(), context), context))
+    assert [case.case_id for case in cases] == ["contracts/t1"]
 
 
 @pytest.mark.parametrize(
