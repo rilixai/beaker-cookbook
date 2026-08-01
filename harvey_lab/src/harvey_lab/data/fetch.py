@@ -406,7 +406,10 @@ def _materialize_task(root: Path, task_id: str, commit: str, label: str) -> None
         )
         _discard(stage_root)
         _prune_empty_parents(stage_root.parent, root / ".partial")
+        # Installing replaces whatever tree was there, so any memo for this task
+        # at another commit is now a lie: drop them all and memo only this one.
         with _registry_lock:
+            _verified.difference_update({key for key in _verified if key[:2] == (str(root), task_id)})
             _verified.add((str(root), task_id, commit))
         logger.info("  %s %s done (%d files)", label, task_id, count)
 

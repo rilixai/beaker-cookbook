@@ -419,6 +419,33 @@ def test_ensure_task_dirs_refetches_incomplete_tree(tmp_path: Path, monkeypatch:
     assert (root / "contracts/t1/documents/b.txt").read_bytes() == b"bbbb"
 
 
+def test_ensure_task_dirs_refetches_when_the_commit_changes_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Rows can pin different benchmark commits. Re-installing a task at commit B
+    # invalidates whatever was verified for commit A, so asking for A again
+    # re-materializes it instead of serving B's documents from memory.
+    tree = {"tasks/contracts/t1/task.json": b'{"title": "T1"}', "tasks/contracts/t1/documents/a.txt": b"aaa"}
+    downloads: list[str] = []
+    base = _fake_github(tree)
+
+    def _counting(url: str) -> bytes:
+        if url.startswith("https://raw.githubusercontent.com/"):
+            downloads.append(url)
+        return base(url)
+
+    monkeypatch.setattr(fetch_mod, "_request", _counting)
+    for commit in ("aaa", "bbb", "aaa"):
+        fetch_mod.ensure_task_dirs(["contracts/t1"], commit=commit, cache_dir=tmp_path)
+        marker = json.loads((tmp_path / ".fetched/contracts/t1").read_text())
+        assert marker["commit"] == commit
+    assert len(downloads) == 6  # two files, fetched afresh for each of the three calls
+
+    # Re-asking for the commit already on disk is still a memoized no-op.
+    fetch_mod.ensure_task_dirs(["contracts/t1"], commit="aaa", cache_dir=tmp_path)
+    assert len(downloads) == 6
+
+
 def test_ensure_task_dirs_leaves_no_partial_tree_on_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A download that dies mid-tree must not publish anything under tasks/: the
     # files it did get stay in staging, where the next call resumes from them.
