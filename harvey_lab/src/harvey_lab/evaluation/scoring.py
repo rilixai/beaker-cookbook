@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, MutableSequence, Sequence
 from typing import Any
 
 
@@ -179,18 +179,56 @@ def _parse_batch_verdicts(text: str, ids: Sequence[str]) -> dict[str, bool]:
     return result
 
 
+def _record_usage(sink: MutableSequence[dict[str, Any]] | None, model: str, response: Any) -> None:
+    """Append one judge call's reported token usage to ``sink``.
+
+    Only what the provider actually reported is recorded; a response without a
+    usage block contributes nothing rather than an estimate.
+    """
+    if sink is None:
+        return
+    usage = response.get("usage") if isinstance(response, Mapping) else getattr(response, "usage", None)
+    if usage is None:
+        return
+
+    def _field(name: str) -> Any:
+        return usage.get(name) if isinstance(usage, Mapping) else getattr(usage, name, None)
+
+    input_tokens = _field("prompt_tokens")
+    output_tokens = _field("completion_tokens")
+    total_tokens = _field("total_tokens")
+    if not isinstance(input_tokens, int) or not isinstance(output_tokens, int):
+        return
+    sink.append(
+        {
+            "model": model,
+            "usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens if isinstance(total_tokens, int) else input_tokens + output_tokens,
+            },
+        }
+    )
+
+
 def build_rubric_judge(
     model: str = DEFAULT_JUDGE_MODEL,
     llm: Callable[..., Any] | None = None,
     *,
     timeout: float = DEFAULT_JUDGE_TIMEOUT_S,
     num_retries: int = DEFAULT_JUDGE_NUM_RETRIES,
+    usage_sink: MutableSequence[dict[str, Any]] | None = None,
 ) -> BatchJudge:
     """Return a batched ``judge(task, criteria, output) -> {id: passed}``.
 
     ``llm`` is injectable for tests: pass ``llm(model=..., messages=...) ->
     str | response`` returning a scripted batch verdict so zero network fires.
     In production ``llm`` is ``None`` and litellm is imported lazily.
+
+    ``usage_sink`` collects the token usage each judge call reports, as
+    ``{"model": ..., "usage": {"input_tokens", "output_tokens",
+    "total_tokens"}}`` — the shape RilixAI's rollout usage tracker reads for
+    inner LLM calls, so grading cost is measured rather than invisible.
     """
 
     def _call_llm(messages: list[dict[str, str]]) -> str:
@@ -198,6 +236,7 @@ def build_rubric_judge(
             result = llm(model=model, messages=messages)
             if isinstance(result, str):
                 return result
+            _record_usage(usage_sink, model, result)
             if isinstance(result, Mapping):
                 choices = result.get("choices")
                 if isinstance(choices, Sequence) and choices:
@@ -215,6 +254,7 @@ def build_rubric_judge(
             timeout=timeout,
             num_retries=num_retries,
         )
+        _record_usage(usage_sink, model, response)
         return str(response.choices[0].message.content or "")
 
     def _judge(task_description: str, criteria: Sequence[Mapping[str, Any]], agent_output: str) -> dict[str, bool]:

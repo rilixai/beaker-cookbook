@@ -29,6 +29,7 @@ from harvey_lab.agent.agent import (
     _count_turns,
     _default_model_factory,
     _render_template,
+    _token_usage_from_run_metadata,
 )
 from harvey_lab.agent.workspace import TaskWorkspace, extract_text, task_source_from_dir
 from harvey_lab.config import HarveyLabConfig
@@ -480,6 +481,55 @@ def test_build_rubric_judge_propagates_provider_errors() -> None:
     judge = build_rubric_judge(model="stub/test", llm=_broken_llm)
     with pytest.raises(JudgeCallError, match="context window exceeded"):
         judge("task", [{"id": "C1", "match_criteria": "x"}], "output")
+
+
+def test_build_rubric_judge_records_reported_usage() -> None:
+    """Judge cost is measured from the provider's own usage block, not estimated."""
+    usage_sink: list[dict[str, Any]] = []
+
+    def _llm(*, model: str, messages: list[dict]) -> dict[str, Any]:
+        del model, messages
+        return {
+            "content": '{"verdicts": [{"id": "C1", "verdict": "pass"}]}',
+            "usage": {"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150},
+        }
+
+    judge = build_rubric_judge(model="stub/test", llm=_llm, usage_sink=usage_sink)
+    assert judge("task", [{"id": "C1", "match_criteria": "x"}], "output") == {"C1": True}
+    assert usage_sink == [
+        {
+            "model": "stub/test",
+            "usage": {"input_tokens": 120, "output_tokens": 30, "total_tokens": 150},
+        }
+    ]
+
+
+def test_build_rubric_judge_records_nothing_when_usage_is_absent() -> None:
+    usage_sink: list[dict[str, Any]] = []
+
+    def _llm(**_kwargs: Any) -> str:
+        return '{"verdicts": [{"id": "C1", "verdict": "pass"}]}'
+
+    build_rubric_judge(model="stub/test", llm=_llm, usage_sink=usage_sink)(
+        "task", [{"id": "C1", "match_criteria": "x"}], "output"
+    )
+    assert usage_sink == []
+
+
+def test_agent_output_token_usage_sums_stirrup_records() -> None:
+    from stirrup.core.models import TokenUsage
+
+    usage = _token_usage_from_run_metadata(
+        {"token_usage": [TokenUsage(input=10, answer=4, reasoning=1), TokenUsage(input=7, answer=2)]}
+    )
+
+    assert usage.to_dict() == {"input_tokens": 17, "output_tokens": 7, "total_tokens": 24, "requests": 2}
+    assert _token_usage_from_run_metadata({}).to_dict() == {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "requests": 0,
+    }
 
 
 def test_scope_deliverables_selects_named_only() -> None:
