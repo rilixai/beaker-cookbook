@@ -34,15 +34,6 @@ COOKBOOK_ROOT = Path(__file__).resolve().parents[2]
 SPEC_PATH = COOKBOOK_ROOT / ".rilix-ai" / "rilixai_spec.py"
 DATASET_DIR = COOKBOOK_ROOT / ".rilix-ai" / "dataset"
 
-# ``CaseResult.failure`` — the marker the runtime counts as an unresolved
-# rollout — ships in rilixai 0.3.4. The recipe works on either version (an
-# older SDK just records the failure as an ordinary error payload); the pin in
-# pyproject.toml is raised once 0.3.4 is published.
-SDK_REPORTS_FAILURES = hasattr(CaseResult(output={}), "failure")
-requires_failure_marker = pytest.mark.skipif(
-    not SDK_REPORTS_FAILURES, reason="requires rilixai>=0.3.4 for CaseResult.failure"
-)
-
 SYSTEM_MARKER = "CANDIDATE-SYSTEM-PROMPT-MARKER"
 TEMPLATE_MARKER = "CANDIDATE-TASK-TEMPLATE-MARKER"
 
@@ -369,7 +360,6 @@ def test_a_harness_failure_is_reported_as_a_failed_rollout(
     assert "task fetch failed" in result.output["error"]
 
 
-@requires_failure_marker
 def test_a_harness_failure_carries_the_sdk_failure_marker(
     spec_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -408,7 +398,6 @@ def test_a_task_download_failure_is_a_harness_failure(
     assert "rate limit" in result.output["error"]
 
 
-@requires_failure_marker
 def test_a_stale_dataset_row_is_reported_as_a_permanent_failure(
     spec_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
