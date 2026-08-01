@@ -479,6 +479,22 @@ def test_ensure_task_dirs_rechecks_after_another_process_replaces_the_task(
     assert (root / "contracts/t1/documents/a.txt").read_bytes() == b"aaa"
 
 
+def test_ensure_task_dirs_keeps_documents_named_like_temp_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The downloader's own temp files end in ".part"; a source document that
+    # happens to be named that way is content and must survive the cleanup.
+    tree = {
+        "tasks/contracts/t1/task.json": b'{"title": "T1"}',
+        "tasks/contracts/t1/documents/archive.part": b"real content",
+    }
+    monkeypatch.setattr(fetch_mod, "_request", _fake_github(tree))
+    root = fetch_mod.ensure_task_dirs(["contracts/t1"], commit="aaa", cache_dir=tmp_path)
+
+    assert (root / "contracts/t1/documents/archive.part").read_bytes() == b"real content"
+    assert fetch_mod._is_cached(tmp_path, "contracts/t1", "aaa")
+
+
 def test_ensure_task_dirs_handles_sibling_tasks_in_one_area(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Sibling tasks hold different locks and share `.partial/<area>`, so cleanup
     # of one must never pull the staging parent out from under the other.

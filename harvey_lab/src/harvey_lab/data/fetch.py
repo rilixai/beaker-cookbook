@@ -399,8 +399,12 @@ def _materialize_task(root: Path, task_id: str, commit: str, label: str) -> None
             raise FileNotFoundError(f"Fetched {task_id} but no task.json — is the task id valid at {commit[:10]}?")
         if not _tree_matches_manifest(stage_tree, manifest):
             raise RuntimeError(f"Fetched {task_id} but the tree is incomplete against the source manifest.")
+        # Only the downloader's own temp files, never a source document that
+        # happens to be named "<something>.part".
+        expected = {rel for rel, _ in manifest}
         for leftover in stage_tree.rglob("*.part"):
-            leftover.unlink(missing_ok=True)
+            if leftover.relative_to(stage_tree).as_posix() not in expected:
+                leftover.unlink(missing_ok=True)
 
         _install_tree(stage_tree, dest, root / ".trash")
         # The marker is written only once the complete tree is in place, and it
