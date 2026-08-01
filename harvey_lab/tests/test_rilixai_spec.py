@@ -341,6 +341,24 @@ def test_a_harness_failure_carries_the_sdk_failure_marker(
     assert "task fetch failed" in result.failure.error
 
 
+def test_a_task_download_failure_is_a_harness_failure(
+    spec_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fetcher reports GitHub rate limits as a plain ``RuntimeError``."""
+
+    def _throttled(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("GitHub API rate limit exceeded")
+
+    monkeypatch.setattr(spec_module, "ensure_task_dirs", _throttled)
+
+    result = asyncio.run(
+        spec_module._run_case(case=_failing_case(), targets=_candidate_prompts(spec_module), runtime=None)
+    )
+
+    assert "rate limit" in result.output["error"]
+
+
 def test_a_provider_api_error_is_a_harness_failure(
     spec_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,

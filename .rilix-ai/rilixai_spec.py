@@ -356,12 +356,23 @@ def _record_for_case(case: Case, *, cache_dir: Path | None = None) -> tuple[Harv
     payload = case.input if isinstance(case.input, Mapping) else {}
     task_id = str(payload.get("task_id") or case.case_id)
     commit = str(case.metadata.get("harvey_labs_commit") or HARVEY_LABS_COMMIT)
-    tasks_root = ensure_task_dirs([task_id], commit=commit, cache_dir=cache_dir)
-    _assert_task_workspace_usable(tasks_root / task_id, task_id)
-    record = load_records(tasks_root, task_ids=[task_id])[0]
+    try:
+        tasks_root = ensure_task_dirs([task_id], commit=commit, cache_dir=cache_dir)
+        _assert_task_workspace_usable(tasks_root / task_id, task_id)
+        record = load_records(tasks_root, task_ids=[task_id])[0]
+    except HarnessError:
+        raise
+    except Exception as exc:
+        # Everything between here and the agent is the harness fetching data.
+        # The fetcher reports GitHub rate limits and exhausted retries as plain
+        # ``RuntimeError``, and a truncated ``task.json`` surfaces as a
+        # ``JSONDecodeError``; classified by type they would look like bugs in
+        # this spec, when they are the retryable outage this PR exists to
+        # report. Classified by *position* instead, they cannot be missed.
+        raise HarnessError(f"{task_id}: could not resolve the task tree: {type(exc).__name__}: {exc}") from exc
     expected_fingerprint = str(case.metadata.get("task_fingerprint") or "")
     if expected_fingerprint and expected_fingerprint != record.task_fingerprint:
-        raise RuntimeError(
+        raise HarnessError(
             f"{task_id}: fetched task tree does not match the dataset row "
             f"(fingerprint {record.task_fingerprint[:12]} != {expected_fingerprint[:12]}); "
             "re-export the dataset from the pinned commit."
