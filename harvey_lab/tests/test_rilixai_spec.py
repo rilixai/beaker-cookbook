@@ -481,6 +481,38 @@ def test_an_agent_that_submits_nothing_still_scores_an_honest_zero(
     assert score.field_scores == {ALL_PASS_FIELD: 0.0, CRITERION_PASS_RATE_FIELD: 0.0}
 
 
+def test_a_judge_that_never_answers_is_a_harness_failure_not_a_zero(spec_module: ModuleType) -> None:
+    """``score_rubric`` scores an unreachable judge FAIL; that is not the agent's score."""
+
+    def _dead(*_args: Any, **_kwargs: Any) -> dict[str, bool]:
+        raise spec_module.JudgeCallError("judge API is down")
+
+    judge = spec_module._OutageAwareJudge(_dead)
+    graded = spec_module.score_rubric(
+        criteria=[{"id": "C1", "match_criteria": "Mentions $50,000.", "deliverables": ["memo.md"]}],
+        deliverables={"memo.md": "The fee is $50,000."},
+        task_description="Summarize the fee.",
+        judge=judge,
+    )
+
+    assert graded[CRITERION_PASS_RATE_FIELD] == 0.0
+    with pytest.raises(spec_module.JudgeCallError, match="nothing was graded"):
+        judge.assert_reached()
+
+
+def test_a_judge_that_answers_is_not_reported_as_an_outage(spec_module: ModuleType) -> None:
+    """A criterion whose deliverables are absent never reaches the judge — still a score."""
+    judge = spec_module._OutageAwareJudge(lambda *_a, **_kw: {"C1": False})
+    spec_module.score_rubric(
+        criteria=[{"id": "C1", "match_criteria": "Mentions $50,000.", "deliverables": ["memo.md"]}],
+        deliverables={"memo.md": "Nothing relevant."},
+        task_description="Summarize the fee.",
+        judge=judge,
+    )
+
+    judge.assert_reached()
+
+
 class _FakeCall:
     """The one trace operation a model call uses."""
 

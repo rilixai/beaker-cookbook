@@ -449,6 +449,36 @@ def _task_description(case: Case, record: HarveyLabRecord) -> str:
     return f"{header}{record.instructions}".strip()
 
 
+class _OutageAwareJudge:
+    """A rubric judge that remembers whether it ever actually graded anything.
+
+    ``score_rubric``'s ``_call_judge_with_fallback`` retries a batch and then
+    scores it FAIL rather than aborting the evaluation — correct per criterion,
+    but it means a judge API that is *entirely* down returns a full sheet of
+    zeros that is indistinguishable from an agent that got everything wrong.
+    That is the same silent-zero this PR exists to remove, one layer up, so the
+    spec watches from outside: if the judge was called and no call ever
+    succeeded, the case is a harness failure, not a score.
+
+    A partial outage keeps LAB-AA's conservative behaviour untouched.
+    """
+
+    def __init__(self, judge: Any) -> None:
+        self._judge = judge
+        self.calls = 0
+        self.verdicts = 0
+
+    def __call__(self, task_description: str, criteria: Sequence[Mapping[str, Any]], agent_output: str) -> Any:
+        self.calls += 1
+        graded = self._judge(task_description, criteria, agent_output)
+        self.verdicts += 1
+        return graded
+
+    def assert_reached(self) -> None:
+        if self.calls and not self.verdicts:
+            raise JudgeCallError(f"the rubric judge failed every one of its {self.calls} attempts; nothing was graded.")
+
+
 def _grade(
     *,
     case: Case,
@@ -464,18 +494,22 @@ def _grade(
     blocks needs a change in that module, so grading cost is still unmeasured.
     """
     criteria = [dict(criterion) for criterion in case.ground_truth.get("criteria", ())]
-    judge = build_rubric_judge(
-        config.judge_model,
-        timeout=config.llm_timeout,
-        num_retries=config.judge_num_retries,
+    judge = _OutageAwareJudge(
+        build_rubric_judge(
+            config.judge_model,
+            timeout=config.llm_timeout,
+            num_retries=config.judge_num_retries,
+        )
     )
-    return score_rubric(
+    graded = score_rubric(
         criteria=criteria,
         deliverables=output.deliverables,
         task_description=_task_description(case, record),
         judge=judge,
         batch_size=config.judge_batch_size,
     )
+    judge.assert_reached()
+    return graded
 
 
 class _TracedClient:
