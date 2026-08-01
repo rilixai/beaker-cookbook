@@ -34,6 +34,15 @@ COOKBOOK_ROOT = Path(__file__).resolve().parents[2]
 SPEC_PATH = COOKBOOK_ROOT / ".rilix-ai" / "rilixai_spec.py"
 DATASET_DIR = COOKBOOK_ROOT / ".rilix-ai" / "dataset"
 
+# ``CaseResult.failure`` — the marker the runtime counts as an unresolved
+# rollout — ships in rilixai 0.3.4. The recipe works on either version (an
+# older SDK just records the failure as an ordinary error payload); the pin in
+# pyproject.toml is raised once 0.3.4 is published.
+SDK_REPORTS_FAILURES = hasattr(CaseResult(output={}), "failure")
+requires_failure_marker = pytest.mark.skipif(
+    not SDK_REPORTS_FAILURES, reason="requires rilixai>=0.3.4 for CaseResult.failure"
+)
+
 SYSTEM_MARKER = "CANDIDATE-SYSTEM-PROMPT-MARKER"
 TEMPLATE_MARKER = "CANDIDATE-TASK-TEMPLATE-MARKER"
 
@@ -203,6 +212,7 @@ def _patch_for_local_rollout(
     lab_task_root: Path,
     *,
     body: str,
+    submit_nothing: bool = False,
 ) -> list[list[Any]]:
     """Wire ``_run_case`` to a fixture task, a scripted client and a stub judge.
 
@@ -217,8 +227,23 @@ def _patch_for_local_rollout(
             seen_messages.append(list(messages))
             return await super().generate(messages, tools)
 
+    class _EmptySubmissionClient(_RecordingClient):
+        """Runs to completion and finishes without submitting any file."""
+
+        async def generate(self, messages: list[Any], tools: dict[str, Any]) -> Any:
+            from stirrup.core.models import AssistantMessage, ToolCall
+
+            seen_messages.append(list(messages))
+            call = ToolCall(
+                name="finish",
+                arguments=json.dumps({"summary": "Nothing to submit.", "paths": []}),
+                tool_call_id="tc-1",
+            )
+            return AssistantMessage(content="", tool_calls=[call])
+
     def _model_factory(*_args: Any) -> Any:
-        return _RecordingClient(deliverable_body=body, deliverable_name="memo.md")
+        client = _EmptySubmissionClient if submit_nothing else _RecordingClient
+        return client(deliverable_body=body, deliverable_name="memo.md")
 
     record = spec_module.load_records(lab_task_root, task_ids=["contracts/t1"])[0]
     monkeypatch.setattr(spec_module, "_record_for_case", lambda case, **_kw: (record, lab_task_root))
@@ -309,25 +334,336 @@ def test_run_case_reports_missing_deliverables_and_failed_criteria(
     assert any("failed criteria" in note for note in feedback)
 
 
-def test_run_case_failure_scores_zero_instead_of_aborting_the_run(
+def _failing_case() -> Case:
+    return Case(
+        input={
+            "task_id": "contracts/t1",
+            "instructions": "Summarize the fee.",
+            "documents": ["notes.txt"],
+        },
+        case_id="contracts/t1",
+        ground_truth={"criteria": [{"id": "C1", "match_criteria": "Mentions $50,000."}]},
+    )
+
+
+def test_a_harness_failure_is_reported_as_a_failed_rollout(
     spec_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A broken harness must not look like an agent that scored 0.
+
+    This is the regression for the run where a non-concurrency-safe task
+    fetcher emptied every task folder: every rollout crashed, the spec turned
+    each crash into an ordinary result, and 297 cases reported a clean 0.0.
+    """
+
     def _boom(_case: Case, **_kwargs: Any) -> Any:
-        raise RuntimeError("task fetch failed")
+        raise FileNotFoundError("task fetch failed")
 
     monkeypatch.setattr(spec_module, "_record_for_case", _boom)
+
+    result = asyncio.run(
+        spec_module._run_case(case=_failing_case(), targets=_candidate_prompts(spec_module), runtime=None)
+    )
+
+    assert "task fetch failed" in result.output["error"]
+
+
+@requires_failure_marker
+def test_a_harness_failure_carries_the_sdk_failure_marker(
+    spec_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The marker is what makes the case unresolved instead of a scored zero."""
+
+    def _boom(_case: Case, **_kwargs: Any) -> Any:
+        raise FileNotFoundError("task fetch failed")
+
+    monkeypatch.setattr(spec_module, "_record_for_case", _boom)
+
+    result = asyncio.run(
+        spec_module._run_case(case=_failing_case(), targets=_candidate_prompts(spec_module), runtime=None)
+    )
+
+    assert result.failure is not None
+    assert result.failure.retryable is True
+    assert "task fetch failed" in result.failure.error
+
+
+def test_a_task_download_failure_is_a_harness_failure(
+    spec_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fetcher reports GitHub rate limits as a plain ``RuntimeError``."""
+
+    def _throttled(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("GitHub API rate limit exceeded")
+
+    monkeypatch.setattr(spec_module, "ensure_task_dirs", _throttled)
+
+    result = asyncio.run(
+        spec_module._run_case(case=_failing_case(), targets=_candidate_prompts(spec_module), runtime=None)
+    )
+
+    assert "rate limit" in result.output["error"]
+
+
+@requires_failure_marker
+def test_a_stale_dataset_row_is_reported_as_a_permanent_failure(
+    spec_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retrying a fingerprint mismatch thirty times just hides it."""
+
+    def _stale(_case: Case, **_kwargs: Any) -> Any:
+        raise spec_module.DatasetMismatchError("contracts/t1: fetched task tree does not match the dataset row")
+
+    monkeypatch.setattr(spec_module, "_record_for_case", _stale)
+
+    result = asyncio.run(
+        spec_module._run_case(case=_failing_case(), targets=_candidate_prompts(spec_module), runtime=None)
+    )
+
+    assert result.failure is not None
+    assert result.failure.retryable is False
+
+
+def test_a_provider_api_error_is_a_harness_failure(
+    spec_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LiteLLM maps provider failures onto ``openai.*`` types, not its own base."""
+    from litellm.exceptions import RateLimitError
+
+    def _boom(_case: Case, **_kwargs: Any) -> Any:
+        raise RateLimitError("slow down", llm_provider="openrouter", model="m")
+
+    monkeypatch.setattr(spec_module, "_record_for_case", _boom)
+
+    result = asyncio.run(
+        spec_module._run_case(case=_failing_case(), targets=_candidate_prompts(spec_module), runtime=None)
+    )
+
+    assert "RateLimitError" in result.output["error"]
+
+
+def test_an_unexpected_error_escapes_to_the_runtime(
+    spec_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only classified harness failures are caught; a bug must not be swallowed."""
+
+    def _bug(_case: Case, **_kwargs: Any) -> Any:
+        raise ValueError("this spec has a bug")
+
+    monkeypatch.setattr(spec_module, "_record_for_case", _bug)
+
+    with pytest.raises(ValueError, match="this spec has a bug"):
+        asyncio.run(spec_module._run_case(case=_failing_case(), targets=_candidate_prompts(spec_module), runtime=None))
+
+
+def test_a_task_with_no_documents_of_its_own_is_not_a_harness_failure(
+    spec_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    lab_task_root: Path,
+    tmp_path: Path,
+) -> None:
+    """Completeness is measured against the row, not against "documents/ is non-empty"."""
+    for document in (lab_task_root / "contracts/t1/documents").iterdir():
+        document.unlink()
+    monkeypatch.setattr(spec_module, "ensure_task_dirs", lambda *_a, **_kw: lab_task_root)
+    case = Case(
+        input={"task_id": "contracts/t1", "instructions": "Draft from scratch.", "documents": []},
+        case_id="contracts/t1",
+        ground_truth={"criteria": [{"id": "C1", "match_criteria": "Mentions $50,000."}]},
+    )
+
+    record, _root = spec_module._record_for_case(case, cache_dir=tmp_path)
+
+    assert record.task_id == "contracts/t1"
+
+
+@pytest.mark.parametrize("missing", ["task.json", "documents"])
+def test_an_empty_task_directory_fails_before_the_agent_runs(
+    spec_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    lab_task_root: Path,
+    tmp_path: Path,
+    missing: str,
+) -> None:
+    """The one-stat precondition that would have caught the whole bad run."""
+    task_dir = lab_task_root / "contracts" / "t1"
+    if missing == "task.json":
+        (task_dir / "task.json").unlink()
+    else:
+        for document in (task_dir / "documents").iterdir():
+            document.unlink()
+
+    monkeypatch.setattr(spec_module, "ensure_task_dirs", lambda *_a, **_kw: lab_task_root)
+
+    with pytest.raises(spec_module.HarnessError, match="contracts/t1"):
+        spec_module._record_for_case(_failing_case(), cache_dir=tmp_path)
+
+
+def test_an_agent_that_submits_nothing_still_scores_an_honest_zero(
+    spec_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    lab_task_root: Path,
+) -> None:
+    """LAB-AA grades an empty submission as 0 — it is not a harness failure."""
+    _patch_for_local_rollout(spec_module, monkeypatch, lab_task_root, body="unused", submit_nothing=True)
     case = Case(
         input={"task_id": "contracts/t1", "instructions": "Summarize the fee."},
         case_id="contracts/t1",
-        ground_truth={"criteria": [{"id": "C1", "match_criteria": "Mentions $50,000."}]},
+        ground_truth={"criteria": [{"id": "C1", "match_criteria": "Mentions $50,000.", "deliverables": ["memo.md"]}]},
     )
 
     result = asyncio.run(spec_module._run_case(case=case, targets=_candidate_prompts(spec_module), runtime=None))
     score = asyncio.run(spec_module.RubricScorer().score_case(case=case, result=result))
 
-    assert "task fetch failed" in result.output["error"]
+    assert getattr(result, "failure", None) is None, "an empty submission is a score, not a harness failure"
+    assert result.output["deliverables_produced"] == []
     assert score.field_scores == {ALL_PASS_FIELD: 0.0, CRITERION_PASS_RATE_FIELD: 0.0}
+
+
+def test_a_judge_that_never_answers_is_a_harness_failure_not_a_zero(spec_module: ModuleType) -> None:
+    """``score_rubric`` scores an unreachable judge FAIL; that is not the agent's score."""
+
+    def _dead(*_args: Any, **_kwargs: Any) -> dict[str, bool]:
+        raise spec_module.JudgeCallError("judge API is down")
+
+    judge = spec_module._OutageAwareJudge(_dead)
+    graded = spec_module.score_rubric(
+        criteria=[{"id": "C1", "match_criteria": "Mentions $50,000.", "deliverables": ["memo.md"]}],
+        deliverables={"memo.md": "The fee is $50,000."},
+        task_description="Summarize the fee.",
+        judge=judge,
+    )
+
+    assert graded[CRITERION_PASS_RATE_FIELD] == 0.0
+    with pytest.raises(spec_module.JudgeCallError, match="nothing was graded"):
+        judge.assert_reached()
+
+
+def test_a_judge_that_answers_is_not_reported_as_an_outage(spec_module: ModuleType) -> None:
+    """A criterion whose deliverables are absent never reaches the judge — still a score."""
+    judge = spec_module._OutageAwareJudge(lambda *_a, **_kw: {"C1": False})
+    spec_module.score_rubric(
+        criteria=[{"id": "C1", "match_criteria": "Mentions $50,000.", "deliverables": ["memo.md"]}],
+        deliverables={"memo.md": "Nothing relevant."},
+        task_description="Summarize the fee.",
+        judge=judge,
+    )
+
+    judge.assert_reached()
+
+
+class _FakeCall:
+    """The one trace operation a model call uses."""
+
+    def __init__(self) -> None:
+        self.recorded_usage: dict[str, int] | None = None
+        self.output_value: Any = None
+
+    def __enter__(self) -> "_FakeCall":
+        return self
+
+    def __exit__(self, *_args: Any) -> bool:
+        return False
+
+    def usage(self, **kwargs: int) -> None:
+        self.recorded_usage = dict(kwargs)
+
+    def output(self, value: Any) -> None:
+        self.output_value = value
+
+
+class _FakeTrace:
+    def __init__(self) -> None:
+        self.calls: list[tuple[dict[str, Any], _FakeCall]] = []
+
+    def model_call(self, **kwargs: Any) -> _FakeCall:
+        call = _FakeCall()
+        self.calls.append((kwargs, call))
+        return call
+
+
+class _UsageClient:
+    """A Stirrup client whose reply carries the provider's token counts."""
+
+    model_slug = "openrouter/some-model"
+    max_tokens = 4096
+
+    def __init__(self, *, input_tokens: int, answer: int, reasoning: int) -> None:
+        self._usage = (input_tokens, answer, reasoning)
+
+    async def generate(self, messages: list[Any], tools: dict[str, Any]) -> Any:
+        from stirrup.core.models import AssistantMessage, TokenUsage
+
+        input_tokens, answer, reasoning = self._usage
+        return AssistantMessage(
+            content="done",
+            token_usage=TokenUsage(input=input_tokens, answer=answer, reasoning=reasoning),
+        )
+
+
+def test_a_traced_model_call_reports_the_providers_own_token_counts(spec_module: ModuleType) -> None:
+    """The runtime derives rollout cost from these spans; nothing is estimated."""
+    trace = _FakeTrace()
+    client = spec_module._TracedClient(
+        _UsageClient(input_tokens=120, answer=30, reasoning=8), trace=trace, provider="openrouter"
+    )
+
+    reply = asyncio.run(client.generate([], {}))
+
+    assert reply.content == "done"
+    (attributes, call) = trace.calls[0]
+    assert attributes["model"] == "openrouter/some-model"
+    assert attributes["provider"] == "openrouter"
+    # Stirrup counts reasoning separately; the provider's output is both.
+    assert call.recorded_usage == {"input_tokens": 120, "output_tokens": 38, "total_tokens": 158}
+
+
+def test_a_traced_call_records_only_what_the_turn_added(spec_module: ModuleType) -> None:
+    """Stirrup resends the whole history each turn; recording it all is quadratic."""
+    trace = _FakeTrace()
+    client = spec_module._TracedClient(
+        _UsageClient(input_tokens=1, answer=1, reasoning=0), trace=trace, provider="openrouter"
+    )
+    history = ["system", "task"]
+
+    asyncio.run(client.generate(list(history), {}))
+    history.append("tool result")
+    asyncio.run(client.generate(list(history), {}))
+    asyncio.run(client.generate(["compacted"], {}))
+
+    assert [attributes["input_messages"] for attributes, _call in trace.calls] == [
+        ["system", "task"],
+        ["tool result"],
+        ["compacted"],
+    ]
+
+
+def test_a_model_call_without_reported_usage_records_none(spec_module: ModuleType) -> None:
+    trace = _FakeTrace()
+    client = spec_module._TracedClient(
+        _UsageClient(input_tokens=0, answer=0, reasoning=0), trace=trace, provider="openrouter"
+    )
+
+    asyncio.run(client.generate([], {}))
+
+    assert trace.calls[0][1].recorded_usage is None, "usage the provider never reported must not be invented"
+
+
+def test_the_spec_traces_the_recipes_own_client(spec_module: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tracing is a wrapper around the recipe's default factory, not a fork of it."""
+    inner = _UsageClient(input_tokens=1, answer=1, reasoning=0)
+    monkeypatch.setattr(spec_module, "_default_model_factory", lambda *_args: inner)
+
+    client = spec_module._tracing_model_factory(_FakeTrace(), "openrouter")("m", 0.0, 1, 1.0, "none")
+
+    assert isinstance(client, spec_module._TracedClient)
+    assert client.model_slug == inner.model_slug
 
 
 def test_targets_that_miss_the_agent_are_rejected(spec_module: ModuleType, lab_task_root: Path) -> None:

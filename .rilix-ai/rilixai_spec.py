@@ -57,8 +57,9 @@ from rilixai import (
     spec,
 )
 from rilixai.sdk import RolloutContext
+from rilixai.tracing import Trace
 
-from harvey_lab.agent.agent import HarveyLabAgent, HarveyLabAgentOutput
+from harvey_lab.agent.agent import HarveyLabAgent, HarveyLabAgentOutput, _default_model_factory
 from harvey_lab.agent.workspace import task_source_from_dir
 from harvey_lab.config import HARVEY_LABS_COMMIT, HarveyLabConfig
 from harvey_lab.data.dataset import HarveyLabRecord, load_records
@@ -66,6 +67,7 @@ from harvey_lab.data.fetch import ensure_task_dirs
 from harvey_lab.evaluation.scoring import (
     ALL_PASS_FIELD,
     CRITERION_PASS_RATE_FIELD,
+    JudgeCallError,
     build_rubric_judge,
     score_rubric,
 )
@@ -90,6 +92,64 @@ OBJECTIVE_WEIGHTS = {CRITERION_PASS_RATE_FIELD: 1.0}
 # Deliverable text is far too large to ship in the trajectory; reflection only
 # needs enough of it to see what the agent actually produced.
 _PREVIEW_CHARS = 800
+
+
+class HarnessError(RuntimeError):
+    """The harness failed, so this case never got a fair run.
+
+    Kept distinct from every other exception on purpose. Artificial Analysis
+    draws the same line: an agent that fails the task scores 0, while a run
+    with persistent infrastructure failures is retried and, if it keeps
+    failing, excluded rather than published. Collapsing the two is how a run
+    where every rollout crashed reported a clean ``0.0`` for 297 cases.
+    """
+
+
+class DatasetMismatchError(HarnessError):
+    """The dataset row and the fetched task disagree — retrying cannot help.
+
+    Still a harness failure (the case never got a fair run), but a permanent
+    one: the export is stale, and thirty identical retries would end in the
+    case being quietly excluded instead of an operator re-exporting it.
+    Reported with ``retryable=False`` so it stays a visible configuration bug.
+    """
+
+
+def _harness_error_types() -> tuple[type[BaseException], ...]:
+    """Exception types that mean "the harness broke", not "the agent was wrong".
+
+    Deliberately enumerated instead of catching bare ``Exception``: anything
+    not listed here is a bug in this spec or the recipe, and it must escape to
+    RilixAI, which logs the traceback and records the case as unresolved. Both
+    routes are loud; only these are reported as *retryable*.
+
+    Covers the task tree (:class:`HarnessError`), any filesystem/network error
+    (``OSError`` — the fetcher's ``urllib`` errors included), timeouts, every
+    provider API error, Stirrup running out of context, and a rubric judge that
+    never returned verdicts.
+
+    The provider base is ``openai.OpenAIError``, not LiteLLM's same-named
+    subclass: LiteLLM maps each provider failure onto the matching ``openai.*``
+    type (``litellm.exceptions.RateLimitError`` derives from
+    ``openai.RateLimitError``), so only the openai base catches them all.
+    """
+    types: list[type[BaseException]] = [HarnessError, OSError, TimeoutError, JudgeCallError]
+    try:
+        from openai import OpenAIError
+    except Exception:  # noqa: BLE001 - optional at import time; only narrows the catch
+        logger.warning("openai exceptions are unavailable; provider API errors will surface as unresolved cases.")
+    else:
+        types.append(OpenAIError)
+    try:
+        from stirrup.core.exceptions import ContextOverflowError
+    except Exception:  # noqa: BLE001 - optional at import time; only narrows the catch
+        logger.warning("stirrup exceptions are unavailable; context overflows will surface as unresolved cases.")
+    else:
+        types.append(ContextOverflowError)
+    return tuple(types)
+
+
+HARNESS_ERRORS = _harness_error_types()
 
 
 # ── Dataset loading ──────────────────────────────────────────────────────────
@@ -334,16 +394,58 @@ def _record_for_case(case: Case, *, cache_dir: Path | None = None) -> tuple[Harv
     payload = case.input if isinstance(case.input, Mapping) else {}
     task_id = str(payload.get("task_id") or case.case_id)
     commit = str(case.metadata.get("harvey_labs_commit") or HARVEY_LABS_COMMIT)
-    tasks_root = ensure_task_dirs([task_id], commit=commit, cache_dir=cache_dir)
-    record = load_records(tasks_root, task_ids=[task_id])[0]
+    try:
+        tasks_root = ensure_task_dirs([task_id], commit=commit, cache_dir=cache_dir)
+        _assert_task_workspace_usable(
+            tasks_root / task_id,
+            task_id,
+            expected_documents=[str(name) for name in payload.get("documents") or ()],
+        )
+        record = load_records(tasks_root, task_ids=[task_id])[0]
+    except HarnessError:
+        raise
+    except Exception as exc:
+        # Everything between here and the agent is the harness fetching data.
+        # The fetcher reports GitHub rate limits and exhausted retries as plain
+        # ``RuntimeError``, and a truncated ``task.json`` surfaces as a
+        # ``JSONDecodeError``; classified by type they would look like bugs in
+        # this spec, when they are the retryable outage this PR exists to
+        # report. Classified by *position* instead, they cannot be missed.
+        raise HarnessError(f"{task_id}: could not resolve the task tree: {type(exc).__name__}: {exc}") from exc
     expected_fingerprint = str(case.metadata.get("task_fingerprint") or "")
     if expected_fingerprint and expected_fingerprint != record.task_fingerprint:
-        raise RuntimeError(
+        raise DatasetMismatchError(
             f"{task_id}: fetched task tree does not match the dataset row "
             f"(fingerprint {record.task_fingerprint[:12]} != {expected_fingerprint[:12]}); "
             "re-export the dataset from the pinned commit."
         )
     return record, tasks_root
+
+
+def _assert_task_workspace_usable(task_dir: Path, task_id: str, *, expected_documents: Sequence[str]) -> None:
+    """Refuse to start the agent on a task folder the fetch did not complete.
+
+    A few stat calls, before a single token is spent. A concurrent/interrupted
+    fetch can leave a task directory that exists but holds no ``task.json`` or
+    only some of its documents; the agent then dutifully explores an empty
+    folder, submits nothing, and the run records an ordinary 0 for what is
+    really a broken harness. This turns that into a loud, retryable failure in
+    the first second of the rollout.
+
+    The dataset row lists the documents it was exported with, so completeness
+    is measured against *that* rather than against "``documents/`` is
+    non-empty": a task the benchmark ships with no source documents is a task,
+    not a failed download.
+    """
+    if not (task_dir / "task.json").is_file():
+        raise HarnessError(f"{task_id}: no task.json under {task_dir} — the task tree was not fetched.")
+    documents = task_dir / "documents"
+    missing = [name for name in expected_documents if not (documents / name).is_file()]
+    if missing:
+        raise HarnessError(
+            f"{task_id}: {len(missing)}/{len(expected_documents)} documents missing under {documents} "
+            f"(first: {missing[0]}) — the task documents were not fetched."
+        )
 
 
 def _placeholder_free_fragment(prompt: str) -> str:
@@ -375,6 +477,36 @@ def _task_description(case: Case, record: HarveyLabRecord) -> str:
     return f"{header}{record.instructions}".strip()
 
 
+class _OutageAwareJudge:
+    """A rubric judge that remembers whether it ever actually graded anything.
+
+    ``score_rubric``'s ``_call_judge_with_fallback`` retries a batch and then
+    scores it FAIL rather than aborting the evaluation — correct per criterion,
+    but it means a judge API that is *entirely* down returns a full sheet of
+    zeros that is indistinguishable from an agent that got everything wrong.
+    That is the same silent-zero this PR exists to remove, one layer up, so the
+    spec watches from outside: if the judge was called and no call ever
+    succeeded, the case is a harness failure, not a score.
+
+    A partial outage keeps LAB-AA's conservative behaviour untouched.
+    """
+
+    def __init__(self, judge: Any) -> None:
+        self._judge = judge
+        self.calls = 0
+        self.verdicts = 0
+
+    def __call__(self, task_description: str, criteria: Sequence[Mapping[str, Any]], agent_output: str) -> Any:
+        self.calls += 1
+        graded = self._judge(task_description, criteria, agent_output)
+        self.verdicts += 1
+        return graded
+
+    def assert_reached(self) -> None:
+        if self.calls and not self.verdicts:
+            raise JudgeCallError(f"the rubric judge failed every one of its {self.calls} attempts; nothing was graded.")
+
+
 def _grade(
     *,
     case: Case,
@@ -382,20 +514,120 @@ def _grade(
     record: HarveyLabRecord,
     config: HarveyLabConfig,
 ) -> dict[str, Any]:
-    """Grade the submitted deliverables against the row's frozen rubric."""
+    """Grade the submitted deliverables against the row's frozen rubric.
+
+    TODO: the judge's own token usage is not reported. Only the agent's calls
+    are traced (see :class:`_TracedClient`), because the judge's LiteLLM calls
+    are made inside ``harvey_lab.evaluation.scoring``; reaching their ``usage``
+    blocks needs a change in that module, so grading cost is still unmeasured.
+    """
     criteria = [dict(criterion) for criterion in case.ground_truth.get("criteria", ())]
-    judge = build_rubric_judge(
-        config.judge_model,
-        timeout=config.llm_timeout,
-        num_retries=config.judge_num_retries,
+    judge = _OutageAwareJudge(
+        build_rubric_judge(
+            config.judge_model,
+            timeout=config.llm_timeout,
+            num_retries=config.judge_num_retries,
+        )
     )
-    return score_rubric(
+    graded = score_rubric(
         criteria=criteria,
         deliverables=output.deliverables,
         task_description=_task_description(case, record),
         judge=judge,
         batch_size=config.judge_batch_size,
     )
+    judge.assert_reached()
+    return graded
+
+
+class _TracedClient:
+    """A Stirrup ``LLMClient`` that reports each call to RilixAI's trace.
+
+    The recipe talks to the provider directly rather than through RilixAI's
+    gateway, so the runtime can only see what the run reports. Wrapping the
+    client is the whole integration: one ``model_call`` span per request,
+    carrying the provider's own token counts off Stirrup's ``TokenUsage``, from
+    which the runtime derives ``outer_agent_usage`` itself. Nothing is
+    estimated, and nothing here interprets the call.
+    """
+
+    def __init__(self, inner: Any, *, trace: Trace, provider: str) -> None:
+        self._inner = inner
+        self._trace = trace
+        self._provider = provider
+        self._recorded_messages = 0
+
+    @property
+    def model_slug(self) -> str:
+        return str(self._inner.model_slug)
+
+    @property
+    def max_tokens(self) -> int:
+        return int(self._inner.max_tokens)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def _unrecorded(self, messages: list[Any]) -> list[Any]:
+        """The messages this span adds to the conversation, not the whole of it.
+
+        Stirrup passes the accumulated history on every turn, so recording all
+        of it per call is quadratic in turns — and with ``max_turns=200`` and
+        image content in the history, that is hundreds of megabytes of the same
+        bytes. The spans concatenate to the full conversation anyway. A history
+        shorter than what was already recorded means it was compacted (ReSum),
+        so that one is recorded whole.
+        """
+        new = messages[self._recorded_messages :] if len(messages) >= self._recorded_messages else list(messages)
+        self._recorded_messages = len(messages)
+        return [_traceable_message(message) for message in new]
+
+    async def generate(self, messages: list[Any], tools: dict[str, Any]) -> Any:
+        with self._trace.model_call(
+            operation="chat",
+            provider=self._provider,
+            model=self.model_slug,
+            input_messages=self._unrecorded(messages),
+        ) as call:
+            reply = await self._inner.generate(messages, tools)
+            usage = getattr(reply, "token_usage", None)
+            if usage is not None:
+                # Stirrup's terminology: output = answer + reasoning.
+                prompt_tokens = int(usage.input)
+                completion_tokens = int(usage.answer) + int(usage.reasoning)
+                if prompt_tokens or completion_tokens:
+                    call.usage(
+                        input_tokens=prompt_tokens,
+                        output_tokens=completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens,
+                    )
+            call.output(str(getattr(reply, "content", "") or ""))
+            return reply
+
+
+def _traceable_message(message: Any) -> Any:
+    """A trace-serializable view of a Stirrup chat message."""
+    dump = getattr(message, "model_dump", None)
+    return dump(mode="json") if callable(dump) else message
+
+
+def _tracing_model_factory(trace: Trace, provider: str) -> Any:
+    """The recipe's own model factory, with every call traced.
+
+    ``_default_model_factory`` is private to ``harvey_lab.agent.agent``, and
+    the spec reaches for it deliberately: the wrapper must build *exactly* the
+    client the recipe would have built, so tracing changes nothing about how
+    the agent runs. Renaming it would break this import — export it publicly if
+    that becomes a concern.
+    """
+
+    def _factory(
+        model: str, temperature: float, max_tokens: int, timeout: float, reasoning_effort: str
+    ) -> Any:
+        client = _default_model_factory(model, temperature, max_tokens, timeout, reasoning_effort)
+        return _TracedClient(client, trace=trace, provider=provider)
+
+    return _factory
 
 
 def _trace_evidence(
@@ -460,22 +692,49 @@ _EMPTY_RECORD = HarveyLabRecord(
 
 
 async def _run_case(*, case: Case, targets: OptimizationTargets, runtime: Any) -> CaseResult:
-    """Run one LAB task under the candidate prompts, then grade it."""
+    """Run one LAB task under the candidate prompts, then grade it.
+
+    Failure policy, mirroring AA's: a harness failure (the task tree missing or
+    empty, the sandbox or an API dying, grading never completing) is reported
+    as a *failed* rollout — ``CaseResult.failed`` carries a ``CaseFailure`` the
+    runtime counts as unresolved, so a systematically broken run cannot be
+    mistaken for a bad score. An agent that runs to completion and submits
+    nothing is NOT a harness failure: it flows through to the scorer and earns
+    an honest 0, exactly as LAB-AA grades an empty submission.
+    """
     prompts = targets.to_dict()
     config = _config_for_runtime(runtime)
+    trace = getattr(runtime, "trace", None)
     try:
         record, tasks_root = await asyncio.to_thread(_record_for_case, case)
+        agent_kwargs: dict[str, Any] = {}
+        if trace is not None:
+            # Only when the runtime offers a trace, so the recipe's own default
+            # model factory stays in charge everywhere else.
+            agent_kwargs["model_factory"] = _tracing_model_factory(
+                trace, str(getattr(runtime, "provider", None) or "litellm")
+            )
         agent = HarveyLabAgent(
             config=config,
             task_source=task_source_from_dir(tasks_root),
             system_prompt=prompts[SYSTEM_PROMPT_TARGET],
             task_template=prompts[TASK_TEMPLATE_TARGET],
+            **agent_kwargs,
         )
         _assert_targets_applied(agent, prompts)
         output = await agent.forward(record=record)
         graded = await asyncio.to_thread(_grade, case=case, output=output, record=record, config=config)
-    except Exception as exc:  # noqa: BLE001 - a failed rollout scores 0, it must not abort the run
-        return CaseResult.failed(f"{type(exc).__name__}: {exc}", retryable=False)
+    except HARNESS_ERRORS as exc:
+        # The task tree, the sandbox, the model API, the judge API: none of
+        # this is the agent's answer, so none of it may be scored as one.
+        # Anything NOT listed in HARNESS_ERRORS is a bug and escapes to the
+        # runtime, which records it as an unresolved case with a traceback.
+        logger.exception("harvey-lab rollout failed: case_id=%s", case.case_id)
+        # Retryable unless the condition is deterministic: re-running a stale
+        # dataset row thirty times ends in the case being excluded, when what
+        # the operator needs is to re-export it.
+        retryable = not isinstance(exc, DatasetMismatchError)
+        return CaseResult.failed(f"{type(exc).__name__}: {exc}", retryable=retryable)
 
     criteria = [dict(criterion) for criterion in case.ground_truth.get("criteria", ())]
     return CaseResult(
