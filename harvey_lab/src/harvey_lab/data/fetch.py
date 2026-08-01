@@ -8,18 +8,30 @@ locally, reproducing the same on-disk layout a clone would give
 (``<tasks_root>/<task_id>/task.json`` + ``<task_id>/documents/…``) so the
 loader and the agent's workspace factory work unchanged.
 
+:func:`ensure_task_dirs` is safe to call concurrently — from several threads
+and from several processes sharing one cache. Each task is downloaded under a
+per-task file lock into a private staging tree and only then renamed into
+``tasks/<task_id>``, so a task path that exists is always a complete tree: no
+other caller can ever observe a half-written directory, stray ``.part`` files,
+or have the tree it is reading deleted underneath it. "Already cached" is
+decided by re-checking the recorded file manifest (every path at its expected
+size), not a bare sentinel, so an interrupted download is never mistaken for a
+finished one.
+
 A task's whole file tree is enumerated with a single git Trees API call
 (``recursive=1``) rather than one contents-API call per subdirectory — this
 matters because the unauthenticated API limit is only 60 req/hour and a large
 task has hundreds of nested folders. File bodies then download in parallel
 from ``raw.githubusercontent.com``, which is not API-rate-limited. Set
 ``GITHUB_TOKEN`` to raise the API limit to 5000/hour. Already-fetched tasks are
-skipped via a sentinel marker, so re-runs hit the network only for new tasks.
+skipped via their manifest marker, so re-runs hit the network only for tasks
+that are missing or incomplete.
 """
 
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import json
 import logging
 import os
@@ -29,9 +41,17 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Sequence
+import uuid
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
+
+
+try:  # POSIX only; the in-process lock still serializes threads without it.
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX
+    fcntl = None  # type: ignore[assignment]
 
 from ..config import HARVEY_LABS_COMMIT
 
@@ -51,6 +71,14 @@ _DOWNLOAD_WORKERS = 8
 # directory can be reused across tasks rather than re-fetched.
 _contents_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
 _contents_lock = threading.Lock()
+
+# One lock per (cache root, task id) so threads in this process serialize on a
+# task exactly like separate processes do via the on-disk lock file.
+_task_locks: dict[tuple[str, str], threading.Lock] = {}
+# (cache root, task id, commit) triples whose manifest has already been verified
+# on disk in this process, so repeated calls skip re-stat'ing thousands of files.
+_verified: set[tuple[str, str, str]] = set()
+_registry_lock = threading.Lock()
 
 
 def default_cache_dir() -> Path:
@@ -152,13 +180,20 @@ def _blob_paths(task_id: str, ref: str) -> list[tuple[str, int]]:
     return [(item["path"], int(item.get("size", 0))) for item in tree.get("tree", []) if item["type"] == "blob"]
 
 
-def _download_task(task_id: str, dest: Path, ref: str, on_file: Callable[[], None] | None = None) -> None:
+def _download_task(
+    task_id: str,
+    dest: Path,
+    ref: str,
+    on_file: Callable[[], None] | None = None,
+) -> list[tuple[str, int]]:
     """Download every file under ``tasks/<task_id>`` into ``dest`` in parallel.
 
+    ``dest`` is a private staging directory, never a path another caller reads.
     Resumable: a file already on disk at its expected byte size is skipped, and
     each download lands via a temp file + atomic rename, so a file with the
     final name is always complete. ``on_file`` is called once per file (skipped
-    or downloaded) for progress reporting.
+    or downloaded) for progress reporting. Returns the ``(path, size)`` manifest
+    that was fetched.
     """
     blobs = _blob_paths(task_id, ref)
     dest.mkdir(parents=True, exist_ok=True)
@@ -179,6 +214,201 @@ def _download_task(task_id: str, dest: Path, ref: str, on_file: Callable[[], Non
     with concurrent.futures.ThreadPoolExecutor(max_workers=_DOWNLOAD_WORKERS) as pool:
         for fut in concurrent.futures.as_completed([pool.submit(_fetch_one, rel, size) for rel, size in blobs]):
             fut.result()  # surface the first download error
+    return blobs
+
+
+def _task_relpath(task_id: str) -> Path:
+    """Validate ``task_id`` as a relative cache subpath (ids may be nested)."""
+    normalized = task_id.strip().strip("/")
+    parts = [part for part in normalized.split("/") if part]
+    if not parts or any(part in (".", "..") for part in parts) or Path(normalized).is_absolute():
+        raise ValueError(f"Invalid LAB task id: {task_id!r}")
+    return Path(*parts)
+
+
+@contextmanager
+def _task_lock(root: Path, task_id: str) -> Iterator[None]:
+    """Serialize work on one task across threads *and* across processes.
+
+    The lock file is named by a digest of the task id so a nested id needs no
+    directory tree of its own, and it lives outside ``tasks/`` so it can never
+    be mistaken for task content.
+    """
+    key = (str(root), task_id)
+    with _registry_lock:
+        lock = _task_locks.setdefault(key, threading.Lock())
+    with lock:
+        if fcntl is None:  # pragma: no cover - non-POSIX
+            yield
+            return
+        locks_dir = root / ".locks"
+        locks_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = locks_dir / f"{hashlib.sha256(task_id.encode()).hexdigest()[:32]}.lock"
+        with lock_path.open("a+") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _read_marker(marker: Path) -> dict[str, Any] | None:
+    """Parse a completion marker, or ``None`` if absent/legacy/corrupt."""
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _manifest_of(marker_payload: Mapping[str, Any]) -> list[tuple[str, int]]:
+    files = marker_payload.get("files")
+    if not isinstance(files, list):
+        return []
+    return [(str(entry[0]), int(entry[1])) for entry in files if isinstance(entry, (list, tuple)) and len(entry) == 2]
+
+
+def _tree_matches_manifest(tree: Path, manifest: Sequence[tuple[str, int]]) -> bool:
+    """True only if every manifest entry is on disk at its recorded size."""
+    if not manifest:
+        return False
+    for rel, size in manifest:
+        path = tree / rel
+        try:
+            if not path.is_file() or path.stat().st_size != size:
+                return False
+        except OSError:
+            return False
+    return True
+
+
+def _is_cached(root: Path, task_id: str, commit: str) -> bool:
+    """Whether ``tasks/<task_id>`` is a complete tree fetched at ``commit``.
+
+    Deliberately stricter than a sentinel check: a marker written by an older
+    version, one recorded at a different commit, or a tree missing any manifest
+    file (a download interrupted mid-flight, a hand-deleted document) all count
+    as *not* cached, so the task is re-materialized rather than handed to the
+    agent half-populated.
+    """
+    key = (str(root), task_id, commit)
+    with _registry_lock:
+        if key in _verified:
+            return True
+    relpath = _task_relpath(task_id)
+    payload = _read_marker(root / ".fetched" / relpath)
+    if payload is None or payload.get("commit") != commit:
+        return False
+    tree = root / "tasks" / relpath
+    if not (tree / "task.json").is_file() or not _tree_matches_manifest(tree, _manifest_of(payload)):
+        return False
+    with _registry_lock:
+        _verified.add(key)
+    return True
+
+
+def _discard(path: Path) -> None:
+    """Remove ``path`` (a private staging/superseded tree) if it exists."""
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        with suppress(OSError):
+            path.unlink()
+
+
+def _prune_empty_parents(leaf: Path, stop: Path) -> None:
+    """Remove now-empty staging parents (nested ids leave a dir per level)."""
+    current = leaf
+    while current != stop and stop in current.parents:
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
+
+
+def _install_tree(stage: Path, dest: Path, trash_root: Path) -> None:
+    """Move a completed staging tree to ``dest`` atomically.
+
+    Any tree already at ``dest`` is *moved* aside and deleted afterwards rather
+    than deleted in place, so a reader that is walking it keeps a coherent tree
+    and ``dest`` is never a partially-emptied directory.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    trash_root.mkdir(parents=True, exist_ok=True)
+    superseded = trash_root / f"{dest.name}-{uuid.uuid4().hex[:8]}"
+    if dest.exists():
+        dest.rename(superseded)
+    try:
+        stage.rename(dest)
+    except OSError:
+        if superseded.exists():  # put the old tree back rather than leaving a hole
+            superseded.rename(dest)
+        raise
+    _discard(superseded)
+
+
+def _materialize_task(root: Path, task_id: str, commit: str, label: str) -> None:
+    """Fetch one task into the cache, if it is not already complete there.
+
+    Runs entirely under the task lock: the cached check is re-evaluated after
+    acquiring it, so of N concurrent callers exactly one downloads and the rest
+    return as soon as it lands.
+    """
+    relpath = _task_relpath(task_id)
+    dest = root / "tasks" / relpath
+    stage_root = root / ".partial" / relpath
+    stage_tree = stage_root / "tree"
+    stage_commit = stage_root / "commit"
+
+    with _task_lock(root, task_id):
+        if _is_cached(root, task_id, commit):
+            return
+        # Staging is private to the lock holder, so anything left there by an
+        # interrupted run is either resumable (same commit) or junk.
+        if stage_root.exists() and (
+            not stage_commit.is_file() or stage_commit.read_text(encoding="utf-8").strip() != commit
+        ):
+            _discard(stage_root)
+        stage_root.mkdir(parents=True, exist_ok=True)
+        stage_commit.write_text(commit, encoding="utf-8")
+
+        logger.info("  %s %s ...", label, task_id)
+        count = 0
+        counter_lock = threading.Lock()
+
+        def _tick() -> None:
+            # Log a running file count so a big task (some have thousands of
+            # documents) visibly ticks along rather than looking hung.
+            nonlocal count
+            with counter_lock:
+                count += 1
+                done = count
+            if done % 25 == 0:
+                logger.info("      ... %d files", done)
+
+        manifest = _download_task(task_id, stage_tree, commit, _tick)
+        if not (stage_tree / "task.json").is_file():
+            raise FileNotFoundError(f"Fetched {task_id} but no task.json — is the task id valid at {commit[:10]}?")
+        if not _tree_matches_manifest(stage_tree, manifest):
+            raise RuntimeError(f"Fetched {task_id} but the tree is incomplete against the source manifest.")
+        for leftover in stage_tree.rglob("*.part"):
+            leftover.unlink(missing_ok=True)
+
+        _install_tree(stage_tree, dest, root / ".trash")
+        # The marker is written only once the complete tree is in place, and it
+        # carries the manifest so completeness is re-checkable later.
+        marker = root / ".fetched" / relpath
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            json.dumps({"commit": commit, "files": [[rel, size] for rel, size in manifest]}),
+            encoding="utf-8",
+        )
+        _discard(stage_root)
+        _prune_empty_parents(stage_root.parent, root / ".partial")
+        with _registry_lock:
+            _verified.add((str(root), task_id, commit))
+        logger.info("  %s %s done (%d files)", label, task_id, count)
 
 
 def ensure_task_dirs(
@@ -189,68 +419,28 @@ def ensure_task_dirs(
 ) -> Path:
     """Download each ``tasks/<task_id>`` folder into the cache; return the tasks root.
 
-    Only missing tasks are fetched (a ``.fetched/<task_id>`` sentinel marks a
-    completed download). A partially-downloaded task (interrupted before its
-    sentinel is written) resumes on the next run rather than restarting. The
+    Safe to call concurrently for overlapping task ids: each task is fetched
+    under a per-task lock (in-process and cross-process) into a private staging
+    tree that is renamed into ``tasks/<task_id>`` only once complete, so a task
+    path is either absent or a whole tree — never mid-download, never deleted
+    under a reader, never littered with ``.part`` files. Individual file
+    downloads stay resumable, and an interrupted task resumes from its staging
+    tree on the next call rather than restarting.
+
+    Only missing or incomplete tasks are fetched: a task counts as cached only
+    when its ``.fetched/<task_id>`` marker records this ``commit`` *and* every
+    file in that marker's manifest is on disk at its recorded size. The
     returned path is a ``tasks/`` directory usable as ``--tasks-root`` —
     ``<tasks_root>/<task_id>/{task.json,documents/…}``.
     """
     root = cache_dir or default_cache_dir()
     tasks_root = root / "tasks"
-    sentinels = root / ".fetched"
-    partials = root / ".partial"
 
-    def _cached_for(tid: str) -> bool:
-        # The sentinel records the commit it was fetched at; a mismatch (e.g. a
-        # reused --cache-dir after a pin bump) must refetch, not serve stale
-        # trees. Also require the task tree to still be on disk (guards a
-        # manually-deleted cache dir leaving a dangling sentinel).
-        marker = sentinels / tid
-        if not (marker.is_file() and marker.read_text(encoding="utf-8") == commit):
-            return False
-        return (tasks_root / tid / "task.json").is_file()
-
-    pending = [tid for tid in task_ids if not _cached_for(tid)]
+    unique = list(dict.fromkeys(task_ids))
+    pending = [tid for tid in unique if not _is_cached(root, tid, commit)]
     if pending:
         logger.info("Fetching %d task(s) from %s@%s into %s ...", len(pending), REPO, commit[:10], root)
-    for i, tid in enumerate(pending, start=1):
-        dest = tasks_root / tid
-        # A `.partial/<tid>` marker (written before downloading) records the
-        # commit of an in-progress tree. If it matches, keep what's on disk and
-        # resume; otherwise the tree is stale (a different commit, or unknown
-        # provenance) so drop it and start clean.
-        partial = partials / tid
-        resuming = partial.is_file() and partial.read_text(encoding="utf-8") == commit
-        if dest.exists() and not resuming:
-            shutil.rmtree(dest)
-        partial.parent.mkdir(parents=True, exist_ok=True)
-        partial.write_text(commit, encoding="utf-8")
-        logger.info("  [%d/%d] %s ...", i, len(pending), tid)
-
-        # Log a running file count so a big task (some have thousands of
-        # documents) visibly ticks along rather than looking hung. Downloads
-        # run on a thread pool, so guard the counter with a lock.
-        count = 0
-        lock = threading.Lock()
-
-        def _tick() -> None:
-            nonlocal count
-            with lock:
-                count += 1
-                done = count
-            if done % 25 == 0:
-                logger.info("      ... %d files", done)
-
-        _download_task(tid, dest, commit, _tick)
-        logger.info("  [%d/%d] %s done (%d files)", i, len(pending), tid, count)
-        if not (dest / "task.json").is_file():
-            raise FileNotFoundError(f"Fetched {tid} but no task.json — is the task id valid at {commit[:10]}?")
-        # Write the completed sentinel *before* clearing the `.partial` marker:
-        # if interrupted in between, the marker still allows a resume rather
-        # than a full re-download (a lingering marker is harmless — a matching
-        # sentinel short-circuits the task anyway).
-        marker = sentinels / tid
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(commit, encoding="utf-8")
-        partial.unlink(missing_ok=True)
+    for index, task_id in enumerate(pending, start=1):
+        _materialize_task(root, task_id, commit, f"[{index}/{len(pending)}]")
+    tasks_root.mkdir(parents=True, exist_ok=True)
     return tasks_root

@@ -28,6 +28,7 @@ stays deterministic and only aggregates them.
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -69,6 +70,8 @@ from harvey_lab.evaluation.scoring import (
     score_rubric,
 )
 
+
+logger = logging.getLogger(__name__)
 
 SPEC_NAME = "harvey-lab"
 
@@ -215,6 +218,7 @@ class LabTaskDataLoader(CaseDataLoader[LabTaskRow]):
 
     def iter_cases(self, row: LabTaskRow, context: DatasetRowContext) -> Iterable[Case]:
         del context
+        _preflight_task(row.task_id, str(row.metadata.get("harvey_labs_commit") or HARVEY_LABS_COMMIT))
         yield Case(
             input={
                 "task_id": row.task_id,
@@ -228,6 +232,33 @@ class LabTaskDataLoader(CaseDataLoader[LabTaskRow]):
             ground_truth={"criteria": [dict(criterion) for criterion in row.criteria]},
             group_key=row.practice_area,
             metadata=dict(row.metadata),
+        )
+
+
+def _preflight_task(task_id: str, commit: str) -> None:
+    """Materialize a task's tree while the dataset is being loaded.
+
+    This is the run's single pre-flight choke point: ``iter_cases`` runs for
+    every row before the engine schedules the first rollout, so by the time any
+    ``run_case`` starts, every task the run needs is already a complete tree in
+    the cache and the rollout path does no downloading. That matters because
+    fetching during rollouts means dozens of workers racing on the same task
+    (one LAB task is a ~3k-file data room), and a task that lands *after* its
+    case was evaluated scores 0 with no tool calls at all.
+
+    Best-effort by design: a task that cannot be fetched here must not abort the
+    whole run at dataset-load time, so it is logged and left to ``run_case``,
+    where the failure is attributed to its own case. ``ensure_task_dirs`` is
+    itself concurrency-safe, so that fallback is a slow path, not a race.
+    """
+    try:
+        ensure_task_dirs([task_id], commit=commit)
+    except Exception as exc:  # noqa: BLE001 - pre-flight is an optimization, run_case still guards
+        logger.warning(
+            "Pre-flight fetch of LAB task %s failed (%s: %s); retrying in run_case.",
+            task_id,
+            type(exc).__name__,
+            exc,
         )
 
 

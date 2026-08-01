@@ -12,9 +12,12 @@ abandon tools, and one full agent -> judge evaluation pass.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import inspect
 import json
 import re
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -319,20 +322,20 @@ def test_ensure_task_dirs_fetches_and_caches(tmp_path: Path, monkeypatch: pytest
 
 
 def test_ensure_task_dirs_resumes_partial(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # An interrupted task (no `.fetched` sentinel, but a `.partial` marker for
-    # this commit + some files already on disk) resumes: correctly-sized files
+    # An interrupted task (no completion marker, but a staging tree for this
+    # commit with some files already on disk) resumes: correctly-sized files
     # are not re-downloaded, only the missing ones are.
     tree = {
         "tasks/contracts/t1/task.json": b'{"title": "T1"}',
         "tasks/contracts/t1/documents/a.txt": b"aaa",
         "tasks/contracts/t1/documents/b.txt": b"bbbb",
     }
-    # Simulate a prior interrupted run: task.json already fetched, plus the marker.
+    # Simulate a prior interrupted run: task.json already staged, plus the marker.
     commit = fetch_mod.HARVEY_LABS_COMMIT
-    (tmp_path / "tasks/contracts/t1").mkdir(parents=True)
-    (tmp_path / "tasks/contracts/t1/task.json").write_bytes(b'{"title": "T1"}')
-    (tmp_path / ".partial/contracts").mkdir(parents=True)
-    (tmp_path / ".partial/contracts/t1").write_text(commit)
+    stage = tmp_path / ".partial/contracts/t1"
+    (stage / "tree").mkdir(parents=True)
+    (stage / "tree/task.json").write_bytes(b'{"title": "T1"}')
+    (stage / "commit").write_text(commit)
 
     fetched: list[str] = []
     base = _fake_github(tree)
@@ -349,8 +352,106 @@ def test_ensure_task_dirs_resumes_partial(tmp_path: Path, monkeypatch: pytest.Mo
     assert "task.json" not in fetched
     assert sorted(fetched) == ["a.txt", "b.txt"]
     assert (root / "contracts/t1/documents/b.txt").read_bytes() == b"bbbb"
-    # The partial marker is cleared once the task completes.
-    assert not (tmp_path / ".partial/contracts/t1").exists()
+    # Staging is cleared once the task completes.
+    assert not stage.exists()
+
+
+def test_ensure_task_dirs_is_concurrency_safe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Many workers racing on one task id yield exactly one complete tree.
+
+    This is the regression guard for the failure that made a whole optimization
+    run score 0: every rollout saw "not cached", they all downloaded the same
+    task at once, and they deleted and half-wrote the tree the others were
+    reading. Each caller here also *reads* the tree it is handed, so a partial
+    or vanishing directory surfaces as a failure rather than passing silently.
+    """
+    tree = {
+        "tasks/contracts/t1/task.json": b'{"title": "T1"}',
+        **{f"tasks/contracts/t1/documents/doc{i:03d}.txt": f"body-{i}".encode() for i in range(40)},
+    }
+    downloads: list[str] = []
+    downloads_lock = threading.Lock()
+    base = _fake_github(tree)
+
+    def _slow(url: str) -> bytes:
+        if url.startswith("https://raw.githubusercontent.com/"):
+            with downloads_lock:
+                downloads.append(url)
+            time.sleep(0.001)  # widen the window a racing caller could slip into
+        return base(url)
+
+    monkeypatch.setattr(fetch_mod, "_request", _slow)
+
+    def _worker() -> int:
+        root = fetch_mod.ensure_task_dirs(["contracts/t1"], cache_dir=tmp_path)
+        task_dir = root / "contracts/t1"
+        assert (task_dir / "task.json").read_bytes() == b'{"title": "T1"}'
+        docs = sorted(path.name for path in (task_dir / "documents").iterdir())
+        assert docs == sorted(f"doc{i:03d}.txt" for i in range(40))
+        return len(docs)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        assert [fut.result() for fut in [pool.submit(_worker) for _ in range(16)]] == [40] * 16
+
+    # Exactly one download of each file: the losers waited on the lock and then
+    # saw a complete cache rather than re-fetching.
+    assert len(downloads) == len(set(downloads)) == 41
+    assert list((tmp_path / "tasks/contracts").iterdir()) == [tmp_path / "tasks/contracts/t1"]
+    assert not list((tmp_path / "tasks").rglob("*.part"))
+
+
+def test_ensure_task_dirs_refetches_incomplete_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # "Cached" is decided against the recorded manifest, not a bare sentinel: a
+    # tree whose task.json is present but that lost a document must not be
+    # served to the agent as if it were whole.
+    tree = {
+        "tasks/contracts/t1/task.json": b'{"title": "T1"}',
+        "tasks/contracts/t1/documents/a.txt": b"aaa",
+        "tasks/contracts/t1/documents/b.txt": b"bbbb",
+    }
+    monkeypatch.setattr(fetch_mod, "_request", _fake_github(tree))
+    root = fetch_mod.ensure_task_dirs(["contracts/t1"], commit="aaa", cache_dir=tmp_path)
+    (root / "contracts/t1/documents/b.txt").unlink()
+    fetch_mod._verified.clear()  # a fresh process would not remember the earlier check
+
+    assert not fetch_mod._is_cached(tmp_path, "contracts/t1", "aaa")
+    root = fetch_mod.ensure_task_dirs(["contracts/t1"], commit="aaa", cache_dir=tmp_path)
+    assert (root / "contracts/t1/documents/b.txt").read_bytes() == b"bbbb"
+
+
+def test_ensure_task_dirs_leaves_no_partial_tree_on_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A download that dies mid-tree must not publish anything under tasks/: the
+    # files it did get stay in staging, where the next call resumes from them.
+    tree = {
+        "tasks/contracts/t1/task.json": b'{"title": "T1"}',
+        "tasks/contracts/t1/documents/a.txt": b"aaa",
+        "tasks/contracts/t1/documents/boom.txt": b"bbbb",
+    }
+    base = _fake_github(tree)
+
+    def _flaky(url: str) -> bytes:
+        if url.endswith("boom.txt"):
+            raise RuntimeError("connection reset")
+        return base(url)
+
+    monkeypatch.setattr(fetch_mod, "_request", _flaky)
+    with pytest.raises(RuntimeError, match="connection reset"):
+        fetch_mod.ensure_task_dirs(["contracts/t1"], commit="aaa", cache_dir=tmp_path)
+
+    assert not (tmp_path / "tasks/contracts/t1").exists()
+    assert not (tmp_path / ".fetched/contracts/t1").exists()
+    assert (tmp_path / ".partial/contracts/t1/tree/task.json").is_file()
+
+    monkeypatch.setattr(fetch_mod, "_request", base)
+    root = fetch_mod.ensure_task_dirs(["contracts/t1"], commit="aaa", cache_dir=tmp_path)
+    assert (root / "contracts/t1/documents/boom.txt").read_bytes() == b"bbbb"
+    assert not list((tmp_path / "tasks").rglob("*.part"))
+
+
+@pytest.mark.parametrize("task_id", ["", "/", "../escape", "contracts/../../escape"])
+def test_ensure_task_dirs_rejects_unsafe_task_ids(task_id: str, tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Invalid LAB task id"):
+        fetch_mod.ensure_task_dirs([task_id], cache_dir=tmp_path)
 
 
 def test_ensure_task_dirs_refetches_on_commit_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
