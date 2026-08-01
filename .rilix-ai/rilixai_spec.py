@@ -501,7 +501,14 @@ def _traceable_message(message: Any) -> Any:
 
 
 def _tracing_model_factory(trace: Trace, provider: str) -> Any:
-    """The recipe's own model factory, with every call traced."""
+    """The recipe's own model factory, with every call traced.
+
+    ``_default_model_factory`` is private to ``harvey_lab.agent.agent``, and
+    the spec reaches for it deliberately: the wrapper must build *exactly* the
+    client the recipe would have built, so tracing changes nothing about how
+    the agent runs. Renaming it would break this import — export it publicly if
+    that becomes a concern.
+    """
 
     def _factory(
         model: str, temperature: float, max_tokens: int, timeout: float, reasoning_effort: str
