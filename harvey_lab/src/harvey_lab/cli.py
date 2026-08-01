@@ -8,6 +8,9 @@ Subcommands:
   provider key).
 * ``evaluate`` — reuse completed outputs in ``--output-dir``, run and persist
   any missing tasks, then grade every rubric criterion with the batched judge.
+* ``fetch`` — materialize a split's task folders into the cache and stop. Needs
+  no model key, so it is the hook for warming the cache at environment-setup
+  time rather than mid-run (see ``data/fetch.py``).
 
 Tasks come from the frozen ``splits/{train,val,test}.txt`` lists (see
 ``splits/README.md``). By default only the needed task folders are fetched
@@ -60,8 +63,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "command",
-        choices=("run", "evaluate"),
-        help="`run` executes and saves; `evaluate` resumes saved outputs and grades them.",
+        choices=("run", "evaluate", "fetch"),
+        help=(
+            "`run` executes and saves; `evaluate` resumes saved outputs and grades them; "
+            "`fetch` only downloads the split's task folders into the cache."
+        ),
     )
     parser.add_argument(
         "--tasks-root",
@@ -389,6 +395,33 @@ def _run_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_fetch(args: argparse.Namespace) -> int:
+    """Materialize the selected split's task trees into the cache and stop.
+
+    Downloading is the one part of a run that is slow, network-bound and shared
+    across every task, so it is worth doing once up front — from a setup script,
+    a warm-up step, or by hand — instead of during evaluation.
+    """
+    task_ids = read_split(args.split)
+    if args.limit is not None:
+        task_ids = task_ids[: max(0, args.limit)]
+    if not task_ids:
+        logger.error("fetch got no tasks for --split %s.", args.split)
+        return 2
+    tasks_root = ensure_task_dirs(task_ids, cache_dir=args.cache_dir)
+    # Loading the records is the cheapest end-to-end proof the trees are usable:
+    # it reads every task.json and fingerprints every document on disk.
+    records = load_records(tasks_root, task_ids=task_ids)
+    logger.info(
+        "Materialized %d task(s) of split=%s under %s (%d document(s)).",
+        len(records),
+        args.split,
+        tasks_root,
+        sum(len(record.documents) for record in records),
+    )
+    return 0
+
+
 def _archive_eval_reports(output_dir: Path) -> None:
     for name in ("eval_summary.json", "eval_outputs.json"):
         current = output_dir / name
@@ -477,6 +510,8 @@ def _run_evaluate(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
+    if args.command == "fetch":
+        return _run_fetch(args)
     if args.command == "run":
         return _run_run(args)
     return _run_evaluate(args)
