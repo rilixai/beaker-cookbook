@@ -105,6 +105,16 @@ class HarnessError(RuntimeError):
     """
 
 
+class DatasetMismatchError(HarnessError):
+    """The dataset row and the fetched task disagree — retrying cannot help.
+
+    Still a harness failure (the case never got a fair run), but a permanent
+    one: the export is stale, and thirty identical retries would end in the
+    case being quietly excluded instead of an operator re-exporting it.
+    Reported with ``retryable=False`` so it stays a visible configuration bug.
+    """
+
+
 def _harness_error_types() -> tuple[type[BaseException], ...]:
     """Exception types that mean "the harness broke", not "the agent was wrong".
 
@@ -376,7 +386,7 @@ def _record_for_case(case: Case, *, cache_dir: Path | None = None) -> tuple[Harv
         raise HarnessError(f"{task_id}: could not resolve the task tree: {type(exc).__name__}: {exc}") from exc
     expected_fingerprint = str(case.metadata.get("task_fingerprint") or "")
     if expected_fingerprint and expected_fingerprint != record.task_fingerprint:
-        raise HarnessError(
+        raise DatasetMismatchError(
             f"{task_id}: fetched task tree does not match the dataset row "
             f"(fingerprint {record.task_fingerprint[:12]} != {expected_fingerprint[:12]}); "
             "re-export the dataset from the pinned commit."
@@ -483,6 +493,7 @@ class _TracedClient:
         self._inner = inner
         self._trace = trace
         self._provider = provider
+        self._recorded_messages = 0
 
     @property
     def model_slug(self) -> str:
@@ -495,12 +506,26 @@ class _TracedClient:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
 
+    def _unrecorded(self, messages: list[Any]) -> list[Any]:
+        """The messages this span adds to the conversation, not the whole of it.
+
+        Stirrup passes the accumulated history on every turn, so recording all
+        of it per call is quadratic in turns — and with ``max_turns=200`` and
+        image content in the history, that is hundreds of megabytes of the same
+        bytes. The spans concatenate to the full conversation anyway. A history
+        shorter than what was already recorded means it was compacted (ReSum),
+        so that one is recorded whole.
+        """
+        new = messages[self._recorded_messages :] if len(messages) >= self._recorded_messages else list(messages)
+        self._recorded_messages = len(messages)
+        return [_traceable_message(message) for message in new]
+
     async def generate(self, messages: list[Any], tools: dict[str, Any]) -> Any:
         with self._trace.model_call(
             operation="chat",
             provider=self._provider,
             model=self.model_slug,
-            input_messages=[_traceable_message(message) for message in messages],
+            input_messages=self._unrecorded(messages),
         ) as call:
             reply = await self._inner.generate(messages, tools)
             usage = getattr(reply, "token_usage", None)
@@ -643,7 +668,11 @@ async def _run_case(*, case: Case, targets: OptimizationTargets, runtime: Any) -
         # Anything NOT listed in HARNESS_ERRORS is a bug and escapes to the
         # runtime, which records it as an unresolved case with a traceback.
         logger.exception("harvey-lab rollout failed: case_id=%s", case.case_id)
-        return CaseResult.failed(f"{type(exc).__name__}: {exc}", retryable=True)
+        # Retryable unless the condition is deterministic: re-running a stale
+        # dataset row thirty times ends in the case being excluded, when what
+        # the operator needs is to re-export it.
+        retryable = not isinstance(exc, DatasetMismatchError)
+        return CaseResult.failed(f"{type(exc).__name__}: {exc}", retryable=retryable)
 
     criteria = [dict(criterion) for criterion in case.ground_truth.get("criteria", ())]
     return CaseResult(

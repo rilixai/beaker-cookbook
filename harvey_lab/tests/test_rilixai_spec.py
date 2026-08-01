@@ -363,6 +363,26 @@ def test_a_task_download_failure_is_a_harness_failure(
     assert "rate limit" in result.output["error"]
 
 
+@requires_failure_marker
+def test_a_stale_dataset_row_is_reported_as_a_permanent_failure(
+    spec_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retrying a fingerprint mismatch thirty times just hides it."""
+
+    def _stale(_case: Case, **_kwargs: Any) -> Any:
+        raise spec_module.DatasetMismatchError("contracts/t1: fetched task tree does not match the dataset row")
+
+    monkeypatch.setattr(spec_module, "_record_for_case", _stale)
+
+    result = asyncio.run(
+        spec_module._run_case(case=_failing_case(), targets=_candidate_prompts(spec_module), runtime=None)
+    )
+
+    assert result.failure is not None
+    assert result.failure.retryable is False
+
+
 def test_a_provider_api_error_is_a_harness_failure(
     spec_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -525,6 +545,26 @@ def test_a_traced_model_call_reports_the_providers_own_token_counts(spec_module:
     assert attributes["provider"] == "openrouter"
     # Stirrup counts reasoning separately; the provider's output is both.
     assert call.recorded_usage == {"input_tokens": 120, "output_tokens": 38, "total_tokens": 158}
+
+
+def test_a_traced_call_records_only_what_the_turn_added(spec_module: ModuleType) -> None:
+    """Stirrup resends the whole history each turn; recording it all is quadratic."""
+    trace = _FakeTrace()
+    client = spec_module._TracedClient(
+        _UsageClient(input_tokens=1, answer=1, reasoning=0), trace=trace, provider="openrouter"
+    )
+    history = ["system", "task"]
+
+    asyncio.run(client.generate(list(history), {}))
+    history.append("tool result")
+    asyncio.run(client.generate(list(history), {}))
+    asyncio.run(client.generate(["compacted"], {}))
+
+    assert [attributes["input_messages"] for attributes, _call in trace.calls] == [
+        ["system", "task"],
+        ["tool result"],
+        ["compacted"],
+    ]
 
 
 def test_a_model_call_without_reported_usage_records_none(spec_module: ModuleType) -> None:
