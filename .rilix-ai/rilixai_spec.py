@@ -115,15 +115,19 @@ def _harness_error_types() -> tuple[type[BaseException], ...]:
 
     Covers the task tree (:class:`HarnessError`), any filesystem/network error
     (``OSError`` — the fetcher's ``urllib`` errors included), timeouts, every
-    LiteLLM/provider API error (they all derive from ``openai.OpenAIError``,
-    which LiteLLM re-exports), Stirrup running out of context, and a rubric
-    judge that never returned verdicts.
+    provider API error, Stirrup running out of context, and a rubric judge that
+    never returned verdicts.
+
+    The provider base is ``openai.OpenAIError``, not LiteLLM's same-named
+    subclass: LiteLLM maps each provider failure onto the matching ``openai.*``
+    type (``litellm.exceptions.RateLimitError`` derives from
+    ``openai.RateLimitError``), so only the openai base catches them all.
     """
     types: list[type[BaseException]] = [HarnessError, OSError, TimeoutError, JudgeCallError]
     try:
-        from litellm.exceptions import OpenAIError
+        from openai import OpenAIError
     except Exception:  # noqa: BLE001 - optional at import time; only narrows the catch
-        logger.warning("litellm exceptions are unavailable; provider API errors will surface as unresolved cases.")
+        logger.warning("openai exceptions are unavailable; provider API errors will surface as unresolved cases.")
     else:
         types.append(OpenAIError)
     try:

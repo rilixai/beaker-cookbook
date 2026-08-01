@@ -341,6 +341,25 @@ def test_a_harness_failure_carries_the_sdk_failure_marker(
     assert "task fetch failed" in result.failure.error
 
 
+def test_a_provider_api_error_is_a_harness_failure(
+    spec_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LiteLLM maps provider failures onto ``openai.*`` types, not its own base."""
+    from litellm.exceptions import RateLimitError
+
+    def _boom(_case: Case, **_kwargs: Any) -> Any:
+        raise RateLimitError("slow down", llm_provider="openrouter", model="m")
+
+    monkeypatch.setattr(spec_module, "_record_for_case", _boom)
+
+    result = asyncio.run(
+        spec_module._run_case(case=_failing_case(), targets=_candidate_prompts(spec_module), runtime=None)
+    )
+
+    assert "RateLimitError" in result.output["error"]
+
+
 def test_an_unexpected_error_escapes_to_the_runtime(
     spec_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
