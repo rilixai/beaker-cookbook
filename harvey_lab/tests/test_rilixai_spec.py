@@ -399,25 +399,92 @@ def test_an_agent_that_submits_nothing_still_scores_an_honest_zero(
     assert score.field_scores == {ALL_PASS_FIELD: 0.0, CRITERION_PASS_RATE_FIELD: 0.0}
 
 
-def test_run_metrics_report_the_rollouts_token_usage(
-    spec_module: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-    lab_task_root: Path,
-) -> None:
-    """Without these keys the rollout usage tracker records no cost at all."""
-    _patch_for_local_rollout(spec_module, monkeypatch, lab_task_root, body="The fee is $50,000 per notes.txt.")
-    case = Case(
-        input={"task_id": "contracts/t1", "instructions": "Summarize the fee."},
-        case_id="contracts/t1",
-        ground_truth={"criteria": [{"id": "C1", "match_criteria": "Mentions $50,000."}]},
+class _FakeCall:
+    """The one trace operation a model call uses."""
+
+    def __init__(self) -> None:
+        self.recorded_usage: dict[str, int] | None = None
+        self.output_value: Any = None
+
+    def __enter__(self) -> "_FakeCall":
+        return self
+
+    def __exit__(self, *_args: Any) -> bool:
+        return False
+
+    def usage(self, **kwargs: int) -> None:
+        self.recorded_usage = dict(kwargs)
+
+    def output(self, value: Any) -> None:
+        self.output_value = value
+
+
+class _FakeTrace:
+    def __init__(self) -> None:
+        self.calls: list[tuple[dict[str, Any], _FakeCall]] = []
+
+    def model_call(self, **kwargs: Any) -> _FakeCall:
+        call = _FakeCall()
+        self.calls.append((kwargs, call))
+        return call
+
+
+class _UsageClient:
+    """A Stirrup client whose reply carries the provider's token counts."""
+
+    model_slug = "openrouter/some-model"
+    max_tokens = 4096
+
+    def __init__(self, *, input_tokens: int, answer: int, reasoning: int) -> None:
+        self._usage = (input_tokens, answer, reasoning)
+
+    async def generate(self, messages: list[Any], tools: dict[str, Any]) -> Any:
+        from stirrup.core.models import AssistantMessage, TokenUsage
+
+        input_tokens, answer, reasoning = self._usage
+        return AssistantMessage(
+            content="done",
+            token_usage=TokenUsage(input=input_tokens, answer=answer, reasoning=reasoning),
+        )
+
+
+def test_a_traced_model_call_reports_the_providers_own_token_counts(spec_module: ModuleType) -> None:
+    """The runtime derives rollout cost from these spans; nothing is estimated."""
+    trace = _FakeTrace()
+    client = spec_module._TracedClient(
+        _UsageClient(input_tokens=120, answer=30, reasoning=8), trace=trace, provider="openrouter"
     )
 
-    result = asyncio.run(spec_module._run_case(case=case, targets=_candidate_prompts(spec_module), runtime=None))
+    reply = asyncio.run(client.generate([], {}))
 
-    usage = result.run_metrics["outer_agent_usage"]
-    assert usage["requests"] >= 1
-    assert usage["model"]
-    assert set(usage) >= {"input_tokens", "output_tokens", "total_tokens", "requests", "model"}
+    assert reply.content == "done"
+    (attributes, call) = trace.calls[0]
+    assert attributes["model"] == "openrouter/some-model"
+    assert attributes["provider"] == "openrouter"
+    # Stirrup counts reasoning separately; the provider's output is both.
+    assert call.recorded_usage == {"input_tokens": 120, "output_tokens": 38, "total_tokens": 158}
+
+
+def test_a_model_call_without_reported_usage_records_none(spec_module: ModuleType) -> None:
+    trace = _FakeTrace()
+    client = spec_module._TracedClient(
+        _UsageClient(input_tokens=0, answer=0, reasoning=0), trace=trace, provider="openrouter"
+    )
+
+    asyncio.run(client.generate([], {}))
+
+    assert trace.calls[0][1].recorded_usage is None, "usage the provider never reported must not be invented"
+
+
+def test_the_spec_traces_the_recipes_own_client(spec_module: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tracing is a wrapper around the recipe's default factory, not a fork of it."""
+    inner = _UsageClient(input_tokens=1, answer=1, reasoning=0)
+    monkeypatch.setattr(spec_module, "_default_model_factory", lambda *_args: inner)
+
+    client = spec_module._tracing_model_factory(_FakeTrace(), "openrouter")("m", 0.0, 1, 1.0, "none")
+
+    assert isinstance(client, spec_module._TracedClient)
+    assert client.model_slug == inner.model_slug
 
 
 def test_targets_that_miss_the_agent_are_rejected(spec_module: ModuleType, lab_task_root: Path) -> None:

@@ -57,8 +57,9 @@ from rilixai import (
     spec,
 )
 from rilixai.sdk import RolloutContext
+from rilixai.tracing import Trace
 
-from harvey_lab.agent.agent import AgentTokenUsage, HarveyLabAgent, HarveyLabAgentOutput
+from harvey_lab.agent.agent import HarveyLabAgent, HarveyLabAgentOutput, _default_model_factory
 from harvey_lab.agent.workspace import task_source_from_dir
 from harvey_lab.config import HARVEY_LABS_COMMIT, HarveyLabConfig
 from harvey_lab.data.dataset import HarveyLabRecord, load_records
@@ -416,19 +417,13 @@ def _grade(
     output: HarveyLabAgentOutput,
     record: HarveyLabRecord,
     config: HarveyLabConfig,
-    judge_calls: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Grade the submitted deliverables against the row's frozen rubric.
-
-    ``judge_calls`` collects each judge call's reported token usage so grading
-    cost lands in ``run_metrics`` instead of going unmeasured.
-    """
+    """Grade the submitted deliverables against the row's frozen rubric."""
     criteria = [dict(criterion) for criterion in case.ground_truth.get("criteria", ())]
     judge = build_rubric_judge(
         config.judge_model,
         timeout=config.llm_timeout,
         num_retries=config.judge_num_retries,
-        usage_sink=judge_calls,
     )
     return score_rubric(
         criteria=criteria,
@@ -439,27 +434,72 @@ def _grade(
     )
 
 
-def _usage_metrics(
-    *,
-    usage: AgentTokenUsage,
-    model: str,
-    judge_calls: Sequence[Mapping[str, Any]],
-) -> dict[str, Any]:
-    """Per-rollout token usage in the shape RilixAI's usage tracker reads.
+class _TracedClient:
+    """A Stirrup ``LLMClient`` that reports each call to RilixAI's trace.
 
-    ``outer_agent_usage`` is the model under test (summed from Stirrup's
-    per-message ``TokenUsage``, i.e. the provider's own counts) and
-    ``inner_llm_calls`` is the rubric judge. Without these two keys
-    ``RolloutUsageTracker.record_rollout_token_usage`` bails out early and the
-    run reports no rollout cost at all. Usage the provider never reported is
-    omitted rather than estimated.
+    The recipe talks to the provider directly rather than through RilixAI's
+    gateway, so the runtime can only see what the run reports. Wrapping the
+    client is the whole integration: one ``model_call`` span per request,
+    carrying the provider's own token counts off Stirrup's ``TokenUsage``, from
+    which the runtime derives ``outer_agent_usage`` itself. Nothing is
+    estimated, and nothing here interprets the call.
     """
-    metrics: dict[str, Any] = {}
-    if usage.requests:
-        metrics["outer_agent_usage"] = {**usage.to_dict(), "model": model}
-    if judge_calls:
-        metrics["inner_llm_calls"] = [dict(call) for call in judge_calls]
-    return metrics
+
+    def __init__(self, inner: Any, *, trace: Trace, provider: str) -> None:
+        self._inner = inner
+        self._trace = trace
+        self._provider = provider
+
+    @property
+    def model_slug(self) -> str:
+        return str(self._inner.model_slug)
+
+    @property
+    def max_tokens(self) -> int:
+        return int(self._inner.max_tokens)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    async def generate(self, messages: list[Any], tools: dict[str, Any]) -> Any:
+        with self._trace.model_call(
+            operation="chat",
+            provider=self._provider,
+            model=self.model_slug,
+            input_messages=[_traceable_message(message) for message in messages],
+        ) as call:
+            reply = await self._inner.generate(messages, tools)
+            usage = getattr(reply, "token_usage", None)
+            if usage is not None:
+                # Stirrup's terminology: output = answer + reasoning.
+                prompt_tokens = int(usage.input)
+                completion_tokens = int(usage.answer) + int(usage.reasoning)
+                if prompt_tokens or completion_tokens:
+                    call.usage(
+                        input_tokens=prompt_tokens,
+                        output_tokens=completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens,
+                    )
+            call.output(str(getattr(reply, "content", "") or ""))
+            return reply
+
+
+def _traceable_message(message: Any) -> Any:
+    """A trace-serializable view of a Stirrup chat message."""
+    dump = getattr(message, "model_dump", None)
+    return dump(mode="json") if callable(dump) else message
+
+
+def _tracing_model_factory(trace: Trace, provider: str) -> Any:
+    """The recipe's own model factory, with every call traced."""
+
+    def _factory(
+        model: str, temperature: float, max_tokens: int, timeout: float, reasoning_effort: str
+    ) -> Any:
+        client = _default_model_factory(model, temperature, max_tokens, timeout, reasoning_effort)
+        return _TracedClient(client, trace=trace, provider=provider)
+
+    return _factory
 
 
 def _trace_evidence(
@@ -536,31 +576,33 @@ async def _run_case(*, case: Case, targets: OptimizationTargets, runtime: Any) -
     """
     prompts = targets.to_dict()
     config = _config_for_runtime(runtime)
-    judge_calls: list[dict[str, Any]] = []
+    trace = getattr(runtime, "trace", None)
     try:
         record, tasks_root = await asyncio.to_thread(_record_for_case, case)
+        agent_kwargs: dict[str, Any] = {}
+        if trace is not None:
+            # Only when the runtime offers a trace, so the recipe's own default
+            # model factory stays in charge everywhere else.
+            agent_kwargs["model_factory"] = _tracing_model_factory(
+                trace, str(getattr(runtime, "provider", None) or "litellm")
+            )
         agent = HarveyLabAgent(
             config=config,
             task_source=task_source_from_dir(tasks_root),
             system_prompt=prompts[SYSTEM_PROMPT_TARGET],
             task_template=prompts[TASK_TEMPLATE_TARGET],
+            **agent_kwargs,
         )
         _assert_targets_applied(agent, prompts)
         output = await agent.forward(record=record)
-        graded = await asyncio.to_thread(
-            _grade, case=case, output=output, record=record, config=config, judge_calls=judge_calls
-        )
+        graded = await asyncio.to_thread(_grade, case=case, output=output, record=record, config=config)
     except HARNESS_ERRORS as exc:
         # The task tree, the sandbox, the model API, the judge API: none of
         # this is the agent's answer, so none of it may be scored as one.
         # Anything NOT listed in HARNESS_ERRORS is a bug and escapes to the
         # runtime, which records it as an unresolved case with a traceback.
         logger.exception("harvey-lab rollout failed: case_id=%s", case.case_id)
-        return CaseResult.failed(
-            f"{type(exc).__name__}: {exc}",
-            run_metrics=_usage_metrics(usage=AgentTokenUsage(), model=config.task_model, judge_calls=judge_calls),
-            retryable=True,
-        )
+        return CaseResult.failed(f"{type(exc).__name__}: {exc}", retryable=True)
 
     criteria = [dict(criterion) for criterion in case.ground_truth.get("criteria", ())]
     return CaseResult(
@@ -580,7 +622,6 @@ async def _run_case(*, case: Case, targets: OptimizationTargets, runtime: Any) -
         run_metrics={
             "trace_evidence": _trace_evidence(case=case, output=output, graded=graded, criteria=criteria),
             "timing": {"agent_seconds": round(output.wall_seconds, 3)},
-            **_usage_metrics(usage=output.token_usage, model=config.task_model, judge_calls=judge_calls),
         },
         context={
             # The verdicts the scorer aggregates, plus enough of the work product

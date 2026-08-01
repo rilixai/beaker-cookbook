@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, cast
@@ -45,57 +45,6 @@ logger = logging.getLogger(__name__)
 
 FINISH_TOOL_NAME = "finish"
 ABANDON_TOOL_NAME = "abandon_task_finish"
-
-
-@dataclass(frozen=True)
-class AgentTokenUsage:
-    """Token counts actually reported by the model for one task.
-
-    Summed from Stirrup's per-assistant-message ``TokenUsage`` records, which
-    come straight off the provider response — no estimation. ``requests`` is
-    the number of model calls the tool-use loop made.
-    """
-
-    input_tokens: int = 0
-    output_tokens: int = 0
-    total_tokens: int = 0
-    requests: int = 0
-
-    def to_dict(self) -> dict[str, int]:
-        return {
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-            "total_tokens": self.total_tokens,
-            "requests": self.requests,
-        }
-
-
-def _token_usage_from_run_metadata(run_metadata: Any) -> AgentTokenUsage:
-    """Sum Stirrup's ``run_metadata["token_usage"]`` into one per-task total.
-
-    Read defensively: ``run_metadata`` is Stirrup's loosely-typed bag, and a
-    provider that reports no usage simply yields zeros.
-    """
-    entries: Any = run_metadata.get("token_usage") if isinstance(run_metadata, Mapping) else None
-    if not isinstance(entries, Sequence) or isinstance(entries, (str, bytes)):
-        return AgentTokenUsage()
-    input_tokens = 0
-    output_tokens = 0
-    requests = 0
-    for entry in entries:
-        entry_input = getattr(entry, "input", None)
-        entry_output = getattr(entry, "output", None)
-        if not isinstance(entry_input, int) or not isinstance(entry_output, int):
-            continue
-        input_tokens += entry_input
-        output_tokens += entry_output
-        requests += 1
-    return AgentTokenUsage(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        total_tokens=input_tokens + output_tokens,
-        requests=requests,
-    )
 
 
 @dataclass
@@ -120,7 +69,6 @@ class HarveyLabAgentOutput:
     max_turns_reached: bool = False
     total_turns: int = 0
     wall_seconds: float = 0.0
-    token_usage: AgentTokenUsage = field(default_factory=AgentTokenUsage)
 
 
 # Factory that builds a Stirrup ``LLMClient`` from model settings. Kept behind
@@ -402,7 +350,7 @@ class HarveyLabAgent:
                     workspace_dir=work_dir,
                     documents_dir="documents",
                 )
-                finish_params, history, run_metadata = await session.run(user_prompt)
+                finish_params, history, _metadata = await session.run(user_prompt)
             abandoned = isinstance(finish_params, AbandonParams)
             submitted_paths = list(getattr(finish_params, "paths", []) or [])
             names = _effective_deliverable_names(record)
@@ -419,7 +367,6 @@ class HarveyLabAgent:
                 max_turns_reached=finish_params is None,
                 total_turns=_count_turns(history),
                 wall_seconds=time.monotonic() - started,
-                token_usage=_token_usage_from_run_metadata(run_metadata),
             )
         finally:
             workspace.close()
@@ -465,7 +412,6 @@ async def _upload_documents(exec_env: Any, workspace: TaskWorkspace) -> None:
 
 
 __all__ = [
-    "AgentTokenUsage",
     "ExecProviderFactory",
     "HarveyLabAgent",
     "HarveyLabAgentOutput",
