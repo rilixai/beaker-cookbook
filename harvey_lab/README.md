@@ -170,6 +170,11 @@ strings and set those providers' keys, e.g.
 ## Run
 
 ```bash
+# Optional but recommended: materialize/download the task folders up front (no model key
+# needed). Run it in setup, and `run`/`evaluate` never wait on GitHub — one LAB
+# task is a ~3k-file data room.
+uv run harvey-lab fetch --split test --limit 10
+
 # Run the agent and dump its deliverables (no grading), on 10 test tasks.
 # The 10 task folders are fetched from GitHub on first use and cached.
 uv run harvey-lab run \
