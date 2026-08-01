@@ -422,7 +422,13 @@ def _grade(
     record: HarveyLabRecord,
     config: HarveyLabConfig,
 ) -> dict[str, Any]:
-    """Grade the submitted deliverables against the row's frozen rubric."""
+    """Grade the submitted deliverables against the row's frozen rubric.
+
+    TODO: the judge's own token usage is not reported. Only the agent's calls
+    are traced (see :class:`_TracedClient`), because the judge's LiteLLM calls
+    are made inside ``harvey_lab.evaluation.scoring``; reaching their ``usage``
+    blocks needs a change in that module, so grading cost is still unmeasured.
+    """
     criteria = [dict(criterion) for criterion in case.ground_truth.get("criteria", ())]
     judge = build_rubric_judge(
         config.judge_model,
