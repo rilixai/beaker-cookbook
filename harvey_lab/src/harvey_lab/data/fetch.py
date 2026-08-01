@@ -75,8 +75,10 @@ _contents_lock = threading.Lock()
 # One lock per (cache root, task id) so threads in this process serialize on a
 # task exactly like separate processes do via the on-disk lock file.
 _task_locks: dict[tuple[str, str], threading.Lock] = {}
-# (cache root, task id, commit) triples whose manifest has already been verified
-# on disk in this process, so repeated calls skip re-stat'ing thousands of files.
+# (cache root, task id, marker digest) triples whose manifest has already been
+# verified on disk in this process, so repeated calls skip re-stat'ing thousands
+# of files. Keying on the marker's content means a task reinstalled by anyone —
+# this process or another one sharing the cache — is verified afresh.
 _verified: set[tuple[str, str, str]] = set()
 _registry_lock = threading.Lock()
 
@@ -252,11 +254,19 @@ def _task_lock(root: Path, task_id: str) -> Iterator[None]:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def _read_marker(marker: Path) -> dict[str, Any] | None:
-    """Parse a completion marker, or ``None`` if absent/legacy/corrupt."""
+def _read_marker_bytes(marker: Path) -> bytes | None:
+    """Raw completion marker, or ``None`` if it is not there."""
     try:
-        payload = json.loads(marker.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        return marker.read_bytes()
+    except OSError:
+        return None
+
+
+def _parse_marker(raw: bytes) -> dict[str, Any] | None:
+    """Parse a completion marker, or ``None`` if it is legacy/corrupt."""
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
         return None
     return payload if isinstance(payload, dict) else None
 
@@ -290,15 +300,23 @@ def _is_cached(root: Path, task_id: str, commit: str) -> bool:
     file (a download interrupted mid-flight, a hand-deleted document) all count
     as *not* cached, so the task is re-materialized rather than handed to the
     agent half-populated.
+
+    The marker itself is always re-read — runs share a cache root, so a task
+    another process reinstalled must not be answered from memory. Only the
+    per-file scan is memoized, against the digest of the marker that described
+    the tree when it ran.
     """
-    key = (str(root), task_id, commit)
+    relpath = _task_relpath(task_id)
+    raw = _read_marker_bytes(root / ".fetched" / relpath)
+    if raw is None:
+        return False
+    payload = _parse_marker(raw)
+    if payload is None or payload.get("commit") != commit:
+        return False
+    key = (str(root), task_id, hashlib.sha256(raw).hexdigest())
     with _registry_lock:
         if key in _verified:
             return True
-    relpath = _task_relpath(task_id)
-    payload = _read_marker(root / ".fetched" / relpath)
-    if payload is None or payload.get("commit") != commit:
-        return False
     tree = root / "tasks" / relpath
     if not (tree / "task.json").is_file() or not _tree_matches_manifest(tree, _manifest_of(payload)):
         return False
@@ -314,17 +332,6 @@ def _discard(path: Path) -> None:
     else:
         with suppress(OSError):
             path.unlink()
-
-
-def _prune_empty_parents(leaf: Path, stop: Path) -> None:
-    """Remove now-empty staging parents (nested ids leave a dir per level)."""
-    current = leaf
-    while current != stop and stop in current.parents:
-        try:
-            current.rmdir()
-        except OSError:
-            return
-        current = current.parent
 
 
 def _install_tree(stage: Path, dest: Path, trash_root: Path) -> None:
@@ -400,17 +407,13 @@ def _materialize_task(root: Path, task_id: str, commit: str, label: str) -> None
         # carries the manifest so completeness is re-checkable later.
         marker = root / ".fetched" / relpath
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(
-            json.dumps({"commit": commit, "files": [[rel, size] for rel, size in manifest]}),
-            encoding="utf-8",
-        )
+        marker_bytes = json.dumps({"commit": commit, "files": [[rel, size] for rel, size in manifest]}).encode()
+        marker.write_bytes(marker_bytes)
+        # Staging parents are left in place: a sibling task under the same
+        # practice area may be mkdir-ing into them right now.
         _discard(stage_root)
-        _prune_empty_parents(stage_root.parent, root / ".partial")
-        # Installing replaces whatever tree was there, so any memo for this task
-        # at another commit is now a lie: drop them all and memo only this one.
         with _registry_lock:
-            _verified.difference_update({key for key in _verified if key[:2] == (str(root), task_id)})
-            _verified.add((str(root), task_id, commit))
+            _verified.add((str(root), task_id, hashlib.sha256(marker_bytes).hexdigest()))
         logger.info("  %s %s done (%d files)", label, task_id, count)
 
 

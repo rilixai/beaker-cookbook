@@ -18,6 +18,7 @@ import json
 import re
 import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -237,6 +238,16 @@ def test_load_records_raises_on_missing_split_task(tasks_root: Path) -> None:
 # ─── on-demand task fetch ─────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _isolated_fetch_caches() -> Iterator[None]:
+    """``fetch`` memoizes listings and verified trees for the whole process."""
+    for cache in (fetch_mod._contents_cache, fetch_mod._verified):
+        cache.clear()
+    yield
+    for cache in (fetch_mod._contents_cache, fetch_mod._verified):
+        cache.clear()
+
+
 def _fake_github(tree: dict[str, bytes]) -> Any:
     """Return a fake ``_request`` serving the contents API, Trees API + raw blobs.
 
@@ -444,6 +455,47 @@ def test_ensure_task_dirs_refetches_when_the_commit_changes_back(
     # Re-asking for the commit already on disk is still a memoized no-op.
     fetch_mod.ensure_task_dirs(["contracts/t1"], commit="aaa", cache_dir=tmp_path)
     assert len(downloads) == 6
+
+
+def test_ensure_task_dirs_rechecks_after_another_process_replaces_the_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Runs share a cache root, so the in-process memo must not outlive the marker
+    # it was recorded against: another process reinstalling the task invalidates
+    # it and this process re-materializes rather than reading the other version.
+    tree = {"tasks/contracts/t1/task.json": b'{"title": "T1"}', "tasks/contracts/t1/documents/a.txt": b"aaa"}
+    monkeypatch.setattr(fetch_mod, "_request", _fake_github(tree))
+    root = fetch_mod.ensure_task_dirs(["contracts/t1"], commit="aaa", cache_dir=tmp_path)
+    assert fetch_mod._is_cached(tmp_path, "contracts/t1", "aaa")
+
+    # Another process installs the task at a different commit.
+    (root / "contracts/t1/documents/a.txt").write_bytes(b"bbbb")
+    (tmp_path / ".fetched/contracts/t1").write_text(
+        json.dumps({"commit": "bbb", "files": [["task.json", 15], ["documents/a.txt", 4]]})
+    )
+
+    assert not fetch_mod._is_cached(tmp_path, "contracts/t1", "aaa")
+    fetch_mod.ensure_task_dirs(["contracts/t1"], commit="aaa", cache_dir=tmp_path)
+    assert (root / "contracts/t1/documents/a.txt").read_bytes() == b"aaa"
+
+
+def test_ensure_task_dirs_handles_sibling_tasks_in_one_area(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Sibling tasks hold different locks and share `.partial/<area>`, so cleanup
+    # of one must never pull the staging parent out from under the other.
+    tree = {
+        f"tasks/contracts/t{i}/{name}": data
+        for i in range(8)
+        for name, data in (("task.json", b'{"title": "T"}'), ("documents/a.txt", b"aaa"))
+    }
+    monkeypatch.setattr(fetch_mod, "_request", _fake_github(tree))
+
+    def _worker(index: int) -> Path:
+        return fetch_mod.ensure_task_dirs([f"contracts/t{index}"], commit="aaa", cache_dir=tmp_path)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        roots = [fut.result() for fut in [pool.submit(_worker, i) for i in range(8)]]
+    for index, root in enumerate(roots):
+        assert (root / f"contracts/t{index}/documents/a.txt").read_bytes() == b"aaa"
 
 
 def test_ensure_task_dirs_leaves_no_partial_tree_on_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
