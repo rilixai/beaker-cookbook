@@ -1,4 +1,4 @@
-"""Tests for the RilixAI prompt-optimization spec (``.rilix-ai/rilixai_spec.py``).
+"""Tests for the RilixAI prompt-optimization spec (``harvey_lab/rilixai_spec.py``).
 
 These cover the two things that silently break a prompt-optimization
 integration: a dataset contract that drifts from the exported rows, and
@@ -30,8 +30,9 @@ from harvey_lab.evaluation.scoring import ALL_PASS_FIELD, CRITERION_PASS_RATE_FI
 from tests.test_units import _fee_judge, _local_exec_factory, _ScriptedClient, _write_task
 
 
-COOKBOOK_ROOT = Path(__file__).resolve().parents[2]
-SPEC_PATH = COOKBOOK_ROOT / ".rilix-ai" / "rilixai_spec.py"
+RECIPE_ROOT = Path(__file__).resolve().parents[1]
+COOKBOOK_ROOT = RECIPE_ROOT.parent
+SPEC_PATH = RECIPE_ROOT / "rilixai_spec.py"
 DATASET_DIR = COOKBOOK_ROOT / ".rilix-ai" / "dataset"
 
 SYSTEM_MARKER = "CANDIDATE-SYSTEM-PROMPT-MARKER"

@@ -9,7 +9,7 @@ agent without touching recipe code.
 One case = one Harvey LAB task:
 
 * ``input`` — the task id, title, instructions and requested deliverable
-  filenames (see ``.rilix-ai/export_dataset.py``).
+  filenames (see ``../.rilix-ai/export_dataset.py``).
 * ``ground_truth`` — that task's own rubric: ~40-70 binary ``match_criteria``.
 * rollout — the task folder is fetched from ``harveyai/harvey-labs`` at the
   pinned commit, then the Stirrup agent runs it under the candidate prompts
@@ -23,24 +23,23 @@ One case = one Harvey LAB task:
 Grading runs inside ``run_case`` (as ``harvey-lab evaluate`` does) so the
 per-criterion verdicts can ride along as reflection evidence; ``score_case``
 stays deterministic and only aggregates them.
+
+This module lives at the recipe root rather than beside ``rilixai.yaml`` at the
+repository root, because ``spec.source_dir`` points the image builder at
+``harvey_lab/`` so it pip-installs this recipe's ``pyproject.toml``. Only what
+is under ``source_dir`` reaches the image. See the note in
+``.rilix-ai/rilixai.yaml``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import sys
+import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
-
-# The spec image mounts the cookbook repo at ``/spec``. Ensure the sibling
-# ``harvey_lab/src`` package is importable inside the baked image (it is
-# installed in local dev, so the path is a no-op there).
-_HARVEY_LAB_SRC = Path(__file__).resolve().parents[1] / "harvey_lab" / "src"
-if str(_HARVEY_LAB_SRC) not in sys.path:
-    sys.path.insert(0, str(_HARVEY_LAB_SRC))
 
 from rilixai import (
     Case,
@@ -504,7 +503,9 @@ class _OutageAwareJudge:
 
     def assert_reached(self) -> None:
         if self.calls and not self.verdicts:
-            raise JudgeCallError(f"the rubric judge failed every one of its {self.calls} attempts; nothing was graded.")
+            raise JudgeCallError(
+                f"the rubric judge failed every one of its {self.calls} attempts; nothing was graded."
+            )
 
 
 def _grade(
@@ -621,9 +622,7 @@ def _tracing_model_factory(trace: Trace, provider: str) -> Any:
     that becomes a concern.
     """
 
-    def _factory(
-        model: str, temperature: float, max_tokens: int, timeout: float, reasoning_effort: str
-    ) -> Any:
+    def _factory(model: str, temperature: float, max_tokens: int, timeout: float, reasoning_effort: str) -> Any:
         client = _default_model_factory(model, temperature, max_tokens, timeout, reasoning_effort)
         return _TracedClient(client, trace=trace, provider=provider)
 
@@ -799,6 +798,27 @@ class RubricScorer:
 # ── Spec ─────────────────────────────────────────────────────────────────────
 
 
+# Binaries the agent shells out to via ``code_exec``. They are named directly
+# in the task prompt, and unlike the Python dependencies they cannot come from
+# ``pyproject.toml`` — they are hand-listed in ``spec.apt_install`` in
+# ``.rilix-ai/rilixai.yaml``, so that list can drift from what the agent
+# actually needs. Missing binaries degrade the agent (it can read the task
+# documents but not convert them) rather than crash it, so this warns once at
+# spec load instead of failing every rollout in parallel.
+_EXPECTED_AGENT_BINARIES = ("pandoc", "pdftotext", "soffice")
+
+
+def _warn_on_missing_agent_binaries() -> None:
+    """Log the document-conversion binaries the agent's shell is missing."""
+    absent = [name for name in _EXPECTED_AGENT_BINARIES if shutil.which(name) is None]
+    if absent:
+        logger.warning(
+            "Harvey LAB agent binaries not on PATH: %s. The agent can read task documents "
+            "but not convert them; add them to `spec.apt_install` in .rilix-ai/rilixai.yaml.",
+            ", ".join(absent),
+        )
+
+
 @spec(
     name=SPEC_NAME,
     version="v1",
@@ -809,6 +829,7 @@ class RubricScorer:
 def build_spec(ctx: OptimizationContext) -> Spec:
     """Assemble the Harvey LAB prompt-optimization spec."""
     del ctx
+    _warn_on_missing_agent_binaries()
     return Spec(
         name=SPEC_NAME,
         seed_targets=_seed_targets(),
