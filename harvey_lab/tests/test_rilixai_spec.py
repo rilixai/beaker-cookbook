@@ -291,7 +291,11 @@ def test_run_case_reports_missing_deliverables_and_failed_criteria(
 
 def _failing_case() -> Case:
     return Case(
-        input={"task_id": "contracts/t1", "instructions": "Summarize the fee."},
+        input={
+            "task_id": "contracts/t1",
+            "instructions": "Summarize the fee.",
+            "documents": ["notes.txt"],
+        },
         case_id="contracts/t1",
         ground_truth={"criteria": [{"id": "C1", "match_criteria": "Mentions $50,000."}]},
     )
@@ -391,6 +395,27 @@ def test_an_unexpected_error_escapes_to_the_runtime(
 
     with pytest.raises(ValueError, match="this spec has a bug"):
         asyncio.run(spec_module._run_case(case=_failing_case(), targets=_candidate_prompts(spec_module), runtime=None))
+
+
+def test_a_task_with_no_documents_of_its_own_is_not_a_harness_failure(
+    spec_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    lab_task_root: Path,
+    tmp_path: Path,
+) -> None:
+    """Completeness is measured against the row, not against "documents/ is non-empty"."""
+    for document in (lab_task_root / "contracts/t1/documents").iterdir():
+        document.unlink()
+    monkeypatch.setattr(spec_module, "ensure_task_dirs", lambda *_a, **_kw: lab_task_root)
+    case = Case(
+        input={"task_id": "contracts/t1", "instructions": "Draft from scratch.", "documents": []},
+        case_id="contracts/t1",
+        ground_truth={"criteria": [{"id": "C1", "match_criteria": "Mentions $50,000."}]},
+    )
+
+    record, _root = spec_module._record_for_case(case, cache_dir=tmp_path)
+
+    assert record.task_id == "contracts/t1"
 
 
 @pytest.mark.parametrize("missing", ["task.json", "documents"])

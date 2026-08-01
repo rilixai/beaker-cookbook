@@ -358,7 +358,11 @@ def _record_for_case(case: Case, *, cache_dir: Path | None = None) -> tuple[Harv
     commit = str(case.metadata.get("harvey_labs_commit") or HARVEY_LABS_COMMIT)
     try:
         tasks_root = ensure_task_dirs([task_id], commit=commit, cache_dir=cache_dir)
-        _assert_task_workspace_usable(tasks_root / task_id, task_id)
+        _assert_task_workspace_usable(
+            tasks_root / task_id,
+            task_id,
+            expected_documents=[str(name) for name in payload.get("documents") or ()],
+        )
         record = load_records(tasks_root, task_ids=[task_id])[0]
     except HarnessError:
         raise
@@ -380,21 +384,30 @@ def _record_for_case(case: Case, *, cache_dir: Path | None = None) -> tuple[Harv
     return record, tasks_root
 
 
-def _assert_task_workspace_usable(task_dir: Path, task_id: str) -> None:
-    """Refuse to start the agent on a task folder that is missing or empty.
+def _assert_task_workspace_usable(task_dir: Path, task_id: str, *, expected_documents: Sequence[str]) -> None:
+    """Refuse to start the agent on a task folder the fetch did not complete.
 
-    One stat call, before a single token is spent. A concurrent/interrupted
+    A few stat calls, before a single token is spent. A concurrent/interrupted
     fetch can leave a task directory that exists but holds no ``task.json`` or
-    no documents; the agent then dutifully explores an empty folder, submits
-    nothing, and the run records an ordinary 0 for what is really a broken
-    harness. This turns that into a loud, retryable failure in the first
-    second of the rollout.
+    only some of its documents; the agent then dutifully explores an empty
+    folder, submits nothing, and the run records an ordinary 0 for what is
+    really a broken harness. This turns that into a loud, retryable failure in
+    the first second of the rollout.
+
+    The dataset row lists the documents it was exported with, so completeness
+    is measured against *that* rather than against "``documents/`` is
+    non-empty": a task the benchmark ships with no source documents is a task,
+    not a failed download.
     """
     if not (task_dir / "task.json").is_file():
         raise HarnessError(f"{task_id}: no task.json under {task_dir} — the task tree was not fetched.")
     documents = task_dir / "documents"
-    if not documents.is_dir() or not any(path.is_file() for path in documents.rglob("*")):
-        raise HarnessError(f"{task_id}: {documents} is missing or empty — the task documents were not fetched.")
+    missing = [name for name in expected_documents if not (documents / name).is_file()]
+    if missing:
+        raise HarnessError(
+            f"{task_id}: {len(missing)}/{len(expected_documents)} documents missing under {documents} "
+            f"(first: {missing[0]}) — the task documents were not fetched."
+        )
 
 
 def _placeholder_free_fragment(prompt: str) -> str:
