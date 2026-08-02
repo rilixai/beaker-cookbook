@@ -29,6 +29,36 @@ repository root, because ``spec.source_dir`` points the image builder at
 ``harvey_lab/`` so it pip-installs this recipe's ``pyproject.toml``. Only what
 is under ``source_dir`` reaches the image. See the note in
 ``.rilix-ai/rilixai.yaml``.
+
+Temporary contortions
+---------------------
+Six things here are shaped by a platform gap rather than by the benchmark, and
+each should be deleted once the gap closes. They are listed together because
+individually they read like ordinary code; together they are the standing bill
+for running LAB-AA on RilixAI. Each is explained where it lives.
+
+1. **Reasoning is off in a hosted run** — ``_config_for_runtime``. The gateway
+   validates ``reasoning_effort`` against ``model_catalog``, which marks both
+   GLM 5.2 and DeepSeek V4 Pro non-reasoning, so the request is rejected before
+   it leaves us. AA runs reasoning models at maximum effort, so *hosted numbers
+   are not comparable to published LAB results until this is fixed.* Needs the
+   catalog flags corrected.
+2. **Output is capped at 16,384 tokens in a hosted run** — ``_config_for_runtime``.
+   AA gives a reasoning model its creator's maximum, which the recipe knows for
+   its own model and cannot know for a selected one. Needs the selected model's
+   capabilities (max output, reasoning tier) surfaced to the rollout; that
+   single addition removes this and (1).
+3. **The judge needs its own provider key in the sandbox** —
+   ``_assert_judge_credential_present``. Needs the gateway to authorize a
+   run-scoped grader model alongside the model targets.
+4. **Judge cost is unmeasured** — ``_grade``. Only the agent's calls are traced.
+5. **The recipe's dependencies are declared to the image by pointing
+   ``source_dir`` at this directory** — ``.rilix-ai/rilixai.yaml``. Needs the
+   ``pip_install_from`` key that ``rilixai init`` already writes and nothing
+   reads.
+6. **Agent binaries are hand-listed as ``apt_install``** — same file. No
+   packaging metadata can express them, so the list can drift from what the
+   agent shells out to; ``_warn_on_missing_agent_binaries`` is the backstop.
 """
 
 from __future__ import annotations
@@ -435,7 +465,9 @@ def _config_for_runtime(runtime: RolloutContext | Any) -> tuple[HarveyLabConfig,
             # A swapped-in model may not be a reasoning model at all, and the
             # gateway rejects the parameter outright for one whose catalog entry
             # says so, so the recipe cannot keep asserting its own default here.
-            # Restore this once a rollout is told the selected model's tier.
+            # Restore this once a rollout is told the selected model's tier
+            # (contortion 1: AA runs reasoning models at maximum effort, so a
+            # hosted score is not comparable to a published LAB one meanwhile).
             task_reasoning_effort="none",
             # Same reason, with teeth: the recipe's 384k cap is DeepSeek V4's
             # own maximum output, which is what AA's protocol asks of a
@@ -446,7 +478,7 @@ def _config_for_runtime(runtime: RolloutContext | Any) -> tuple[HarveyLabConfig,
             # (~$2.86/M out) demands roughly $1.1k of headroom per call and is
             # refused with HTTP 402 whatever the balance actually is. Non-
             # reasoning models get AA's 16,384, which matches the effort we
-            # just dropped.
+            # just dropped. Contortion 2, and it lifts with the same change.
             max_output_tokens=_AA_NON_REASONING_OUTPUT_TOKENS,
         ),
         _TaskModelRouting(api_base=target.base_url, api_key=target.api_key),
@@ -591,7 +623,7 @@ def _grade(
 ) -> dict[str, Any]:
     """Grade the submitted deliverables against the row's frozen rubric.
 
-    TODO: the judge's own token usage is not reported. Only the agent's calls
+    TODO (contortion 4): the judge's own token usage is not reported. Only the agent's calls
     are traced (see :class:`_TracedClient`), because the judge's LiteLLM calls
     are made inside ``harvey_lab.evaluation.scoring``; reaching their ``usage``
     blocks needs a change in that module, so grading cost is still unmeasured.
@@ -910,6 +942,14 @@ def _assert_judge_credential_present() -> None:
     Without it, every rollout would run the agent to completion and only then
     fail to grade it — the most expensive possible way to discover a missing
     environment variable.
+
+    Temporary (contortion 3 in the module docstring). The key this asks for is
+    the *same* OpenRouter credential the organization has already stored in
+    RilixAI settings, pasted a second time into the agent's sandbox secrets
+    because only the gateway can read the first copy. It goes away when the
+    gateway authorizes a run-scoped grader model alongside the model targets —
+    which also removes the last provider credential from the sandbox, and lets
+    grader spend be accounted separately instead of vanishing (contortion 4).
     """
     if not os.environ.get("RILIXAI_INFERENCE_BASE_URL"):
         return  # Not a hosted run; the local CLI's own env rules apply.
