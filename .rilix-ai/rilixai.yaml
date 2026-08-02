@@ -5,6 +5,13 @@ spec:
   name: "harvey-lab"
   target: "rilixai_spec:build_spec"
   task_type: "harvey-lab"
+  # TEMPORARY (contortion 5 in harvey_lab/rilixai_spec.py): `rilixai init`
+  # already writes a `pip_install_from: "harvey_lab/pyproject.toml"` key for
+  # monorepo workspaces and *nothing on the platform reads it* — the push route
+  # only knows `pip_install`. Until it is implemented, the layout below is how
+  # this recipe's dependencies reach its image at all. Delete this comment and
+  # move the spec back beside this file once `pip_install_from` works.
+  #
   # This is a multi-recipe monorepo, but the spec image must be built from a
   # *single* recipe: the builder pip-installs the bundle root when it finds a
   # pyproject.toml there, which is the only way the recipe's dependency
@@ -24,6 +31,7 @@ spec:
   source_dir: "harvey_lab"
   package_import_root: "."
 
+  # Hand-maintained, and it can drift (contortion 6 in rilixai_spec.py).
   # System binaries the agent shells out to through `code_exec` (see
   # harvey_lab/README.md "Install"): `pandoc`, `pdftotext` (poppler-utils) and
   # `soffice` (libreoffice). These are named directly in the task prompt.
