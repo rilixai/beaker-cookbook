@@ -682,6 +682,10 @@ def test_a_hosted_rollout_routes_the_agent_through_the_inference_gateway(
     config, routing = spec_module._config_for_runtime(runtime)
 
     assert config.task_model == "openai/openrouter:z-ai/glm-5.2"
+    # Neither the recipe's reasoning effort nor its DeepSeek-sized output cap
+    # can be asserted against a model the recipe knows nothing about.
+    assert config.task_reasoning_effort == "none"
+    assert config.max_output_tokens == 16_384
     assert routing.factory_kwargs() == {
         "api_base": "https://runtime.example/v1/llm",
         "api_key": "run-token",
