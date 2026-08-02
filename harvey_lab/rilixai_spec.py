@@ -364,6 +364,13 @@ def _seed_targets() -> OptimizationTargets:
     )
 
 
+# AA's LAB-AA protocol caps a non-reasoning model's completion at 16,384
+# tokens; a reasoning model instead gets its creator's maximum, which is what
+# ``HarveyLabConfig.max_output_tokens`` encodes for the model the recipe ships
+# with.
+_AA_NON_REASONING_OUTPUT_TOKENS = 16_384
+
+
 @dataclass(frozen=True)
 class _TaskModelRouting:
     """Where the agent's own LLM calls go for one rollout.
@@ -430,6 +437,17 @@ def _config_for_runtime(runtime: RolloutContext | Any) -> tuple[HarveyLabConfig,
             # says so, so the recipe cannot keep asserting its own default here.
             # Restore this once a rollout is told the selected model's tier.
             task_reasoning_effort="none",
+            # Same reason, with teeth: the recipe's 384k cap is DeepSeek V4's
+            # own maximum output, which is what AA's protocol asks of a
+            # *reasoning* model. Asserted against another model it is at best
+            # above that model's limit, and at worst unaffordable — OpenRouter
+            # reserves ``max_tokens`` × the output rate against the account
+            # balance before it will start a request, so 384k on GLM 5.2
+            # (~$2.86/M out) demands roughly $1.1k of headroom per call and is
+            # refused with HTTP 402 whatever the balance actually is. Non-
+            # reasoning models get AA's 16,384, which matches the effort we
+            # just dropped.
+            max_output_tokens=_AA_NON_REASONING_OUTPUT_TOKENS,
         ),
         _TaskModelRouting(api_base=target.base_url, api_key=target.api_key),
     )
