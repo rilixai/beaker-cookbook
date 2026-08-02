@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -55,7 +56,7 @@ from rilixai import (
     optimization_targets_from_prompts,
     spec,
 )
-from rilixai.sdk import RolloutContext
+from rilixai.sdk import RolloutContext, inference_target
 from rilixai.tracing import Trace
 
 from harvey_lab.agent.agent import HarveyLabAgent, HarveyLabAgentOutput, _default_model_factory
@@ -363,20 +364,75 @@ def _seed_targets() -> OptimizationTargets:
     )
 
 
-def _config_for_runtime(runtime: RolloutContext | Any) -> HarveyLabConfig:
-    """The recipe's production config, with RilixAI's model only when it picks one.
+@dataclass(frozen=True)
+class _TaskModelRouting:
+    """Where the agent's own LLM calls go for one rollout.
 
-    ``runtime.model`` is a LiteLLM model string, which is exactly what
-    ``HarveyLabConfig.task_model`` already is, so model selection needs no
-    gateway and no change to the recipe. Without it, the run uses the recipe's
-    own default model — prompt-only optimization must not silently re-route the
-    agent to another model.
+    ``api_base``/``api_key`` are set only for a hosted run, where they address
+    the run's inference gateway. Empty everywhere else, which leaves the recipe
+    calling its configured provider directly, exactly as ``harvey-lab run`` does.
+    """
+
+    api_base: str | None = None
+    api_key: str | None = None
+
+    def factory_kwargs(self) -> dict[str, str]:
+        kwargs: dict[str, str] = {}
+        if self.api_base is not None:
+            kwargs["api_base"] = self.api_base
+        if self.api_key is not None:
+            kwargs["api_key"] = self.api_key
+        return kwargs
+
+
+def _config_for_runtime(runtime: RolloutContext | Any) -> tuple[HarveyLabConfig, _TaskModelRouting]:
+    """The recipe's production config, re-pointed at the model RilixAI selected.
+
+    Without a selected model the recipe's own default stands: prompt-only
+    optimization must not silently re-route the agent to another model.
+
+    With one, note what ``runtime`` actually carries. ``runtime.model`` is a
+    *bare* model id (``z-ai/glm-5.2``) and the provider is a separate field —
+    it is **not** a LiteLLM model spec, and handing it to LiteLLM as one is a
+    BadRequestError ("LLM Provider NOT provided") for any id whose first path
+    segment LiteLLM does not recognise as a provider. The canonical id lives on
+    ``runtime.canonical_model_id`` (``openrouter:z-ai/glm-5.2``) and is what the
+    gateway wants.
+
+    So a hosted rollout is routed through the run's inference gateway, which
+    :func:`rilixai.sdk.inference_target` resolves from the sandbox environment.
+    That is the designed path, and it is load-bearing for more than provider
+    resolution:
+
+    * the sandbox holds no provider credential of its own — the gateway spends
+      the customer's, against the run's budget;
+    * the gateway is what attributes spend to *this* model target, which is
+      where the model-comparison chart's per-target rollout cost comes from.
+      Call OpenRouter directly and that cost is simply never recorded.
+
+    The gateway speaks OpenAI's dialect, hence the ``openai/`` prefix: it tells
+    LiteLLM which dialect to speak, while the model *named in the request body*
+    stays the canonical id the gateway authorizes against.
     """
     config = HarveyLabConfig()
-    selected_model = getattr(runtime, "model", None)
-    if selected_model:
-        return replace(config, task_model=str(selected_model))
-    return config
+    selected_model = str(getattr(runtime, "model", None) or "")
+    if not selected_model:
+        return config, _TaskModelRouting()
+
+    target = inference_target(runtime)
+    return (
+        replace(
+            config,
+            task_model=f"openai/{target.model}",
+            # The recipe's default effort is tuned for the model it ships with.
+            # A swapped-in model may not be a reasoning model at all, and the
+            # gateway rejects the parameter outright for one whose catalog entry
+            # says so, so the recipe cannot keep asserting its own default here.
+            # Restore this once a rollout is told the selected model's tier.
+            task_reasoning_effort="none",
+        ),
+        _TaskModelRouting(api_base=target.base_url, api_key=target.api_key),
+    )
 
 
 def _record_for_case(case: Case, *, cache_dir: Path | None = None) -> tuple[HarveyLabRecord, Path]:
@@ -612,18 +668,21 @@ def _traceable_message(message: Any) -> Any:
     return dump(mode="json") if callable(dump) else message
 
 
-def _tracing_model_factory(trace: Trace, provider: str) -> Any:
-    """The recipe's own model factory, with every call traced.
+def _rollout_model_factory(trace: Trace | None, provider: str, routing: _TaskModelRouting) -> Any:
+    """The recipe's own model factory, routed for this rollout and traced.
 
     ``_default_model_factory`` is private to ``harvey_lab.agent.agent``, and
     the spec reaches for it deliberately: the wrapper must build *exactly* the
-    client the recipe would have built, so tracing changes nothing about how
-    the agent runs. Renaming it would break this import — export it publicly if
-    that becomes a concern.
+    client the recipe would have built, so neither the routing nor the tracing
+    changes anything about how the agent runs. Renaming it would break this
+    import — export it publicly if that becomes a concern.
     """
+    routing_kwargs = routing.factory_kwargs()
 
     def _factory(model: str, temperature: float, max_tokens: int, timeout: float, reasoning_effort: str) -> Any:
-        client = _default_model_factory(model, temperature, max_tokens, timeout, reasoning_effort)
+        client = _default_model_factory(model, temperature, max_tokens, timeout, reasoning_effort, **routing_kwargs)
+        if trace is None:
+            return client
         return _TracedClient(client, trace=trace, provider=provider)
 
     return _factory
@@ -702,16 +761,17 @@ async def _run_case(*, case: Case, targets: OptimizationTargets, runtime: Any) -
     an honest 0, exactly as LAB-AA grades an empty submission.
     """
     prompts = targets.to_dict()
-    config = _config_for_runtime(runtime)
+    config, routing = _config_for_runtime(runtime)
     trace = getattr(runtime, "trace", None)
     try:
         record, tasks_root = await asyncio.to_thread(_record_for_case, case)
         agent_kwargs: dict[str, Any] = {}
-        if trace is not None:
-            # Only when the runtime offers a trace, so the recipe's own default
-            # model factory stays in charge everywhere else.
-            agent_kwargs["model_factory"] = _tracing_model_factory(
-                trace, str(getattr(runtime, "provider", None) or "litellm")
+        if trace is not None or routing.factory_kwargs():
+            # Only when the runtime traces the rollout or selects where its
+            # calls go, so the recipe's own default model factory stays in
+            # charge everywhere else.
+            agent_kwargs["model_factory"] = _rollout_model_factory(
+                trace, str(getattr(runtime, "provider", None) or "litellm"), routing
             )
         agent = HarveyLabAgent(
             config=config,
@@ -819,6 +879,34 @@ def _warn_on_missing_agent_binaries() -> None:
         )
 
 
+def _assert_judge_credential_present() -> None:
+    """Fail at spec load if a hosted run cannot pay for the rubric judge.
+
+    Only the *agent's* calls go through the run's inference gateway: it
+    authorizes the models the customer selected for the run, and the judge is
+    deliberately not one of them — it is a fixed grader, and letting it drift
+    with the model under test would make two targets' scores incomparable. So
+    the judge keeps calling its own provider directly and needs that provider's
+    key in the run environment.
+
+    Without it, every rollout would run the agent to completion and only then
+    fail to grade it — the most expensive possible way to discover a missing
+    environment variable.
+    """
+    if not os.environ.get("RILIXAI_INFERENCE_BASE_URL"):
+        return  # Not a hosted run; the local CLI's own env rules apply.
+    judge_model = HarveyLabConfig().judge_model
+    provider = judge_model.split("/", 1)[0]
+    key_variable = f"{provider.upper().replace('-', '_')}_API_KEY"
+    if not os.environ.get(key_variable):
+        raise RuntimeError(
+            f"The rubric judge ({judge_model}) has no credential: {key_variable} is not set "
+            "in this run's environment. The run's inference gateway covers the agent's model "
+            "only — it authorizes the models selected for the run, and the judge is a fixed "
+            f"grader outside that set. Set {key_variable} as a run environment variable."
+        )
+
+
 @spec(
     name=SPEC_NAME,
     version="v1",
@@ -830,6 +918,7 @@ def build_spec(ctx: OptimizationContext) -> Spec:
     """Assemble the Harvey LAB prompt-optimization spec."""
     del ctx
     _warn_on_missing_agent_binaries()
+    _assert_judge_credential_present()
     return Spec(
         name=SPEC_NAME,
         seed_targets=_seed_targets(),

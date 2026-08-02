@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 from rilixai import Case, CaseResult, DatasetRowContext, OptimizationContext, validate_spec
+from rilixai.sdk import RolloutContext
 
 from harvey_lab.agent.agent import HarveyLabAgent
 from harvey_lab.agent.prompts import load_harvey_lab_prompts
@@ -242,7 +243,10 @@ def _patch_for_local_rollout(
     monkeypatch.setattr(
         spec_module,
         "_config_for_runtime",
-        lambda _runtime: HarveyLabConfig(max_turns=5, enable_view_image=False),
+        lambda _runtime: (
+            HarveyLabConfig(max_turns=5, enable_view_image=False),
+            spec_module._TaskModelRouting(),
+        ),
     )
     monkeypatch.setattr(
         spec_module,
@@ -648,12 +652,59 @@ def test_a_model_call_without_reported_usage_records_none(spec_module: ModuleTyp
 def test_the_spec_traces_the_recipes_own_client(spec_module: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     """Tracing is a wrapper around the recipe's default factory, not a fork of it."""
     inner = _UsageClient(input_tokens=1, answer=1, reasoning=0)
-    monkeypatch.setattr(spec_module, "_default_model_factory", lambda *_args: inner)
+    monkeypatch.setattr(spec_module, "_default_model_factory", lambda *_args, **_kwargs: inner)
 
-    client = spec_module._tracing_model_factory(_FakeTrace(), "openrouter")("m", 0.0, 1, 1.0, "none")
+    routing = spec_module._TaskModelRouting()
+    client = spec_module._rollout_model_factory(_FakeTrace(), "openrouter", routing)("m", 0.0, 1, 1.0, "none")
 
     assert isinstance(client, spec_module._TracedClient)
     assert client.model_slug == inner.model_slug
+
+
+def test_a_hosted_rollout_routes_the_agent_through_the_inference_gateway(
+    spec_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The selected model is reached through the run's gateway, not the provider.
+
+    ``runtime.model`` is a bare model id, so LiteLLM cannot resolve a provider
+    from it and the sandbox holds no provider key anyway. The gateway's
+    canonical id and credentials must reach the client instead.
+    """
+    monkeypatch.setenv("RILIXAI_INFERENCE_BASE_URL", "https://runtime.example/v1/llm")
+    monkeypatch.setenv("RILIXAI_INFERENCE_API_KEY", "run-token")
+    runtime = RolloutContext(
+        model="z-ai/glm-5.2",
+        provider="openrouter",
+        canonical_model_id="openrouter:z-ai/glm-5.2",
+        user_id="u",
+    )
+
+    config, routing = spec_module._config_for_runtime(runtime)
+
+    assert config.task_model == "openai/openrouter:z-ai/glm-5.2"
+    assert routing.factory_kwargs() == {
+        "api_base": "https://runtime.example/v1/llm",
+        "api_key": "run-token",
+    }
+
+    seen: dict[str, Any] = {}
+
+    def _record(*args: Any, **kwargs: Any) -> Any:
+        seen.update(kwargs)
+        return _UsageClient(input_tokens=1, answer=1, reasoning=0)
+
+    monkeypatch.setattr(spec_module, "_default_model_factory", _record)
+    spec_module._rollout_model_factory(None, "openrouter", routing)(config.task_model, 0.0, 1, 1.0, "none")
+
+    assert seen == routing.factory_kwargs()
+
+
+def test_a_run_without_a_selected_model_keeps_the_recipes_own_provider(spec_module: ModuleType) -> None:
+    """Prompt-only optimization must not re-route the agent to another model."""
+    config, routing = spec_module._config_for_runtime(RolloutContext(model=None, user_id="u"))
+
+    assert config == HarveyLabConfig()
+    assert routing.factory_kwargs() == {}
 
 
 def test_targets_that_miss_the_agent_are_rejected(spec_module: ModuleType, lab_task_root: Path) -> None:
@@ -735,3 +786,17 @@ def test_build_spec_is_valid_and_declares_its_dataset_schema(spec_module: Module
     registration = spec_module.build_spec.__rilixai_spec__
     assert registration.name == "harvey-lab"
     assert registration.metadata["dataset_schema"]["json_schema"]["required"] == ["id", "input", "expected"]
+
+
+def test_a_hosted_run_without_a_judge_credential_fails_at_spec_load(
+    spec_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cheaper to fail here than after every rollout has run the agent to completion."""
+    monkeypatch.setenv("RILIXAI_INFERENCE_BASE_URL", "https://runtime.example/v1/llm")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
+        spec_module.build_spec(OptimizationContext())
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    assert spec_module.build_spec(OptimizationContext()).name == "harvey-lab"
