@@ -69,6 +69,9 @@ Standard src layout — the importable package lives under `src/harvey_lab/`:
 | `src/harvey_lab/evaluation/utils.py` | JSON + summary serialization for the CLI |
 | `src/harvey_lab/config.py` | model / budget / timeout knobs |
 | `src/harvey_lab/cli.py` | run the agent, or run + grade it (`harvey-lab` console command) |
+| `.beaker/rilixai_spec.py` | RilixAI spec: real task loader, prompt targets, agent rollout, and rubric objective |
+| `.beaker/beaker.yaml` | safe-to-commit RilixAI project and agent selection |
+| `scripts/build_rilixai_dataset.py` | converts the frozen task IDs into uploadable pinned JSONL references |
 
 ## How the work is graded
 
@@ -204,3 +207,62 @@ See `--help` for all flags (`--split {train,val,test}`, `--limit`,
 `--task-reasoning-effort`, `--judge-model`, `--judge-batch-size`,
 `--judge-num-retries`, `--shell-timeout`, `--max-turns`, `--no-view-image`,
 `--rerun`, …).
+
+## RilixAI optimization
+
+The RilixAI spec optimizes both prompts that drive the legal agent:
+`SYSTEM_PROMPT_SEED` and `TASK_TEMPLATE_SEED`. Each dataset row is an immutable
+reference to a real public Harvey LAB task at `HARVEY_LABS_COMMIT`; the loader
+fetches that task's canonical documents and `task.json` rubric. Candidate
+prompts are passed into a fresh `HarveyLabAgent` for every rollout, and the
+existing rubric scorer reports `all_pass` plus `criterion_pass_rate`. The dense
+criterion pass rate is the optimization objective.
+
+Build the uploadable train/validation task-reference dataset from the committed
+split lists:
+
+```bash
+uv run python scripts/build_rilixai_dataset.py rilixai_dataset
+```
+
+The generated JSONL contains task IDs and the pinned source commit, not copied
+or synthetic labels. The spec resolves rubrics and documents from Harvey's
+canonical public repository when loading each case. A local dry-run downloads
+the first referenced task and calls the configured task model and rubric judge,
+so it requires their provider credentials and incurs model usage:
+
+```bash
+uv run rilixai run dry-run \
+  --config '{"local_dataset_path":"rilixai_dataset"}'
+```
+
+For hosted optimization, authenticate and select the target agent, then store
+the judge's OpenRouter key on that agent. The optimized task model itself uses
+RilixAI's run-scoped inference gateway and does not require a provider key in
+this repository:
+
+```bash
+uv run rilixai login --agent \
+  --agent-name "Harvey LAB Legal Agent" \
+  --repo rilixai/rilixai-cookbook
+
+printf '%s' "$OPENROUTER_API_KEY" | \
+  uv run rilixai agent env set OPENROUTER_API_KEY \
+    --value-stdin --agent harvey-lab-legal-agent
+```
+
+After committing and pushing the spec, build it before the first dataset
+upload, then upload the generated source directory:
+
+```bash
+uv run rilixai spec build-from-github --ref <branch>
+uv run rilixai dataset upload rilixai_dataset \
+  --name harvey-labs-public \
+  --total-count 1660 \
+  --split train=1560 --split val=100 \
+  --agent harvey-lab-legal-agent
+```
+
+Launching an optimization is intentionally a separate explicit action; use the
+uploaded dataset name with `rilixai run trigger` only when ready to spend the
+configured optimization budget.

@@ -885,6 +885,20 @@ def test_forward_uses_configured_prompts(tasks_root: Path) -> None:
     assert "MY-CUSTOM-SYSTEM-PROMPT" in str(getattr(client.messages[0], "content", ""))
 
 
+def test_forward_uses_configured_task_template(tasks_root: Path) -> None:
+    """The candidate task template is rendered into the user prompt."""
+    client = _CapturingClient([("abandon_task_finish", {"reason": "done"})])
+    _run_with_client(
+        tasks_root,
+        client,
+        task_template="OPTIMIZED TASK: {{title}}\n{{instructions}}\n{{deliverables}}",
+    )
+    rendered_messages = "\n".join(str(getattr(message, "content", "")) for message in client.messages)
+    assert "OPTIMIZED TASK: task contracts/t1" in rendered_messages
+    assert "Summarize the termination fee" in rendered_messages
+    assert "`memo.md`" in rendered_messages
+
+
 def test_forward_exposes_only_code_exec_and_finish_tools(tasks_root: Path) -> None:
     """LAB-AA gives the model a single code-execution tool plus the finish pair —
     no curated read/write/grep helpers."""
