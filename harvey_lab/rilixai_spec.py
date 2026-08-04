@@ -1,4 +1,4 @@
-"""RilixAI prompt-optimization spec for the Harvey LAB legal agent.
+"""Beaker prompt-optimization spec for the Harvey LAB legal agent.
 
 What is optimized: the recipe's **two agent prompts** — Artificial Analysis'
 LAB-AA ``system_prompt`` and ``task_template`` (``harvey_lab.agent.prompts``).
@@ -9,7 +9,7 @@ agent without touching recipe code.
 One case = one Harvey LAB task:
 
 * ``input`` — the task id, title, instructions and requested deliverable
-  filenames (see ``../.rilix-ai/export_dataset.py``).
+  filenames (see ``../.beaker/export_dataset.py``).
 * ``ground_truth`` — that task's own rubric: ~40-70 binary ``match_criteria``.
 * rollout — the task folder is fetched from ``harveyai/harvey-labs`` at the
   pinned commit, then the Stirrup agent runs it under the candidate prompts
@@ -24,18 +24,18 @@ Grading runs inside ``run_case`` (as ``harvey-lab evaluate`` does) so the
 per-criterion verdicts can ride along as reflection evidence; ``score_case``
 stays deterministic and only aggregates them.
 
-This module lives at the recipe root rather than beside ``rilixai.yaml`` at the
+This module lives at the recipe root rather than beside ``beaker.yaml`` at the
 repository root, because ``spec.source_dir`` points the image builder at
 ``harvey_lab/`` so it pip-installs this recipe's ``pyproject.toml``. Only what
 is under ``source_dir`` reaches the image. See the note in
-``.rilix-ai/rilixai.yaml``.
+``.beaker/beaker.yaml``.
 
 Temporary contortions
 ---------------------
 Six things here are shaped by a platform gap rather than by the benchmark, and
 each should be deleted once the gap closes. They are listed together because
 individually they read like ordinary code; together they are the standing bill
-for running LAB-AA on RilixAI. Each is explained where it lives.
+for running LAB-AA on Beaker. Each is explained where it lives.
 
 1. **Reasoning is off in a hosted run** — ``_config_for_runtime``. The gateway
    validates ``reasoning_effort`` against ``model_catalog``, which marks both
@@ -53,7 +53,7 @@ for running LAB-AA on RilixAI. Each is explained where it lives.
    run-scoped grader model alongside the model targets.
 4. **Judge cost is unmeasured** — ``_grade``. Only the agent's calls are traced.
 5. **The recipe's dependencies are declared to the image by pointing
-   ``source_dir`` at this directory** — ``.rilix-ai/rilixai.yaml``. Needs the
+   ``source_dir`` at this directory** — ``.beaker/beaker.yaml``. Needs the
    ``pip_install_from`` key that ``rilixai init`` already writes and nothing
    reads.
 6. **Agent binaries are hand-listed as ``apt_install``** — same file. No
@@ -150,7 +150,7 @@ def _harness_error_types() -> tuple[type[BaseException], ...]:
 
     Deliberately enumerated instead of catching bare ``Exception``: anything
     not listed here is a bug in this spec or the recipe, and it must escape to
-    RilixAI, which logs the traceback and records the case as unresolved. Both
+    Beaker, which logs the traceback and records the case as unresolved. Both
     routes are loud; only these are reported as *retryable*.
 
     Covers the task tree (:class:`HarnessError`), any filesystem/network error
@@ -264,17 +264,17 @@ class LabTaskRow:
 
 
 class LabTaskDataLoader(CaseDataLoader[LabTaskRow]):
-    """Validate ``.rilix-ai/dataset/*.jsonl`` rows and map them to cases.
+    """Validate ``.beaker/dataset/*.jsonl`` rows and map them to cases.
 
     Layout (``config_defaults.local_dataset_path`` for dry-runs, an uploaded
     dataset revision for hosted runs)::
 
-        .rilix-ai/dataset/train.jsonl      # required
-        .rilix-ai/dataset/val.jsonl        # required
-        .rilix-ai/dataset/test.jsonl       # optional
-        .rilix-ai/dataset/manifest.json    # provenance: source repo + commit
+        .beaker/dataset/train.jsonl      # required
+        .beaker/dataset/val.jsonl        # required
+        .beaker/dataset/test.jsonl       # optional
+        .beaker/dataset/manifest.json    # provenance: source repo + commit
 
-    Rows are produced by ``.rilix-ai/export_dataset.py`` from the frozen
+    Rows are produced by ``.beaker/export_dataset.py`` from the frozen
     ``harvey_lab`` splits; a row without a scoreable criterion is rejected here
     rather than silently scoring 0 (the recipe treats such a task as
     unscoreable and excludes it from its own averages).
@@ -423,7 +423,7 @@ class _TaskModelRouting:
 
 
 def _config_for_runtime(runtime: RolloutContext | Any) -> tuple[HarveyLabConfig, _TaskModelRouting]:
-    """The recipe's production config, re-pointed at the model RilixAI selected.
+    """The recipe's production config, re-pointed at the model Beaker selected.
 
     Without a selected model the recipe's own default stands: prompt-only
     optimization must not silently re-route the agent to another model.
@@ -648,9 +648,9 @@ def _grade(
 
 
 class _TracedClient:
-    """A Stirrup ``LLMClient`` that reports each call to RilixAI's trace.
+    """A Stirrup ``LLMClient`` that reports each call to Beaker's trace.
 
-    The recipe talks to the provider directly rather than through RilixAI's
+    The recipe talks to the provider directly rather than through Beaker's
     gateway, so the runtime can only see what the run reports. Wrapping the
     client is the whole integration: one ``model_call`` span per request,
     carrying the provider's own token counts off Stirrup's ``TokenUsage``, from
@@ -911,7 +911,7 @@ class RubricScorer:
 # Binaries the agent shells out to via ``code_exec``. They are named directly
 # in the task prompt, and unlike the Python dependencies they cannot come from
 # ``pyproject.toml`` — they are hand-listed in ``spec.apt_install`` in
-# ``.rilix-ai/rilixai.yaml``, so that list can drift from what the agent
+# ``.beaker/beaker.yaml``, so that list can drift from what the agent
 # actually needs. Missing binaries degrade the agent (it can read the task
 # documents but not convert them) rather than crash it, so this warns once at
 # spec load instead of failing every rollout in parallel.
@@ -924,7 +924,7 @@ def _warn_on_missing_agent_binaries() -> None:
     if absent:
         logger.warning(
             "Harvey LAB agent binaries not on PATH: %s. The agent can read task documents "
-            "but not convert them; add them to `spec.apt_install` in .rilix-ai/rilixai.yaml.",
+            "but not convert them; add them to `spec.apt_install` in .beaker/beaker.yaml.",
             ", ".join(absent),
         )
 
@@ -945,7 +945,7 @@ def _assert_judge_credential_present() -> None:
 
     Temporary (contortion 3 in the module docstring). The key this asks for is
     the *same* OpenRouter credential the organization has already stored in
-    RilixAI settings, pasted a second time into the agent's sandbox secrets
+    Beaker settings, pasted a second time into the agent's sandbox secrets
     because only the gateway can read the first copy. It goes away when the
     gateway authorizes a run-scoped grader model alongside the model targets —
     which also removes the last provider credential from the sandbox, and lets

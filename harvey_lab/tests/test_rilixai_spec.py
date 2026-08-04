@@ -1,4 +1,4 @@
-"""Tests for the RilixAI prompt-optimization spec (``harvey_lab/rilixai_spec.py``).
+"""Tests for the Beaker prompt-optimization spec (``harvey_lab/rilixai_spec.py``).
 
 These cover the two things that silently break a prompt-optimization
 integration: a dataset contract that drifts from the exported rows, and
@@ -34,7 +34,7 @@ from tests.test_units import _fee_judge, _local_exec_factory, _ScriptedClient, _
 RECIPE_ROOT = Path(__file__).resolve().parents[1]
 COOKBOOK_ROOT = RECIPE_ROOT.parent
 SPEC_PATH = RECIPE_ROOT / "rilixai_spec.py"
-DATASET_DIR = COOKBOOK_ROOT / ".rilix-ai" / "dataset"
+DATASET_DIR = COOKBOOK_ROOT / ".beaker" / "dataset"
 
 SYSTEM_MARKER = "CANDIDATE-SYSTEM-PROMPT-MARKER"
 TEMPLATE_MARKER = "CANDIDATE-TASK-TEMPLATE-MARKER"
@@ -42,7 +42,7 @@ TEMPLATE_MARKER = "CANDIDATE-TASK-TEMPLATE-MARKER"
 
 @pytest.fixture(scope="module")
 def spec_module() -> ModuleType:
-    """Import the spec by path (``.rilix-ai`` is not an importable package name)."""
+    """Import the spec by path (``.beaker`` is not an importable package name)."""
     module_spec = importlib.util.spec_from_file_location("rilixai_spec_under_test", SPEC_PATH)
     assert module_spec is not None and module_spec.loader is not None
     module = importlib.util.module_from_spec(module_spec)
