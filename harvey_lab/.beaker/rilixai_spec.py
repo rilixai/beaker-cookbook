@@ -267,7 +267,7 @@ class HarveyLabRubricScorer:
 
 
 @spec(
-    name="harvey-labs",
+    name="harvey-lab",
     version="v1",
     description="Optimize the Harvey LAB legal agent's system and task prompts against real public-task rubrics.",
     metadata={"task_type": "legal-work-product", "source_commit": HARVEY_LABS_COMMIT},
@@ -277,7 +277,7 @@ def build_spec(ctx: OptimizationContext) -> Spec:
     """Build the prompt-optimization contract used locally and by hosted runs."""
     del ctx
     return Spec(
-        name="harvey-labs",
+        name="harvey-lab",
         seed_targets=_seed_targets(),
         data_loader=HarveyLabDataLoader(),
         run_case=_run_case,
