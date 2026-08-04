@@ -167,7 +167,7 @@ strings and set those providers' keys, e.g.
 `--task-model deepseek/deepseek-v4-pro` (`DEEPSEEK_API_KEY`) and
 `--judge-model deepseek/deepseek-v4-flash` (`DEEPSEEK_API_KEY`).
 
-In a **hosted RilixAI run** (`rilixai_spec.py`) the split is different: the
+In a **hosted Beaker run** (`rilixai_spec.py`) the split is different: the
 agent's calls go through the run's inference gateway, which holds the customer's
 credential and bills the model under test to the run — the sandbox needs no key
 for it. The judge does not, because the gateway only authorizes the models

@@ -1,6 +1,6 @@
-"""Export real Harvey LAB tasks into the RilixAI JSONL dataset layout.
+"""Export real Harvey LAB tasks into the Beaker JSONL dataset layout.
 
-The labels RilixAI optimizes against are the benchmark's own rubrics: every row
+The labels Beaker optimizes against are the benchmark's own rubrics: every row
 carries one LAB task's instructions as ``input`` and that task's ~60 binary
 ``criteria`` as ``expected``. Nothing is synthesized here — task ids come from
 the frozen ``splits/{train,val}.txt`` lists and the rows are read straight out
@@ -13,9 +13,9 @@ re-fetches that task folder from the pinned commit at rollout time, exactly like
 
 Usage (from the recipe root)::
 
-    uv run python .rilix-ai/export_dataset.py --train 8 --val 4
+    uv run python .beaker/export_dataset.py --train 8 --val 4
 
-Rows land in ``.rilix-ai/dataset/{train,val}.jsonl`` plus a ``manifest.json``
+Rows land in ``.beaker/dataset/{train,val}.jsonl`` plus a ``manifest.json``
 holding provenance (source repo, pinned commit, split counts).
 """
 
@@ -40,7 +40,7 @@ def _row(record: HarveyLabRecord) -> dict[str, Any]:
 
     ``input`` is everything the agent is handed (minus the documents, which the
     spec fetches by ``task_id``); ``expected`` is the rubric the judge grades
-    against. ``group_key`` is the practice area so RilixAI groups scores the way
+    against. ``group_key`` is the practice area so Beaker groups scores the way
     the benchmark is stratified.
     """
     return {

@@ -95,7 +95,7 @@ def _default_model_factory(
     ``api_base``/``api_key`` override where the call goes. Unset (the default),
     LiteLLM resolves the provider from the model slug and reads that provider's
     key from the environment. Set, the call is sent to one OpenAI-compatible
-    endpoint instead — which is how a hosted RilixAI rollout reaches its
+    endpoint instead — which is how a hosted Beaker rollout reaches its
     selected model through the run's inference gateway, holding no provider
     credential of its own.
     """
