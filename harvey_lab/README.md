@@ -233,6 +233,7 @@ so it requires their provider credentials and incurs model usage:
 
 ```bash
 uv run rilixai run dry-run \
+  --source-dir . \
   --config '{"local_dataset_path":"rilixai_dataset"}'
 ```
 
