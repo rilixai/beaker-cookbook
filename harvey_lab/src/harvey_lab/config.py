@@ -62,23 +62,10 @@ class HarveyLabConfig:
     # up to 200 turns per task; Harvey's own harness defaults to the same.
     max_turns: int = 200
 
-    # Per-LLM-call timeout (seconds). Split by model rather than shared: a
-    # single timeout is wrong for two models with very different latencies.
-    #
-    # The Beaker gateway keeps an 870s hard ceiling on any single upstream call,
-    # and the caller's timeout must stay *under* that ceiling — otherwise the
-    # gateway keeps generating (and billing) after the harness has already given
-    # up, and the result is discarded. So both values below stay < 870.
-    #
-    # The task model is a slow reasoner (e.g. qwen3.7-max observed p95 ~276s,
-    # slowest ~675s), so 120s abandoned a fifth of its genuinely-in-progress
-    # calls mid-flight. 600s captures nearly all real work while staying under
-    # the gateway ceiling.
-    task_llm_timeout: float = 600.0
-    # The judge is a fast, cheap model (deepseek-v4-flash, p95 ~34s). A long
-    # timeout here would only mean a genuinely-stuck judge call wastes ten
-    # minutes instead of two, so keep it tight.
-    judge_llm_timeout: float = 120.0
+    # Per-LLM-call timeout (seconds), split per model since the two run at very
+    # different latencies. Keep both under the Beaker gateway's 870s ceiling.
+    task_llm_timeout: float = 600.0  # slow reasoner
+    judge_llm_timeout: float = 120.0  # fast judge
 
     # Retries for a failed judge call. Stirrup owns task-model retries.
     judge_num_retries: int = 8
