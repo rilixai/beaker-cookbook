@@ -102,8 +102,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Run only the first N tasks of the split (cheap smoke run). Default: all.",
     )
-    parser.add_argument("--task-model", type=str, default=defaults.task_model)
-    parser.add_argument("--task-temperature", type=float, default=defaults.task_temperature)
+    parser.add_argument(
+        "--task-model",
+        type=str,
+        default=defaults.task_model,
+        help="LiteLLM model string for the agent; an `openrouter/…` route needs only OPENROUTER_API_KEY.",
+    )
+    parser.add_argument(
+        "--task-temperature",
+        type=float,
+        default=defaults.task_temperature,
+        help="Sampling temperature for the agent model.",
+    )
     parser.add_argument(
         "--task-reasoning-effort",
         type=str,
@@ -111,11 +121,36 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=("none", "minimal", "low", "medium", "high", "xhigh"),
         help="Reasoning budget for a thinking task model (default xhigh = DeepSeek V4 Pro max reasoning); use none for non-reasoning models.",
     )
-    parser.add_argument("--judge-model", type=str, default=defaults.judge_model)
-    parser.add_argument("--judge-batch-size", type=int, default=defaults.judge_batch_size)
-    parser.add_argument("--max-turns", type=int, default=defaults.max_turns)
-    parser.add_argument("--llm-timeout", type=float, default=defaults.llm_timeout)
-    parser.add_argument("--judge-num-retries", type=int, default=defaults.judge_num_retries)
+    parser.add_argument(
+        "--judge-model",
+        type=str,
+        default=defaults.judge_model,
+        help="LiteLLM model string for the rubric judge. Keep it fixed when comparing runs.",
+    )
+    parser.add_argument(
+        "--judge-batch-size",
+        type=int,
+        default=defaults.judge_batch_size,
+        help="Criteria graded per judge call (same deliverable scope). Higher is cheaper, 1 is one call per criterion.",
+    )
+    parser.add_argument(
+        "--max-turns",
+        type=int,
+        default=defaults.max_turns,
+        help="Cap on the agent's tool-use turns per task (LAB-AA uses 200).",
+    )
+    parser.add_argument(
+        "--llm-timeout",
+        type=float,
+        default=defaults.llm_timeout,
+        help="Per-LLM-call timeout in seconds, shared by the agent model and the judge.",
+    )
+    parser.add_argument(
+        "--judge-num-retries",
+        type=int,
+        default=defaults.judge_num_retries,
+        help="Retries litellm applies to a failed judge call, so a transient outage does not score criteria FAIL.",
+    )
     parser.add_argument(
         "--shell-timeout",
         type=int,
@@ -133,7 +168,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=4,
         help="Maximum agent tasks and grading cases processed concurrently; use 1 for fully sequential execution.",
     )
-    parser.add_argument("--output-dir", type=Path, default=Path("harvey_lab_run"))
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("harvey_lab_run"),
+        help="Where deliverables, `run_outputs.json`, and the eval reports are written (and resumed from).",
+    )
     parser.add_argument(
         "--rerun",
         action="store_true",
