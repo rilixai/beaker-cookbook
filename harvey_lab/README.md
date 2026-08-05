@@ -167,15 +167,6 @@ strings and set those providers' keys, e.g.
 `--task-model deepseek/deepseek-v4-pro` (`DEEPSEEK_API_KEY`) and
 `--judge-model deepseek/deepseek-v4-flash` (`DEEPSEEK_API_KEY`).
 
-In a **hosted Beaker run** (`rilixai_spec.py`) the split is different: the
-agent's calls go through the run's inference gateway, which holds the customer's
-credential and bills the model under test to the run — the sandbox needs no key
-for it. The judge does not, because the gateway only authorizes the models
-selected *for the run* and the judge is deliberately a fixed grader outside that
-set. So the run still needs `OPENROUTER_API_KEY` (or whichever provider
-`judge_model` names) in its environment, and the spec refuses to load without
-it.
-
 ## Run
 
 ```bash
