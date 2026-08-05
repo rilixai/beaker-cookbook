@@ -140,6 +140,49 @@ uv run pytest -q
 Hermetic — a scripted Stirrup client over the local shell backend, a stub judge,
 and a fixture task tree: no network, no spend.
 
+## Beaker prompt optimization
+
+Beaker is configured to optimize the agent's two real LLM-visible prompts:
+`system_prompt` and `task_template`. The spec constructs a fresh
+`HarveyLabAgent` for each prompt candidate, so both optimized values are passed
+to Stirrup's model call. The task model keeps its normal application defaults
+for local runs; a Beaker-selected model is routed only inside the optimization
+spec. The rubric judge remains fixed, which keeps scores comparable across
+candidates.
+
+`datasets/harvey-lab-pilot/` contains one real, pinned HARVEY-LABS train task
+and one validation task. It is a wiring pilot, not enough data for a useful
+optimization run. Its JSONL rows carry the task instructions, exact
+deliverables, criterion rubric, and fingerprint from the source task; the
+agent fetches or reads the matching task documents at rollout time.
+
+To create a larger dataset from the same real source, first materialize the
+chosen task folders and then export their labels:
+
+```bash
+export HARVEY_LAB_CACHE=/tmp/harvey-beaker-cache
+uv run harvey-lab fetch --split train --limit 20 --cache-dir "$HARVEY_LAB_CACHE"
+uv run harvey-lab fetch --split val --limit 10 --cache-dir "$HARVEY_LAB_CACHE"
+uv run python scripts/export_beaker_dataset.py \
+  --tasks-root "$HARVEY_LAB_CACHE/tasks" \
+  --output-dir datasets/harvey-lab-v1 --train-limit 20 --val-limit 10
+```
+
+With `OPENROUTER_API_KEY` set, validate the real pilot locally (this calls the
+task model and rubric judge, so it incurs provider usage):
+
+```bash
+export HARVEY_LAB_CACHE=/tmp/harvey-beaker-cache
+beaker run dry-run --config '{"local_dataset_path":"datasets/harvey-lab-pilot"}'
+```
+
+For a hosted optimization, authenticate and create/select the specific target
+agent before building the spec or uploading a larger dataset:
+
+```bash
+beaker login --agent --agent-name "Harvey LAB legal-agent prompts" --repo <owner/repo>
+```
+
 ## Notes
 
 - **Where `code_exec` runs.** By default: a temp directory on your machine, no
