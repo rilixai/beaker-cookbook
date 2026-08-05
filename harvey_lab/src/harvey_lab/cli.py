@@ -143,11 +143,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--task-llm-timeout",
         type=float,
         default=defaults.task_llm_timeout,
-        help=(
-            "Per-LLM-call timeout in seconds for the agent (task) model. Keep it "
-            "under the Beaker gateway's 870s ceiling so an abandoned call is not "
-            "billed after the harness gives up."
-        ),
+        help="Per-LLM-call timeout in seconds for the agent (task) model.",
     )
     parser.add_argument(
         "--judge-llm-timeout",
