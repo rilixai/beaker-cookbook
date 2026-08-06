@@ -69,7 +69,7 @@ class HarveyLabConfig:
 
     # Per-LLM-call timeout (seconds), one per model.
     task_llm_timeout: float = 600.0
-    judge_llm_timeout: float = 120.0
+    judge_llm_timeout: float = 300.0
 
     # Retries for a failed judge call. Stirrup owns task-model retries.
     judge_num_retries: int = 8

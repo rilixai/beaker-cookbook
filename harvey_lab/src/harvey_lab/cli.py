@@ -161,7 +161,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--judge-llm-timeout",
         type=float,
         default=defaults.judge_llm_timeout,
-        help="Per-LLM-call timeout in seconds for the rubric judge (a fast model, so keep it tight).",
+        help="Per-LLM-call timeout in seconds for the rubric judge.",
     )
     parser.add_argument(
         "--judge-num-retries",
