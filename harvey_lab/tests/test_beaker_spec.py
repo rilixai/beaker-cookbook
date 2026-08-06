@@ -1,4 +1,4 @@
-"""Tests for the Beaker prompt-optimization spec (``harvey_lab/rilixai_spec.py``).
+"""Tests for the Beaker prompt-optimization spec (``harvey_lab/beaker_spec.py``).
 
 These cover the two things that silently break a prompt-optimization
 integration: a dataset contract that drifts from the exported rows, and
@@ -20,8 +20,8 @@ from types import ModuleType
 from typing import Any
 
 import pytest
-from rilixai import Case, CaseResult, DatasetRowContext, OptimizationContext, validate_spec
-from rilixai.sdk import RolloutContext
+from beaker import Case, CaseResult, DatasetRowContext, OptimizationContext, validate_spec
+from beaker.sdk import RolloutContext
 
 from harvey_lab.agent.agent import HarveyLabAgent
 from harvey_lab.agent.prompts import load_harvey_lab_prompts
@@ -33,7 +33,7 @@ from tests.test_units import _fee_judge, _local_exec_factory, _ScriptedClient, _
 
 RECIPE_ROOT = Path(__file__).resolve().parents[1]
 COOKBOOK_ROOT = RECIPE_ROOT.parent
-SPEC_PATH = RECIPE_ROOT / "rilixai_spec.py"
+SPEC_PATH = RECIPE_ROOT / "beaker_spec.py"
 DATASET_DIR = COOKBOOK_ROOT / ".beaker" / "dataset"
 
 SYSTEM_MARKER = "CANDIDATE-SYSTEM-PROMPT-MARKER"
@@ -43,7 +43,7 @@ TEMPLATE_MARKER = "CANDIDATE-TASK-TEMPLATE-MARKER"
 @pytest.fixture(scope="module")
 def spec_module() -> ModuleType:
     """Import the spec by path (``.beaker`` is not an importable package name)."""
-    module_spec = importlib.util.spec_from_file_location("rilixai_spec_under_test", SPEC_PATH)
+    module_spec = importlib.util.spec_from_file_location("beaker_spec_under_test", SPEC_PATH)
     assert module_spec is not None and module_spec.loader is not None
     module = importlib.util.module_from_spec(module_spec)
     # dataclasses resolve their annotations through sys.modules, so register the
@@ -670,8 +670,8 @@ def test_a_hosted_rollout_routes_the_agent_through_the_inference_gateway(
     from it and the sandbox holds no provider key anyway. The gateway's
     canonical id and credentials must reach the client instead.
     """
-    monkeypatch.setenv("RILIXAI_INFERENCE_BASE_URL", "https://runtime.example/v1/llm")
-    monkeypatch.setenv("RILIXAI_INFERENCE_API_KEY", "run-token")
+    monkeypatch.setenv("BEAKER_INFERENCE_BASE_URL", "https://runtime.example/v1/llm")
+    monkeypatch.setenv("BEAKER_INFERENCE_API_KEY", "run-token")
     runtime = RolloutContext(
         model="z-ai/glm-5.2",
         provider="openrouter",
@@ -787,7 +787,7 @@ def test_build_spec_is_valid_and_declares_its_dataset_schema(spec_module: Module
     built = validate_spec(spec_module.build_spec(OptimizationContext()))
     assert built.name == "harvey-lab"
     assert built.data_loader.dataset_schema is spec_module.DATASET_SCHEMA
-    registration = spec_module.build_spec.__rilixai_spec__
+    registration = spec_module.build_spec.__beaker_spec__
     assert registration.name == "harvey-lab"
     assert registration.metadata["dataset_schema"]["json_schema"]["required"] == ["id", "input", "expected"]
 
@@ -796,7 +796,7 @@ def test_a_hosted_run_without_a_judge_credential_fails_at_spec_load(
     spec_module: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Cheaper to fail here than after every rollout has run the agent to completion."""
-    monkeypatch.setenv("RILIXAI_INFERENCE_BASE_URL", "https://runtime.example/v1/llm")
+    monkeypatch.setenv("BEAKER_INFERENCE_BASE_URL", "https://runtime.example/v1/llm")
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
     with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
