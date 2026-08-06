@@ -54,7 +54,7 @@ for running LAB-AA on Beaker. Each is explained where it lives.
 4. **Judge cost is unmeasured** — ``_grade``. Only the agent's calls are traced.
 5. **The recipe's dependencies are declared to the image by pointing
    ``source_dir`` at this directory** — ``.beaker/beaker.yaml``. Needs the
-   ``pip_install_from`` key that ``rilixai init`` already writes and nothing
+   ``pip_install_from`` key that ``beaker init`` already writes and nothing
    reads.
 6. **Agent binaries are hand-listed as ``apt_install``** — same file. No
    packaging metadata can express them, so the list can drift from what the
@@ -72,7 +72,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from rilixai import (
+from beaker import (
     Case,
     CaseDataLoader,
     CaseResult,
@@ -86,8 +86,8 @@ from rilixai import (
     optimization_targets_from_prompts,
     spec,
 )
-from rilixai.sdk import RolloutContext, inference_target
-from rilixai.tracing import Trace
+from beaker.sdk import RolloutContext, inference_target
+from beaker.tracing import Trace
 
 from harvey_lab.agent.agent import HarveyLabAgent, HarveyLabAgentOutput, _default_model_factory
 from harvey_lab.agent.workspace import task_source_from_dir
@@ -437,7 +437,7 @@ def _config_for_runtime(runtime: RolloutContext | Any) -> tuple[HarveyLabConfig,
     gateway wants.
 
     So a hosted rollout is routed through the run's inference gateway, which
-    :func:`rilixai.sdk.inference_target` resolves from the sandbox environment.
+    :func:`beaker.sdk.inference_target` resolves from the sandbox environment.
     That is the designed path, and it is load-bearing for more than provider
     resolution:
 
@@ -951,7 +951,7 @@ def _assert_judge_credential_present() -> None:
     which also removes the last provider credential from the sandbox, and lets
     grader spend be accounted separately instead of vanishing (contortion 4).
     """
-    if not os.environ.get("RILIXAI_INFERENCE_BASE_URL"):
+    if not os.environ.get("BEAKER_INFERENCE_BASE_URL"):
         return  # Not a hosted run; the local CLI's own env rules apply.
     judge_model = HarveyLabConfig().judge_model
     provider = judge_model.split("/", 1)[0]

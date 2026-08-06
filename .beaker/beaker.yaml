@@ -1,11 +1,11 @@
 # Beaker project config. Safe to commit — holds no secrets.
 # `spec` owns the local @spec entrypoint used by GitHub-backed spec builds and
-# `rilixai run dry-run`. Run-time flags override values here when provided. blo blo
+# `beaker run dry-run`. Run-time flags override values here when provided.
 spec:
   name: "harvey-lab"
-  target: "rilixai_spec:build_spec"
+  target: "beaker_spec:build_spec"
   task_type: "harvey-lab"
-  # TEMPORARY (contortion 5 in harvey_lab/rilixai_spec.py): `rilixai init`
+  # TEMPORARY (contortion 5 in harvey_lab/beaker_spec.py): `beaker init`
   # already writes a `pip_install_from: "harvey_lab/pyproject.toml"` key for
   # monorepo workspaces and *nothing on the platform reads it* — the push route
   # only knows `pip_install`. Until it is implemented, the layout below is how
@@ -23,7 +23,7 @@ spec:
   #
   # So: bundle = harvey_lab/. Two consequences worth knowing —
   #   * Only what lives under harvey_lab/ reaches the image. That is why
-  #     rilixai_spec.py sits at harvey_lab/rilixai_spec.py and not next to this
+  #     beaker_spec.py sits at harvey_lab/beaker_spec.py and not next to this
   #     file. This config itself must stay at <repo root>/.beaker/beaker.yaml;
   #     the platform only reads it there.
   #   * `package_import_root` must be set explicitly. Left unset it defaults to
@@ -31,7 +31,7 @@ spec:
   source_dir: "harvey_lab"
   package_import_root: "."
 
-  # Hand-maintained, and it can drift (contortion 6 in rilixai_spec.py).
+  # Hand-maintained, and it can drift (contortion 6 in beaker_spec.py).
   # System binaries the agent shells out to through `code_exec` (see
   # harvey_lab/README.md "Install"): `pandoc`, `pdftotext` (poppler-utils) and
   # `soffice` (libreoffice). These are named directly in the task prompt.
@@ -45,8 +45,8 @@ spec:
 scope_key: "harvey-lab-legal-agent"
 agent_key: "harvey-lab-legal-agent"
 config_defaults:
-  # Local scaffold dataset used only by `rilixai run dry-run`.
-  # For `rilixai run trigger`, pass --dataset or set dataset_ref.
+  # Local scaffold dataset used only by `beaker run dry-run`.
+  # For `beaker run trigger`, pass --dataset or set dataset_ref.
   local_dataset_path: ".beaker/dataset"
   # Spend cap: maximum metric/evaluation calls the optimizer may make.
   max_metric_calls: 50
