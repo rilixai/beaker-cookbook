@@ -122,6 +122,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Reasoning budget for a thinking task model (default xhigh = DeepSeek V4 Pro max reasoning); use none for non-reasoning models.",
     )
     parser.add_argument(
+        "--max-output-tokens",
+        type=int,
+        default=defaults.max_output_tokens,
+        help="Per-call completion-token cap for the agent model (litellm max_tokens).",
+    )
+    parser.add_argument(
+        "--context-window-tokens",
+        type=int,
+        default=defaults.context_window_tokens,
+        help="The task model's total context window; drives Stirrup's history summarization.",
+    )
+    parser.add_argument(
         "--judge-model",
         type=str,
         default=defaults.judge_model,
@@ -187,6 +199,8 @@ def _config_from_args(args: argparse.Namespace) -> HarveyLabConfig:
         task_model=args.task_model,
         task_temperature=args.task_temperature,
         task_reasoning_effort=args.task_reasoning_effort,
+        max_output_tokens=args.max_output_tokens,
+        context_window_tokens=args.context_window_tokens,
         judge_model=args.judge_model,
         judge_batch_size=args.judge_batch_size,
         max_turns=args.max_turns,
