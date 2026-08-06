@@ -333,7 +333,7 @@ class HarveyLabAgent:
                 self._config.task_temperature,
                 self._config.max_output_tokens,
                 self._config.context_window_tokens,
-                self._config.llm_timeout,
+                self._config.task_llm_timeout,
                 self._config.task_reasoning_effort,
             )
             agent: Any = Agent(

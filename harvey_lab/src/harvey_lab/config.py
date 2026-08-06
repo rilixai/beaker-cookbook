@@ -67,8 +67,9 @@ class HarveyLabConfig:
     # up to 200 turns per task; Harvey's own harness defaults to the same.
     max_turns: int = 200
 
-    # Per-LLM-call timeout (seconds), shared by the agent model and the judge.
-    llm_timeout: float = 120.0
+    # Per-LLM-call timeout (seconds), one per model.
+    task_llm_timeout: float = 600.0
+    judge_llm_timeout: float = 120.0
 
     # Retries for a failed judge call. Stirrup owns task-model retries.
     judge_num_retries: int = 8

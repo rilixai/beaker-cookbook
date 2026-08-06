@@ -152,10 +152,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Cap on the agent's tool-use turns per task (LAB-AA uses 200).",
     )
     parser.add_argument(
-        "--llm-timeout",
+        "--task-llm-timeout",
         type=float,
-        default=defaults.llm_timeout,
-        help="Per-LLM-call timeout in seconds, shared by the agent model and the judge.",
+        default=defaults.task_llm_timeout,
+        help="Per-LLM-call timeout in seconds for the agent (task) model.",
+    )
+    parser.add_argument(
+        "--judge-llm-timeout",
+        type=float,
+        default=defaults.judge_llm_timeout,
+        help="Per-LLM-call timeout in seconds for the rubric judge (a fast model, so keep it tight).",
     )
     parser.add_argument(
         "--judge-num-retries",
@@ -204,7 +210,8 @@ def _config_from_args(args: argparse.Namespace) -> HarveyLabConfig:
         judge_model=args.judge_model,
         judge_batch_size=args.judge_batch_size,
         max_turns=args.max_turns,
-        llm_timeout=args.llm_timeout,
+        task_llm_timeout=args.task_llm_timeout,
+        judge_llm_timeout=args.judge_llm_timeout,
         judge_num_retries=args.judge_num_retries,
         shell_timeout_s=args.shell_timeout,
         enable_view_image=not args.no_view_image,
@@ -518,7 +525,7 @@ def _run_evaluate(args: argparse.Namespace) -> int:
     outputs, errors = _load_persisted_outputs(args.output_dir, records, manifest)
     judge = build_rubric_judge(
         model=config.judge_model,
-        timeout=config.llm_timeout,
+        timeout=config.judge_llm_timeout,
         num_retries=config.judge_num_retries,
     )
     summary_path = args.output_dir / "eval_summary.json"
