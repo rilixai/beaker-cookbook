@@ -655,7 +655,7 @@ def test_the_spec_traces_the_recipes_own_client(spec_module: ModuleType, monkeyp
     monkeypatch.setattr(spec_module, "_default_model_factory", lambda *_args, **_kwargs: inner)
 
     routing = spec_module._TaskModelRouting()
-    client = spec_module._rollout_model_factory(_FakeTrace(), "openrouter", routing)("m", 0.0, 1, 1.0, "none")
+    client = spec_module._rollout_model_factory(_FakeTrace(), "openrouter", routing)("m", 0.0, 1, 1, 1.0, "none")
 
     assert isinstance(client, spec_module._TracedClient)
     assert client.model_slug == inner.model_slug
@@ -686,6 +686,9 @@ def test_a_hosted_rollout_routes_the_agent_through_the_inference_gateway(
     # can be asserted against a model the recipe knows nothing about.
     assert config.task_reasoning_effort == "none"
     assert config.max_output_tokens == 16_384
+    # The selected model's real window, so stirrup's summarization check is
+    # sized against the context and not the output cap.
+    assert config.context_window_tokens == 1_048_576
     assert routing.factory_kwargs() == {
         "api_base": "https://runtime.example/v1/llm",
         "api_key": "run-token",
@@ -698,7 +701,7 @@ def test_a_hosted_rollout_routes_the_agent_through_the_inference_gateway(
         return _UsageClient(input_tokens=1, answer=1, reasoning=0)
 
     monkeypatch.setattr(spec_module, "_default_model_factory", _record)
-    spec_module._rollout_model_factory(None, "openrouter", routing)(config.task_model, 0.0, 1, 1.0, "none")
+    spec_module._rollout_model_factory(None, "openrouter", routing)(config.task_model, 0.0, 1, 1, 1.0, "none")
 
     assert seen == routing.factory_kwargs()
 

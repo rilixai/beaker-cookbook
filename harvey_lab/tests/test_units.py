@@ -116,6 +116,10 @@ class _ScriptedClient:
     def max_tokens(self) -> int:
         return 100_000
 
+    @property
+    def context_window_tokens(self) -> int:
+        return 1_000_000
+
     async def generate(self, messages: list[Any], tools: dict[str, Any]) -> Any:
         from stirrup.core.models import AssistantMessage, ToolCall
 
@@ -149,7 +153,9 @@ def _workspace_from_messages(messages: list[Any]) -> str:
 
 
 def _scripted_model_factory(body: str, name: str = "memo.md") -> Any:
-    def _factory(_model: str, _temp: float, _max_tokens: int, _timeout: float, _reasoning: str) -> Any:
+    def _factory(
+        _model: str, _temp: float, _max_tokens: int, _context_window: int, _timeout: float, _reasoning: str
+    ) -> Any:
         return _ScriptedClient(deliverable_body=body, deliverable_name=name)
 
     return _factory
@@ -848,6 +854,10 @@ class _CapturingClient:
     def max_tokens(self) -> int:
         return 100_000
 
+    @property
+    def context_window_tokens(self) -> int:
+        return 1_000_000
+
     async def generate(self, messages: list[Any], tools: dict[str, Any]) -> Any:
         from stirrup.core.models import AssistantMessage, ToolCall
 
@@ -1316,7 +1326,7 @@ def test_default_config_targets_deepseek_v4_pro_max_reasoning() -> None:
 
 
 def test_default_model_factory_threads_reasoning_effort() -> None:
-    client = _default_model_factory("openrouter/deepseek/deepseek-v4-pro", 0.0, 16_384, 120.0, "xhigh")
+    client = _default_model_factory("openrouter/deepseek/deepseek-v4-pro", 0.0, 16_384, 262_144, 120.0, "xhigh")
     assert client._reasoning_effort == "xhigh"
     # A reasoning effort opts the param through litellm's model-support gate so a
     # newly released model (not yet in litellm's reasoning map) doesn't raise
@@ -1325,6 +1335,6 @@ def test_default_model_factory_threads_reasoning_effort() -> None:
     # Both the empty string and the "none" CLI sentinel disable reasoning for
     # non-thinking models — sending no reasoning param and no opt-in.
     for sentinel in ("", "none"):
-        disabled = _default_model_factory("openrouter/openai/gpt-4.1-mini", 0.0, 16_384, 120.0, sentinel)
+        disabled = _default_model_factory("openrouter/openai/gpt-4.1-mini", 0.0, 16_384, 262_144, 120.0, sentinel)
         assert disabled._reasoning_effort is None
         assert "allowed_openai_params" not in disabled._kwargs

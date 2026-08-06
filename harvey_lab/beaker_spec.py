@@ -46,8 +46,9 @@ for running LAB-AA on Beaker. Each is explained where it lives.
 2. **Output is capped at 16,384 tokens in a hosted run** — ``_config_for_runtime``.
    AA gives a reasoning model its creator's maximum, which the recipe knows for
    its own model and cannot know for a selected one. Needs the selected model's
-   capabilities (max output, reasoning tier) surfaced to the rollout; that
-   single addition removes this and (1).
+   capabilities (max output, context window, reasoning tier) surfaced to the
+   rollout; that single addition removes this, (1), and the
+   ``_CONTEXT_WINDOW_TOKENS`` table beside it.
 3. **The judge needs its own provider key in the sandbox** —
    ``_assert_judge_credential_present``. Needs the gateway to authorize a
    run-scoped grader model alongside the model targets.
@@ -400,6 +401,25 @@ def _seed_targets() -> OptimizationTargets:
 # with.
 _AA_NON_REASONING_OUTPUT_TOKENS = 16_384
 
+# Stirrup 0.2 sizes its history-summarization check against the model's real
+# context window, passed separately from the output cap above. The platform
+# does not yet surface a selected model's window to the rollout, so the
+# LAB-relevant OpenRouter models are listed here (per OpenRouter's model
+# metadata) with a floor every model in the catalog clears. Lifts with the
+# same capability-surfacing change as contortions 1 and 2.
+_CONTEXT_WINDOW_TOKENS: dict[str, int] = {
+    "qwen/qwen3.7-max": 1_000_000,
+    "qwen/qwen3.7-plus": 1_000_000,
+    "z-ai/glm-5.2": 1_048_576,
+    "z-ai/glm-5v-turbo": 202_752,
+    "z-ai/glm-4.7": 204_800,
+    "z-ai/glm-4.7-flash": 202_752,
+    "deepseek/deepseek-v4-pro": 1_048_576,
+    "deepseek/deepseek-v4-flash": 1_048_576,
+    "deepseek/deepseek-v3.2": 163_840,
+}
+_CONTEXT_WINDOW_FLOOR = 131_072
+
 
 @dataclass(frozen=True)
 class _TaskModelRouting:
@@ -480,6 +500,7 @@ def _config_for_runtime(runtime: RolloutContext | Any) -> tuple[HarveyLabConfig,
             # reasoning models get AA's 16,384, which matches the effort we
             # just dropped. Contortion 2, and it lifts with the same change.
             max_output_tokens=_AA_NON_REASONING_OUTPUT_TOKENS,
+            context_window_tokens=_CONTEXT_WINDOW_TOKENS.get(selected_model, _CONTEXT_WINDOW_FLOOR),
         ),
         _TaskModelRouting(api_base=target.base_url, api_key=target.api_key),
     )
@@ -632,7 +653,7 @@ def _grade(
     judge = _OutageAwareJudge(
         build_rubric_judge(
             config.judge_model,
-            timeout=config.llm_timeout,
+            timeout=config.judge_llm_timeout,
             num_retries=config.judge_num_retries,
         )
     )
@@ -708,7 +729,13 @@ class _TracedClient:
                         output_tokens=completion_tokens,
                         total_tokens=prompt_tokens + completion_tokens,
                     )
-            call.output(str(getattr(reply, "content", "") or ""))
+            blocks = getattr(reply, "blocks", None)
+            if blocks is not None:
+                from stirrup.core.models import joined_text
+
+                call.output(joined_text(blocks))
+            else:
+                call.output(str(getattr(reply, "content", "") or ""))
             return reply
 
 
@@ -729,8 +756,17 @@ def _rollout_model_factory(trace: Trace | None, provider: str, routing: _TaskMod
     """
     routing_kwargs = routing.factory_kwargs()
 
-    def _factory(model: str, temperature: float, max_tokens: int, timeout: float, reasoning_effort: str) -> Any:
-        client = _default_model_factory(model, temperature, max_tokens, timeout, reasoning_effort, **routing_kwargs)
+    def _factory(
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        context_window_tokens: int,
+        timeout: float,
+        reasoning_effort: str,
+    ) -> Any:
+        client = _default_model_factory(
+            model, temperature, max_tokens, context_window_tokens, timeout, reasoning_effort, **routing_kwargs
+        )
         if trace is None:
             return client
         return _TracedClient(client, trace=trace, provider=provider)

@@ -10,17 +10,7 @@ dependencies = [
   # Stirrup — Artificial Analysis' agent harness the LAB-AA leaderboard
   # runs on; supplies the tool-use loop + LLM routing. The litellm extra
   # pulls in the multi-provider client the task model is routed through.
-  #
-  # Held below 0.2 deliberately. 0.2.0 made `context_window_tokens` a required
-  # keyword argument of `LiteLLMClient.__init__` (and rejects
-  # `max_tokens > context_window_tokens`), so `_default_model_factory` raises
-  # TypeError on construction. It also reworks the message-block model, which
-  # `_TracedClient` and `view_image` handling touch. A hosted image is built by
-  # pip-installing this pyproject *without* uv.lock, so an unbounded pin
-  # upgrades silently there while local runs stay on the locked version — which
-  # is exactly how 0.2.0 broke every hosted rollout and no local one. Raise this
-  # bound only together with the code changes 0.2 needs.
-  "stirrup[litellm]>=0.1.12,<0.2",
+  "stirrup[litellm]>=0.2.0",
   "litellm>=1.74",
   # litellm lazy-imports tenacity for its retry wrapper but doesn't declare it.
   "tenacity>=8.0",
