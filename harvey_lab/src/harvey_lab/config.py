@@ -47,6 +47,11 @@ class HarveyLabConfig:
     # support up to 384,000 output tokens within their 1M context window. Use a
     # non-reasoning model if you want a smaller cap (16,384 per AA protocol).
     max_output_tokens: int = 384_000
+    # The model's total context window (tokens). Stirrup 0.2 uses this — not
+    # the output cap above — to decide when conversation history is summarized.
+    # DeepSeek V4 Pro/Flash have a 1M context window; set this to the task
+    # model's real window when swapping models (e.g. 262_144 for Qwen3.7 Max).
+    context_window_tokens: int = 1_000_000
 
     # The rubric judge. Graded in BATCHES of ``judge_batch_size`` criteria per
     # LLM call rather than one call per criterion — batched verification is an
@@ -62,8 +67,9 @@ class HarveyLabConfig:
     # up to 200 turns per task; Harvey's own harness defaults to the same.
     max_turns: int = 200
 
-    # Per-LLM-call timeout (seconds), shared by the agent model and the judge.
-    llm_timeout: float = 120.0
+    # Per-LLM-call timeout (seconds), one per model.
+    task_llm_timeout: float = 600.0
+    judge_llm_timeout: float = 300.0
 
     # Retries for a failed judge call. Stirrup owns task-model retries.
     judge_num_retries: int = 8
