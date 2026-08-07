@@ -106,8 +106,6 @@ from harvey_lab.evaluation.scoring import (
 
 logger = logging.getLogger(__name__)
 
-SPEC_NAME = "harvey-lab"
-
 # The prompt targets, named after the ``HarveyLabAgent`` keyword arguments they
 # are threaded into.
 SYSTEM_PROMPT_TARGET = "system_prompt"
@@ -1001,20 +999,13 @@ def _assert_judge_credential_present() -> None:
         )
 
 
-@spec(
-    name=SPEC_NAME,
-    version="v1",
-    description="Harvey LAB legal agent: optimize the LAB-AA system prompt + task template",
-    metadata={"task_type": SPEC_NAME},
-    dataset_schema=DATASET_SCHEMA,
-)
+@spec(dataset_schema=DATASET_SCHEMA)
 def build_spec(ctx: OptimizationContext) -> Spec:
     """Assemble the Harvey LAB prompt-optimization spec."""
     del ctx
     _warn_on_missing_agent_binaries()
     _assert_judge_credential_present()
     return Spec(
-        name=SPEC_NAME,
         seed_targets=_seed_targets(),
         data_loader=LabTaskDataLoader(),
         run_case=_run_case,

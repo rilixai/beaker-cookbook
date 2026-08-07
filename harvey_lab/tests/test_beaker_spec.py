@@ -788,10 +788,8 @@ def test_scorer_counts_only_verdicts_for_the_rows_own_criteria(spec_module: Modu
 
 def test_build_spec_is_valid_and_declares_its_dataset_schema(spec_module: ModuleType) -> None:
     built = validate_spec(spec_module.build_spec(OptimizationContext()))
-    assert built.name == "harvey-lab"
     assert built.data_loader.dataset_schema is spec_module.DATASET_SCHEMA
     registration = spec_module.build_spec.__beaker_spec__
-    assert registration.name == "harvey-lab"
     assert registration.metadata["dataset_schema"]["json_schema"]["required"] == ["id", "input", "expected"]
 
 
@@ -806,4 +804,4 @@ def test_a_hosted_run_without_a_judge_credential_fails_at_spec_load(
         spec_module.build_spec(OptimizationContext())
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
-    assert spec_module.build_spec(OptimizationContext()).name == "harvey-lab"
+    assert validate_spec(spec_module.build_spec(OptimizationContext())) is not None
