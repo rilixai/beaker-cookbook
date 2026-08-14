@@ -2,7 +2,9 @@
 # Source path: experiments/code/openai_agents/mcp.py
 # Commit: a072b7a86e7c1d5b1d7175659d750ebb9b79f10a
 # License: Apache-2.0 (see LICENSE in this recipe folder)
-# Modified: rewrote appworld_agents.code.* imports to package-relative imports; no logic changes.
+# Modified: rewrote appworld_agents.code.* imports to package-relative imports; normalize the
+# MCP URL to a trailing slash (the mcp 1.x streamable-http client otherwise trips on the
+# server's 307 redirect from /mcp to /mcp/).
 import json
 from contextlib import AsyncExitStack
 from types import TracebackType
@@ -59,14 +61,17 @@ class AgentsMCP:
                 return True
             return tool.name in allowed_tools
 
+        params = build_mcp_config(
+            transport=self.transport,
+            app_names=self._app_names,
+            remote_apis_url=self.remote_apis_url,
+            remote_mcp_url=self.remote_mcp_url,
+        )
+        if "url" in params and not params["url"].endswith("/"):
+            params["url"] += "/"
         server = self.server_class(
             name="AppWorld MCP",
-            params=build_mcp_config(
-                transport=self.transport,
-                app_names=self._app_names,
-                remote_apis_url=self.remote_apis_url,
-                remote_mcp_url=self.remote_mcp_url,
-            ),
+            params=params,
             tool_filter=tool_filter,
             cache_tools_list=False,
             use_structured_content=True,

@@ -12,7 +12,11 @@ changing a flag or a TOML config only.
 
 ## Quick start (< 5 minutes)
 
-Requires Python 3.12+ and [`uv`](https://docs.astral.sh/uv/). From this folder:
+Requires Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and
+[Git LFS](https://git-lfs.com/) (`apt-get install git-lfs && git lfs install`
+— the pinned `appworld` git dependency ships its base databases as LFS
+objects, and `appworld install` fails on unresolved LFS pointers). From this
+folder:
 
 ```bash
 uv sync --group dev                 # install (appworld + openai-agents, pinned)
@@ -103,7 +107,9 @@ reasoning models. `--family` overrides the gpt-5*-based auto-detection.)
 
 `--max-output-tokens` caps output tokens per model request; **reasoning tokens
 count toward it**, so reasoning models default to a much larger cap (65,536 vs
-16,384) to avoid truncated trajectories. There is no per-task cost cap in
+16,384) to avoid truncated trajectories. (The api_predictor pass rides Chat
+Completions — upstream's choice — where reasoning models take the cap as
+`max_completion_tokens`; the profile handles that automatically.) There is no per-task cost cap in
 upstream's openai_agents scaffold; watch the smoke slice before scaling up.
 
 > **Determinism note:** reasoning models accept no `temperature`/`seed`, so

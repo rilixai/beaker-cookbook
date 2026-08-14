@@ -65,15 +65,20 @@ class ModelProfile:
     def settings(self, for_agent: bool = True) -> dict[str, Any]:
         """The ``settings`` dict consumed by the vendored runner (it feeds
         ``ModelSettings(**settings)`` after popping the routing keys)."""
-        settings: dict[str, Any] = {
-            "store": False,
-            "max_tokens": self.max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS[self.family],
-        }
+        max_output_tokens = self.max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS[self.family]
+        settings: dict[str, Any] = {"store": False}
         if for_agent:
             # Routing keys popped by the vendored runner before it builds
             # ModelSettings. The predictor's LanguageModel builds ModelSettings
             # directly, so it must not see them.
             settings["api_type"] = self.api_type
+        if not for_agent and self.family == "reasoning":
+            # The predictor rides Chat Completions (upstream's LanguageModel
+            # uses OpenAIChatCompletionsModel), where reasoning models reject
+            # `max_tokens` and require `max_completion_tokens` instead.
+            settings["extra_args"] = {"max_completion_tokens": max_output_tokens}
+        else:
+            settings["max_tokens"] = max_output_tokens
         if self.family == "reasoning":
             settings["reasoning"] = Reasoning(effort=self.reasoning_effort)  # type: ignore[arg-type]
         else:

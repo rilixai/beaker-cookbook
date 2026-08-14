@@ -55,7 +55,15 @@ def test_predictor_settings_have_no_routing_keys() -> None:
     settings = ModelProfile(name="gpt-5.6", family="reasoning").settings(for_agent=False)
     assert "api_type" not in settings
     assert "tool_choice" not in settings
+    # The predictor rides Chat Completions, where reasoning models reject
+    # `max_tokens` and take `max_completion_tokens` instead.
+    assert "max_tokens" not in settings
+    assert settings["extra_args"] == {"max_completion_tokens": DEFAULT_MAX_OUTPUT_TOKENS["reasoning"]}
     ModelSettings(**settings)
+    standard = ModelProfile(name="gpt-4.1", family="standard").settings(for_agent=False)
+    assert standard["max_tokens"] == DEFAULT_MAX_OUTPUT_TOKENS["standard"]
+    assert "extra_args" not in standard
+    ModelSettings(**standard)
 
 
 def test_example_configs_load() -> None:

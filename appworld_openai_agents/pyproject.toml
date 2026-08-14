@@ -15,7 +15,10 @@ dependencies = [
   "openai-agents>=0.20,<1",
   # Must know the GPT-5 family + the `reasoning` field on Responses.
   "openai>=2.54,<3",
-  "mcp>=2.0,<3",
+  # appworld @ a072b7a uses the pre-2.0 mcp Server API (`Server.list_tools`).
+  "mcp>=1.19,<2",
+  # appworld renders prompt templates with jinja2 but doesn't declare it.
+  "jinja2>=3.1",
 ]
 
 [project.scripts]
@@ -50,7 +53,12 @@ addopts = "--import-mode=importlib"
 line-length = 119
 # The vendored subtree mirrors upstream AppWorld verbatim (imports aside);
 # keep it out of lint/format so diffs against upstream stay reviewable.
-extend-exclude = ["src/appworld_openai_agents/vendored"]
+extend-exclude = [
+  "src/appworld_openai_agents/vendored",
+  # Local benchmark artifacts written by `appworld download data` and runs.
+  "data",
+  "experiments",
+]
 
 [tool.ruff.lint]
 ignore = ["C901", "E501", "E721", "E741", "F402", "F823"]

@@ -25,7 +25,7 @@ All from the upstream repository at commit
 | `src/appworld_openai_agents/vendored/openai_agents/run.py` | `experiments/code/openai_agents/run.py` | imports rewritten to package-relative; LitellmModel import made lazy |
 | `src/appworld_openai_agents/vendored/openai_agents/api_predictor.py` | `experiments/code/openai_agents/api_predictor.py` | imports rewritten to package-relative |
 | `src/appworld_openai_agents/vendored/openai_agents/language_model.py` | `experiments/code/openai_agents/language_model.py` | LitellmModel import made lazy |
-| `src/appworld_openai_agents/vendored/openai_agents/mcp.py` | `experiments/code/openai_agents/mcp.py` | imports rewritten to package-relative |
+| `src/appworld_openai_agents/vendored/openai_agents/mcp.py` | `experiments/code/openai_agents/mcp.py` | imports rewritten to package-relative; MCP URL normalized to a trailing slash |
 | `src/appworld_openai_agents/vendored/common/api_predictor.py` | `experiments/code/common/api_predictor.py` | unmodified |
 | `src/appworld_openai_agents/vendored/common/logger.py` | `experiments/code/common/logger.py` | imports rewritten to package-relative |
 | `src/appworld_openai_agents/vendored/common/usage_tracker.py` | `experiments/code/common/usage_tracker.py` | unmodified |
@@ -47,6 +47,9 @@ Changes to vendored `.py` files (each file's header states its own):
 2. In `run.py` and `language_model.py`, the `LitellmModel` import was moved
    inside the `type == "litellm"` branch, because `litellm` is an optional
    extra this recipe does not install (it targets native OpenAI models).
+3. In `mcp.py`, the MCP server URL is normalized to end with a trailing
+   slash: the mcp 1.x streamable-http client otherwise fails on the server's
+   307 redirect from `/mcp` to `/mcp/`.
 
 Agent behavior is unchanged.
 The upstream jsonnet experiment config
