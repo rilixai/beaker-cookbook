@@ -165,10 +165,16 @@ def main(argv: list[str] | None = None) -> int:
             profile=profile,
             max_steps=args.max_steps,
         )
+        evaluate_flags = [f"--split {args.split}", f"--experiment-name {experiment_name}"]
+        if args.task_id:
+            evaluate_flags.append(f"--task-id {args.task_id}")
+        elif args.max_tasks is not None:
+            evaluate_flags.append(f"--max-tasks {args.max_tasks}")
+        if args.output_dir != Path("."):
+            evaluate_flags.append(f"--output-dir {args.output_dir}")
         print(
             f"\nPredictions written under {args.output_dir}/experiments/outputs/{experiment_name}/\n"
-            f"Score them with:\n  uv run appworld-openai-agents evaluate --split {args.split} "
-            f"--experiment-name {experiment_name}"
+            f"Score them with:\n  uv run appworld-openai-agents evaluate {' '.join(evaluate_flags)}"
         )
         return 0
 

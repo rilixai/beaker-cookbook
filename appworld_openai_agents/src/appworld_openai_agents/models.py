@@ -53,8 +53,6 @@ class ModelProfile:
     temperature: float = 0.0  # standard family only
     top_p: float | None = None  # standard family only
     max_output_tokens: int | None = None  # per model request; family default if None
-    base_url: str | None = None
-    api_key_env_name: str | None = None
 
     def __post_init__(self) -> None:
         if self.family not in ("reasoning", "standard"):
@@ -76,10 +74,6 @@ class ModelProfile:
             # ModelSettings. The predictor's LanguageModel builds ModelSettings
             # directly, so it must not see them.
             settings["api_type"] = self.api_type
-            if self.base_url is not None:
-                settings["base_url"] = self.base_url
-            if self.api_key_env_name is not None:
-                settings["api_key_env_name"] = self.api_key_env_name
         if self.family == "reasoning":
             settings["reasoning"] = Reasoning(effort=self.reasoning_effort)  # type: ignore[arg-type]
         else:
