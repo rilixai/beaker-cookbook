@@ -1,0 +1,113 @@
+"""Capability-aware model configuration.
+
+A single switch — ``family: reasoning | standard`` — decides which sampling
+parameters are attached to a model, so sweeping between GPT-5-style reasoning
+models and GPT-4.1/4o-style standard models is a config/flag change only:
+
+* ``reasoning`` models reject ``temperature`` / ``top_p`` / ``seed`` (the API
+  400s), and take a ``reasoning={"effort": ...}`` setting instead.
+* ``standard`` models take ``temperature`` / ``top_p`` as usual and reject the
+  ``reasoning`` field.
+
+Unsupported parameters are *omitted*, never sent-and-caught. The output of
+:meth:`ModelProfile.to_model_config` is the ``model`` dict the vendored
+AppWorld ``openai_agents`` runner expects (``type`` / ``name`` / ``settings``).
+"""
+
+from __future__ import annotations
+
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Literal
+
+from openai.types.shared import Reasoning
+
+
+ModelFamily = Literal["reasoning", "standard"]
+
+REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+# Sensible per-family defaults for the per-request output-token budget.
+# Reasoning tokens count toward the output budget, so reasoning models get a
+# much larger default to avoid truncated trajectories.
+DEFAULT_MAX_OUTPUT_TOKENS: dict[ModelFamily, int] = {
+    "reasoning": 65536,
+    "standard": 16384,
+}
+
+
+@dataclass
+class ModelProfile:
+    """One model entry: its identity plus the capability profile that decides
+    which sampling parameters may be attached."""
+
+    name: str
+    family: ModelFamily
+    # `responses` is the OpenAI Agents SDK default for native OpenAI models and
+    # serves both reasoning and non-reasoning models; it is what upstream's
+    # `type: openai` routes to (a plain model-name string resolved by the SDK,
+    # NOT LitellmModel), so reasoning settings are honored.
+    api_type: Literal["responses", "chat_completions"] = "responses"
+    reasoning_effort: str = "medium"  # reasoning family only
+    temperature: float = 0.0  # standard family only
+    top_p: float | None = None  # standard family only
+    max_output_tokens: int | None = None  # per model request; family default if None
+    base_url: str | None = None
+    api_key_env_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.family not in ("reasoning", "standard"):
+            raise ValueError(f"Unknown model family: {self.family!r}")
+        if self.family == "reasoning" and self.reasoning_effort not in REASONING_EFFORTS:
+            raise ValueError(
+                f"Invalid reasoning effort {self.reasoning_effort!r}; expected one of {REASONING_EFFORTS}."
+            )
+
+    def settings(self, for_agent: bool = True) -> dict[str, Any]:
+        """The ``settings`` dict consumed by the vendored runner (it feeds
+        ``ModelSettings(**settings)`` after popping the routing keys)."""
+        settings: dict[str, Any] = {
+            "store": False,
+            "max_tokens": self.max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS[self.family],
+        }
+        if for_agent:
+            # Routing keys popped by the vendored runner before it builds
+            # ModelSettings. The predictor's LanguageModel builds ModelSettings
+            # directly, so it must not see them.
+            settings["api_type"] = self.api_type
+            if self.base_url is not None:
+                settings["base_url"] = self.base_url
+            if self.api_key_env_name is not None:
+                settings["api_key_env_name"] = self.api_key_env_name
+        if self.family == "reasoning":
+            settings["reasoning"] = Reasoning(effort=self.reasoning_effort)  # type: ignore[arg-type]
+        else:
+            settings["temperature"] = self.temperature
+            if self.top_p is not None:
+                settings["top_p"] = self.top_p
+        if for_agent:
+            # Upstream reference config (openai_agents_mcp_agent): tool_choice
+            # auto + parallel tool calls, for all models.
+            settings["tool_choice"] = "auto"
+            settings["parallel_tool_calls"] = True
+        return settings
+
+    def to_model_config(self, for_agent: bool = True) -> dict[str, Any]:
+        # `type: openai` + a plain name string routes to the SDK's native
+        # OpenAI model classes (Responses by default), not LitellmModel.
+        return {
+            "type": "openai",
+            "name": self.name,
+            "settings": self.settings(for_agent=for_agent),
+            "extras": {},
+        }
+
+    @classmethod
+    def from_toml(cls, path: Path) -> ModelProfile:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+        model = data.get("model")
+        if not isinstance(model, dict):
+            raise ValueError(f"{path}: expected a [model] table.")
+        return cls(**model)
