@@ -50,6 +50,9 @@ Changes to vendored `.py` files (each file's header states its own):
 3. In `mcp.py`, the MCP server URL is normalized to end with a trailing
    slash: the mcp 1.x streamable-http client otherwise fails on the server's
    307 redirect from `/mcp` to `/mcp/`.
+4. In `mcp.py`, the log streamer handles tool outputs that arrive as a list
+   of content blocks rather than a JSON string (observed with gpt-4o), which
+   otherwise crashed the run in `json.loads`.
 
 Agent behavior is unchanged.
 The upstream jsonnet experiment config

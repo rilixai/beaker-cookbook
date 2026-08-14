@@ -4,7 +4,8 @@
 # License: Apache-2.0 (see LICENSE in this recipe folder)
 # Modified: rewrote appworld_agents.code.* imports to package-relative imports; normalize the
 # MCP URL to a trailing slash (the mcp 1.x streamable-http client otherwise trips on the
-# server's 307 redirect from /mcp to /mcp/).
+# server's 307 redirect from /mcp to /mcp/); log streamer handles tool outputs that arrive
+# as a list of content blocks instead of a JSON string (seen with gpt-4o).
 import json
 from contextlib import AsyncExitStack
 from types import TracebackType
@@ -110,7 +111,14 @@ class AgentsMCP:
                         message = f"{function_name}({', '.join(f'{k}={json.dumps(v)}' for k, v in arguments.items())})"
                         logger.show_message(role="agent", content=message)
                     if event.item.type == "tool_call_output_item":
-                        message_ = json.loads(event.item.raw_item["output"])
+                        # Tool outputs can be a list of content blocks rather
+                        # than a JSON string (seen with gpt-4o); don't crash
+                        # the run over log rendering.
+                        raw_output = event.item.raw_item["output"]
+                        if isinstance(raw_output, str):
+                            message_ = json.loads(raw_output)
+                        else:
+                            message_ = raw_output
                         message = json.dumps(message_, indent=4)
                         logger.show_message(role="environment", content=message)
                     if event.item.type == "message_output_item":
