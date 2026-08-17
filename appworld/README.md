@@ -3,7 +3,7 @@
 [AppWorld](https://github.com/StonyBrookNLP/appworld) is a benchmark where an
 agent operates a simulated world of 9 apps and 457 APIs to complete everyday
 tasks (send money, order things, manage playlists) for a supervisor. Every
-task is scored by real evaluation code, not string matching. It won the ACL
+task is scored by real evaluation code, not string matching. It received the ACL
 2024 Best Resource Paper award ([arXiv:2407.18901](https://arxiv.org/abs/2407.18901)).
 
 This recipe vendors the benchmark's own OpenAI Agents SDK agent so it runs
@@ -17,14 +17,6 @@ You need Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and
 [Git LFS](https://git-lfs.com/) (`apt-get install git-lfs && git lfs install`).
 Git LFS must come first: the pinned `appworld` dependency ships its databases
 as LFS objects, and `appworld install` fails without them. From this folder:
-
-> **If `uv sync` fails with an LFS error** (`smudge filter lfs failed`,
-> `remote missing object`, or `is a Git LFS pointer`): GitHub's LFS endpoint
-> is occasionally flaky, and uv caches partial clones. Run
-> `uv cache clean appworld` and retry. As a last resort, clone upstream
-> yourself (`git clone https://github.com/StonyBrookNLP/appworld.git && cd
-> appworld && git checkout a072b7a && git lfs pull`) and install it into the
-> venv with `uv pip install /path/to/appworld`.
 
 ```bash
 uv sync --group dev                 # install (appworld + openai-agents, pinned)
@@ -68,8 +60,7 @@ things:
 
 ## Data and splits
 
-`appworld download data` fetches everything locally — no HuggingFace, no
-leaderboard round-trip. All four splits run and score locally; the evaluation
+`appworld download data` fetches everything locally. All four splits run and score locally; the evaluation
 programs are public even for the test sets (only setup programs and reference
 solutions are withheld):
 
