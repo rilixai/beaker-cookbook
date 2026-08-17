@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 from agents.model_settings import ModelSettings
 
-from appworld_openai_agents.cli import _parse_args, _profile_from_args
-from appworld_openai_agents.models import DEFAULT_MAX_OUTPUT_TOKENS, ModelProfile
-from appworld_openai_agents.runner import MAX_STEPS, PROMPTS_DIR
+from appworld_openai_agents_sdk.cli import _parse_args, _profile_from_args
+from appworld_openai_agents_sdk.models import DEFAULT_MAX_OUTPUT_TOKENS, ModelProfile
+from appworld_openai_agents_sdk.runner import MAX_STEPS, PROMPTS_DIR
 
 
 RECIPE_DIR = Path(__file__).parent.parent
@@ -71,14 +71,14 @@ def test_example_configs_load() -> None:
 
 
 def test_agent_wiring() -> None:
-    from appworld_openai_agents.code_agent import run_code_agent_on_tasks  # noqa: F401
+    from appworld_openai_agents_sdk.code_agent import run_code_agent_on_tasks  # noqa: F401
 
     assert MAX_STEPS == 50
     assert (PROMPTS_DIR / "react_code_agent" / "instructions.txt").is_file()
 
 
 def test_vendored_files_self_contained() -> None:
-    vendored_dir = RECIPE_DIR / "src" / "appworld_openai_agents" / "vendored"
+    vendored_dir = RECIPE_DIR / "src" / "appworld_openai_agents_sdk" / "vendored"
     for path in vendored_dir.rglob("*.py"):
         for line in path.read_text().splitlines():
             stripped = line.strip()

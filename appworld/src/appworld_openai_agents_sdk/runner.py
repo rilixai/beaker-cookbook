@@ -2,7 +2,7 @@
 
 The agent-loop semantics mirror AppWorld's ReAct baseline (max_steps=50,
 random_seed=100, per-task worlds saved for the evaluator); the loop itself is
-implemented in :mod:`appworld_openai_agents.code_agent` on the OpenAI Agents
+implemented in :mod:`appworld_openai_agents_sdk.code_agent` on the OpenAI Agents
 SDK.
 """
 
@@ -11,8 +11,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from appworld_openai_agents.code_agent import run_code_agent_on_tasks
-from appworld_openai_agents.models import ModelProfile
+from appworld_openai_agents_sdk.code_agent import run_code_agent_on_tasks
+from appworld_openai_agents_sdk.models import ModelProfile
 
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"

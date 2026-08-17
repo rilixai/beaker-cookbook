@@ -6,7 +6,9 @@ tasks (send money, order things, manage playlists) for a supervisor. Every
 task is scored by real evaluation code, not string matching. It received the ACL
 2024 Best Resource Paper award ([arXiv:2407.18901](https://arxiv.org/abs/2407.18901)).
 
-This recipe is a ReAct-style code agent built on the OpenAI Agents SDK: the
+This recipe is a ReAct-style code agent built on the
+[OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) (the
+open-source agent framework — not a hosted OpenAI agent product): the
 agent gets one tool, `execute_python`, backed by AppWorld's own Python
 environment, where the apps are callable as `apis.<app>.<api>(...)`. Nothing
 is pre-selected for it — it discovers the APIs it needs at runtime through the
@@ -30,10 +32,10 @@ uv run appworld download data       # benchmark data, all splits (~few hundred M
 export OPENAI_API_KEY=sk-...        # or: cp .env.example .env and fill it in
 
 # Smoke run: 3 dev tasks (add --model gpt-4.1 etc. to pick another block of configs/model.toml)
-uv run appworld-openai-agents run --config configs/model.toml --split dev --max-tasks 3
+uv run appworld-openai-agents-sdk run --config configs/model.toml --split dev --max-tasks 3
 
 # Score it (prints TGC/SGC):
-uv run appworld-openai-agents evaluate --config configs/model.toml --split dev --max-tasks 3
+uv run appworld-openai-agents-sdk evaluate --config configs/model.toml --split dev --max-tasks 3
 ```
 
 The 3-task smoke run takes a minute or two and costs well under $1, depending
@@ -94,8 +96,8 @@ holding just the parameters that model supports; `--model <name>` picks the
 block (the file's `default` is `gpt-5.6`). Or skip the config and use flags:
 
 ```bash
-uv run appworld-openai-agents run --model gpt-5.6 --reasoning-effort high --split dev --max-tasks 3
-uv run appworld-openai-agents run --model gpt-4.1 --temperature 0 --split dev --max-tasks 3
+uv run appworld-openai-agents-sdk run --model gpt-5.6 --reasoning-effort high --split dev --max-tasks 3
+uv run appworld-openai-agents-sdk run --model gpt-4.1 --temperature 0 --split dev --max-tasks 3
 ```
 
 (`--reasoning-effort` only works with reasoning models and `--temperature`
@@ -114,12 +116,12 @@ cost cap — watch the smoke run before scaling up.
 
 | Path | What it holds |
 |---|---|
-| `src/appworld_openai_agents/cli.py` | `run` / `evaluate` subcommands and all flags |
-| `src/appworld_openai_agents/models.py` | the model layer (`ModelProfile`, reasoning vs standard) |
-| `src/appworld_openai_agents/code_agent.py` | the agent: `execute_python` tool + Agents SDK loop |
-| `src/appworld_openai_agents/runner.py` | entry point (max_steps=50, random_seed=100) |
-| `src/appworld_openai_agents/prompts/react_code_agent/` | agent instructions, adapted from upstream's ReAct prompt (Apache-2.0) |
-| `src/appworld_openai_agents/vendored/` | upstream logging helpers, verbatim modulo imports (Apache-2.0) |
+| `src/appworld_openai_agents_sdk/cli.py` | `run` / `evaluate` subcommands and all flags |
+| `src/appworld_openai_agents_sdk/models.py` | the model layer (`ModelProfile`, reasoning vs standard) |
+| `src/appworld_openai_agents_sdk/code_agent.py` | the agent: `execute_python` tool + Agents SDK loop |
+| `src/appworld_openai_agents_sdk/runner.py` | entry point (max_steps=50, random_seed=100) |
+| `src/appworld_openai_agents_sdk/prompts/react_code_agent/` | agent instructions, adapted from upstream's ReAct prompt (Apache-2.0) |
+| `src/appworld_openai_agents_sdk/vendored/` | upstream logging helpers, verbatim modulo imports (Apache-2.0) |
 | `configs/` | the example model config |
 
 ## Next steps (not implemented yet)

@@ -22,9 +22,9 @@ All from the upstream repository at commit
 
 | File in this recipe | Upstream path | Modified |
 |---|---|---|
-| `src/appworld_openai_agents/vendored/common/logger.py` | `experiments/code/common/logger.py` | imports rewritten to absolute `appworld_openai_agents.*` imports |
-| `src/appworld_openai_agents/vendored/common/usage_tracker.py` | `experiments/code/common/usage_tracker.py` | unmodified |
-| `src/appworld_openai_agents/prompts/react_code_agent/instructions.txt` | `experiments/prompts/react_code_agent/instructions.txt` | adapted: code is submitted via the `execute_python` tool instead of fenced ```python blocks in the message text; wording updated to match |
+| `src/appworld_openai_agents_sdk/vendored/common/logger.py` | `experiments/code/common/logger.py` | imports rewritten to absolute `appworld_openai_agents_sdk.*` imports |
+| `src/appworld_openai_agents_sdk/vendored/common/usage_tracker.py` | `experiments/code/common/usage_tracker.py` | unmodified |
+| `src/appworld_openai_agents_sdk/prompts/react_code_agent/instructions.txt` | `experiments/prompts/react_code_agent/instructions.txt` | adapted: code is submitted via the `execute_python` tool instead of fenced ```python blocks in the message text; wording updated to match |
 
 The prompt file carries no in-file provenance header because a header would
 change the prompt content itself; its provenance is recorded here instead.
@@ -32,7 +32,7 @@ change the prompt content itself; its provenance is recorded here instead.
 ## Modifications (Apache-2.0 §4(b) statement of changes)
 
 1. Internal `appworld_agents.code.*` imports rewritten to absolute
-   `appworld_openai_agents.*` imports so the recipe is self-contained.
+   `appworld_openai_agents_sdk.*` imports so the recipe is self-contained.
 2. The ReAct instructions were adapted from upstream's
    `react_code_agent/instructions.txt`: upstream's agent emits fenced
    ```python blocks in plain messages, this recipe's agent submits code
@@ -41,7 +41,7 @@ change the prompt content itself; its provenance is recorded here instead.
    variables, `apis.<app>.<api>` calls, `api_docs` discovery,
    `apis.supervisor.complete_task`) and the worked demo task are upstream's.
 
-The agent loop itself (`src/appworld_openai_agents/code_agent.py`) is this
+The agent loop itself (`src/appworld_openai_agents_sdk/code_agent.py`) is this
 recipe's own code, written against the OpenAI Agents SDK; it mirrors the
 semantics of upstream's ReAct baseline (`experiments/code/simplified/`):
 max_steps=50, random_seed=100, one code chunk per step executed with

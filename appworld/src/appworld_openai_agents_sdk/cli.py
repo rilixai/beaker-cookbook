@@ -1,7 +1,7 @@
 """CLI entrypoint for the AppWorld openai-agents baseline.
 
-Run as ``uv run appworld-openai-agents <command> ...`` (or ``python -m
-appworld_openai_agents.cli <command> ...``) after installing this project from
+Run as ``uv run appworld-openai-agents-sdk <command> ...`` (or ``python -m
+appworld_openai_agents_sdk.cli <command> ...``) after installing this project from
 its directory (``cd appworld && uv sync --group dev``), and
 after ``appworld install`` + ``appworld download data``.
 
@@ -35,8 +35,8 @@ from appworld import load_task_ids  # noqa: E402
 from appworld.common.printer import table_data_to_string  # noqa: E402
 from appworld.evaluator import Metric, evaluate_dataset, evaluate_tasks  # noqa: E402
 
-from appworld_openai_agents.models import REASONING_EFFORTS, ModelProfile, infer_family  # noqa: E402
-from appworld_openai_agents.runner import MAX_STEPS, run  # noqa: E402
+from appworld_openai_agents_sdk.models import REASONING_EFFORTS, ModelProfile, infer_family  # noqa: E402
+from appworld_openai_agents_sdk.runner import MAX_STEPS, run  # noqa: E402
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -174,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
             evaluate_flags.append(f"--output-dir {args.output_dir}")
         print(
             f"\nPredictions written under {args.output_dir}/experiments/outputs/{experiment_name}/\n"
-            f"Score them with:\n  uv run appworld-openai-agents evaluate {' '.join(evaluate_flags)}"
+            f"Score them with:\n  uv run appworld-openai-agents-sdk evaluate {' '.join(evaluate_flags)}"
         )
         return 0
 
@@ -183,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(
             f"No predictions found for experiment {experiment_name!r} "
             f"(expected {experiment_dir}/). Run the agent first:\n"
-            f"  uv run appworld-openai-agents run --config <toml> --split {args.split}"
+            f"  uv run appworld-openai-agents-sdk run --config <toml> --split {args.split}"
         )
 
     if args.task_id or args.max_tasks is not None:

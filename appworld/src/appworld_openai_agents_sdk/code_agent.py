@@ -38,8 +38,8 @@ from jinja2 import Template
 from openai import OpenAIError
 from rich import print
 
-from appworld_openai_agents.models import ModelProfile
-from appworld_openai_agents.vendored.common.logger import Logger
+from appworld_openai_agents_sdk.models import ModelProfile
+from appworld_openai_agents_sdk.vendored.common.logger import Logger
 
 
 set_tracing_disabled(True)

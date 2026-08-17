@@ -17,7 +17,7 @@ production setups.*
 harvey_lab/       Legal-research agent over the Harvey LABs corpus
 hotpotqa/         Multi-hop QA — PydanticAI tool-using agent (retrieve_k + summarize)
 apex_agents/      Professional knowledge-work tasks — ReAct toolbelt agent, LLM rubric judge
-appworld/         AppWorld benchmark — vendored OpenAI Agents SDK baseline, TGC/SGC eval
+appworld/         AppWorld benchmark — ReAct code agent on the OpenAI Agents SDK, TGC/SGC eval
 ```
 
 Each folder contains everything you need to reproduce the recipe: a
