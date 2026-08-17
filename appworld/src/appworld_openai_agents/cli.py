@@ -103,7 +103,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--experiment-name",
         type=str,
         default=None,
-        help="Experiment (output folder) name. Default `<agent>_<model>_<split>`.",
+        help="Experiment (output folder) name. Default `code_<model>_<split>`.",
     )
     parser.add_argument(
         "--output-dir",

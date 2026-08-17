@@ -18,6 +18,7 @@ from typing import Any, cast
 
 from agents import (
     Agent,
+    AgentsException,
     FunctionToolResult,
     MaxTurnsExceeded,
     RunContextWrapper,
@@ -31,8 +32,10 @@ from agents.model_settings import ModelSettings
 from agents.run import RunConfig
 from appworld import AppWorld
 from appworld.common.io import read_file
+from appworld.common.random import set_random_seed
 from appworld.task import Task
 from jinja2 import Template
+from openai import OpenAIError
 from rich import print
 
 from appworld_openai_agents.models import ModelProfile
@@ -124,6 +127,12 @@ async def run_code_agent_on_task(
             except MaxTurnsExceeded:
                 world.save_state()
                 break
+            # A model/API failure (malformed tool call, provider error) ends
+            # this task as a failure but must not abort the experiment.
+            except (AgentsException, OpenAIError) as error:
+                print(f"Task {task_id} aborted: {error!r}")
+                world.save_state()
+                break
             world.save_state()
             if world.task_completed():
                 break
@@ -166,6 +175,8 @@ async def run_code_agent_on_tasks(
     )
     with AppWorld.initializer(update_defaults=True, experiment_name=experiment_name, **appworld_config):
         for task_id in task_ids:
+            # Upstream reseeds per task (Agent.initialize); mirror it.
+            set_random_seed(appworld_config.get("random_seed"))
             await run_code_agent_on_task(
                 task_id=task_id,
                 profile=profile,
