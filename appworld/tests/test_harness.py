@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from agents.model_settings import ModelSettings
 
+from appworld_openai_agents.cli import _parse_args, _profile_from_args
 from appworld_openai_agents.models import DEFAULT_MAX_OUTPUT_TOKENS, ModelProfile
 from appworld_openai_agents.runner import PROMPTS_DIR, build_runner_config
 
@@ -44,6 +45,20 @@ def test_family_default_output_budgets() -> None:
     assert DEFAULT_MAX_OUTPUT_TOKENS["reasoning"] > DEFAULT_MAX_OUTPUT_TOKENS["standard"]
     profile = ModelProfile(name="gpt-5.6", family="reasoning", max_output_tokens=1234)
     assert profile.settings()["max_tokens"] == 1234
+
+
+def test_family_inferred_from_name() -> None:
+    assert ModelProfile(name="gpt-5.6").family == "reasoning"
+    assert ModelProfile(name="o3").family == "reasoning"
+    assert ModelProfile(name="gpt-4o").family == "standard"
+    assert ModelProfile(name="gpt-4o", family="reasoning").family == "reasoning"
+
+
+def test_cli_rejects_flags_for_wrong_model_kind() -> None:
+    with pytest.raises(SystemExit):
+        _profile_from_args(_parse_args(["run", "--model", "gpt-5.6", "--temperature", "0.2"]))
+    with pytest.raises(SystemExit):
+        _profile_from_args(_parse_args(["run", "--model", "gpt-4o", "--reasoning-effort", "high"]))
 
 
 def test_invalid_effort_rejected() -> None:

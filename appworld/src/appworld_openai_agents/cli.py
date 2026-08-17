@@ -12,9 +12,10 @@ Subcommands:
 * ``evaluate`` — score an experiment with AppWorld's evaluator and print
   TGC/SGC (Task / Scenario Goal Completion).
 
-The model is chosen with ``--config <toml>`` (see ``configs/``) or ``--model``
-+ ``--family`` (plus ``--reasoning-effort`` / ``--temperature``, each ignored
-for the other family).
+The model is chosen with ``--config <toml>`` (see ``configs/``) or ``--model``.
+Whether a model is a reasoning model (GPT-5 / o-series) or a standard one is
+inferred from its name; ``--reasoning-effort`` / ``--temperature`` each apply
+only to their kind of model and error out if given to the other.
 """
 
 from __future__ import annotations
@@ -23,13 +24,12 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import cast
 
 from appworld import load_task_ids
 from appworld.common.printer import table_data_to_string
 from appworld.evaluator import Metric, evaluate_dataset, evaluate_tasks
 
-from .models import REASONING_EFFORTS, ModelFamily, ModelProfile
+from .models import REASONING_EFFORTS, ModelProfile, infer_family
 from .runner import MAX_STEPS, run
 
 
@@ -51,7 +51,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--config",
         type=Path,
         default=None,
-        help="TOML model config (see configs/). Overrides --model/--family/--reasoning-effort/--temperature.",
+        help="TOML model config (see configs/). Overrides --model/--reasoning-effort/--temperature.",
     )
     parser.add_argument(
         "--model",
@@ -60,22 +60,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="OpenAI model name. Default `gpt-5.6`.",
     )
     parser.add_argument(
-        "--family",
-        choices=("reasoning", "standard"),
-        default=None,
-        help="Capability family. Defaults to `reasoning` for gpt-5* names, else `standard`.",
-    )
-    parser.add_argument(
         "--reasoning-effort",
         choices=REASONING_EFFORTS,
-        default="medium",
-        help="Reasoning effort (reasoning models only; ignored for standard models). Default `medium`.",
+        default=None,
+        help="Reasoning effort (reasoning models only). Default `medium`.",
     )
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.0,
-        help="Sampling temperature (standard models only; ignored for reasoning models). Default 0.0.",
+        default=None,
+        help="Sampling temperature (standard models only). Default 0.0.",
     )
     parser.add_argument(
         "--max-output-tokens",
@@ -129,15 +123,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _profile_from_args(args: argparse.Namespace) -> ModelProfile:
     if args.config is not None:
         return ModelProfile.from_toml(args.config)
-    family = cast(
-        ModelFamily,
-        args.family or ("reasoning" if args.model.startswith("gpt-5") else "standard"),
-    )
+    family = infer_family(args.model)
+    if family == "reasoning" and args.temperature is not None:
+        raise SystemExit(
+            f"--temperature is not supported by reasoning models like {args.model!r} (the API rejects it)."
+        )
+    if family == "standard" and args.reasoning_effort is not None:
+        raise SystemExit(f"--reasoning-effort is not supported by non-reasoning models like {args.model!r}.")
     return ModelProfile(
         name=args.model,
-        family=family,
-        reasoning_effort=args.reasoning_effort,
-        temperature=args.temperature,
+        reasoning_effort=args.reasoning_effort or "medium",
+        temperature=args.temperature if args.temperature is not None else 0.0,
         max_output_tokens=args.max_output_tokens,
     )
 

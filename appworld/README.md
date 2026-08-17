@@ -85,16 +85,22 @@ withheld ground truth.
 
 ## Switching models
 
-Each model declares a `family` (`src/appworld_openai_agents/models.py`), and
-that one switch decides which parameters get sent. Parameters a model doesn't
-support are simply not sent — no send-and-catch-400:
+Whether a model is a reasoning model is detected from its name
+(`src/appworld_openai_agents/models.py`: GPT-5 / o-series → reasoning,
+everything else → standard), and that decides which parameters get sent.
+Parameters a model doesn't support are simply not sent — no
+send-and-catch-400:
 
-- **`family = "reasoning"`** (GPT-5 family: `gpt-5.6`, `gpt-5.6-sol`,
-  `gpt-5.6-terra`, `gpt-5.6-luna`, ...): sends
+- **reasoning** (GPT-5 family: `gpt-5.6`, `gpt-5.6-sol`, `gpt-5.6-terra`,
+  `gpt-5.6-luna`, ...): sends
   `reasoning = {"effort": none|minimal|low|medium|high|xhigh|max}`; never
   sends `temperature`/`top_p`/`seed` (the API rejects them with a 400).
-- **`family = "standard"`** (`gpt-4.1`, `gpt-4o`, ...): sends
-  `temperature`/`top_p` as usual; never sends a `reasoning` field.
+- **standard** (`gpt-4.1`, `gpt-4o`, ...): sends `temperature`/`top_p` as
+  usual; never sends a `reasoning` field.
+
+If the auto-detection ever guesses wrong for a new model name, set
+`family = "reasoning"` or `family = "standard"` in the TOML config to
+override it.
 
 Both families use the OpenAI **Responses API** — the Agents SDK default for
 native OpenAI models (the config's `type: openai` resolves to the SDK's own
@@ -109,8 +115,8 @@ uv run appworld-openai-agents run --model gpt-5.6 --reasoning-effort high --spli
 uv run appworld-openai-agents run --model gpt-4.1 --temperature 0 --split dev --max-tasks 3
 ```
 
-(`--reasoning-effort` is ignored for standard models, `--temperature` for
-reasoning models. `--family` overrides the gpt-5*-based auto-detection.)
+(`--reasoning-effort` only works with reasoning models and `--temperature`
+only with standard ones — passing one to the wrong kind of model is an error.)
 
 `--max-output-tokens` caps output tokens per request. **Reasoning tokens
 count toward that cap**, so reasoning models default to a much larger one

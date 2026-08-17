@@ -1,8 +1,10 @@
 """Capability-aware model configuration.
 
-A single switch — ``family: reasoning | standard`` — decides which sampling
-parameters are attached to a model, so sweeping between GPT-5-style reasoning
-models and GPT-4.1/4o-style standard models is a config/flag change only:
+Each model belongs to a family — ``reasoning`` or ``standard`` — which decides
+which sampling parameters are attached. The family is inferred from the model
+name (GPT-5 / o-series → reasoning, everything else → standard), so sweeping
+models is just a name change; an explicit ``family`` override remains available
+for names the inference does not know about:
 
 * ``reasoning`` models reject ``temperature`` / ``top_p`` / ``seed`` (the API
   400s), and take a ``reasoning={"effort": ...}`` setting instead.
@@ -26,6 +28,15 @@ from openai.types.shared import Reasoning
 
 ModelFamily = Literal["reasoning", "standard"]
 
+# Model-name prefixes that identify OpenAI reasoning models.
+_REASONING_NAME_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+
+def infer_family(model_name: str) -> ModelFamily:
+    """Infer the capability family from the model name."""
+    return "reasoning" if model_name.startswith(_REASONING_NAME_PREFIXES) else "standard"
+
+
 REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 
 # Sensible per-family defaults for the per-request output-token budget.
@@ -43,7 +54,7 @@ class ModelProfile:
     which sampling parameters may be attached."""
 
     name: str
-    family: ModelFamily
+    family: ModelFamily | None = None  # inferred from name if not set
     # `responses` is the OpenAI Agents SDK default for native OpenAI models and
     # serves both reasoning and non-reasoning models; it is what upstream's
     # `type: openai` routes to (a plain model-name string resolved by the SDK,
@@ -55,6 +66,8 @@ class ModelProfile:
     max_output_tokens: int | None = None  # per model request; family default if None
 
     def __post_init__(self) -> None:
+        if self.family is None:
+            self.family = infer_family(self.name)
         if self.family not in ("reasoning", "standard"):
             raise ValueError(f"Unknown model family: {self.family!r}")
         if self.family == "reasoning" and self.reasoning_effort not in REASONING_EFFORTS:
@@ -65,21 +78,22 @@ class ModelProfile:
     def settings(self, for_agent: bool = True) -> dict[str, Any]:
         """The ``settings`` dict consumed by the vendored runner (it feeds
         ``ModelSettings(**settings)`` after popping the routing keys)."""
-        max_output_tokens = self.max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS[self.family]
+        family: ModelFamily = self.family or infer_family(self.name)
+        max_output_tokens = self.max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS[family]
         settings: dict[str, Any] = {"store": False}
         if for_agent:
             # Routing keys popped by the vendored runner before it builds
             # ModelSettings. The predictor's LanguageModel builds ModelSettings
             # directly, so it must not see them.
             settings["api_type"] = self.api_type
-        if not for_agent and self.family == "reasoning":
+        if not for_agent and family == "reasoning":
             # The predictor rides Chat Completions (upstream's LanguageModel
             # uses OpenAIChatCompletionsModel), where reasoning models reject
             # `max_tokens` and require `max_completion_tokens` instead.
             settings["extra_args"] = {"max_completion_tokens": max_output_tokens}
         else:
             settings["max_tokens"] = max_output_tokens
-        if self.family == "reasoning":
+        if family == "reasoning":
             settings["reasoning"] = Reasoning(effort=self.reasoning_effort)  # type: ignore[arg-type]
         else:
             settings["temperature"] = self.temperature
