@@ -178,6 +178,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    experiment_dir = args.output_dir / "experiments" / "outputs" / experiment_name / "tasks"
+    if not experiment_dir.is_dir():
+        raise SystemExit(
+            f"No predictions found for experiment {experiment_name!r} "
+            f"(expected {experiment_dir}/). Run the agent first:\n"
+            f"  uv run appworld-openai-agents run --config <toml> --split {args.split}"
+        )
+
     if args.task_id or args.max_tasks is not None:
         # Smoke-slice scoring: evaluate exactly the tasks that were run, not
         # the whole split (unrun tasks would deflate the metrics).
