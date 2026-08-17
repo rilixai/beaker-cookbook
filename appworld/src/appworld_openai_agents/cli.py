@@ -30,7 +30,7 @@ from appworld.common.printer import table_data_to_string
 from appworld.evaluator import Metric, evaluate_dataset, evaluate_tasks
 
 from appworld_openai_agents.models import REASONING_EFFORTS, ModelProfile, infer_family
-from appworld_openai_agents.runner import MAX_STEPS, run
+from appworld_openai_agents.runner import API_MODES, MAX_STEPS, run
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -96,6 +96,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Run/evaluate a single task id (overrides --split/--max-tasks task selection).",
     )
     parser.add_argument(
+        "--api-mode",
+        choices=API_MODES,
+        default="predicted",
+        help=(
+            "How the agent's tool list is chosen: `predicted` = LLM pre-pass picks ≤20 APIs "
+            "(upstream baseline), `all` = no pre-fill, all 457 APIs exposed (harder), "
+            "`ground_truth` = oracle tool list (easier). Default `predicted`."
+        ),
+    )
+    parser.add_argument(
         "--max-steps",
         type=int,
         default=MAX_STEPS,
@@ -151,7 +161,9 @@ def main(argv: list[str] | None = None) -> int:
     # AppWorld resolves data/ and experiments/outputs/ under APPWORLD_ROOT.
     os.environ["APPWORLD_ROOT"] = str(args.output_dir.resolve())
     profile = _profile_from_args(args)
-    experiment_name = args.experiment_name or f"openai_agents_{profile.name}_{args.split}"
+    experiment_name = args.experiment_name or "_".join(
+        ["openai_agents", profile.name, args.split] + ([args.api_mode] if args.api_mode != "predicted" else [])
+    )
 
     if args.command == "run":
         run(
@@ -159,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
             task_ids=_task_ids(args),
             profile=profile,
             max_steps=args.max_steps,
+            api_mode=args.api_mode,
         )
         evaluate_flags = [f"--split {args.split}", f"--experiment-name {experiment_name}"]
         if args.task_id:

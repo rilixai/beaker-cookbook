@@ -94,6 +94,14 @@ def test_example_configs_load() -> None:
         ModelProfile.from_toml(config, model="not-a-model")
 
 
+def test_api_mode_selects_predictor_mode() -> None:
+    profile = ModelProfile(name="gpt-4.1", family="standard")
+    assert build_runner_config(profile)["api_predictor"]["mode"] == "predicted"
+    assert build_runner_config(profile, api_mode="all")["api_predictor"]["mode"] == "all"
+    with pytest.raises(ValueError):
+        build_runner_config(profile, api_mode="nope")
+
+
 def test_runner_config_matches_upstream_semantics() -> None:
     config = build_runner_config(ModelProfile(name="gpt-4.1", family="standard"))
     agent = config["agent"]

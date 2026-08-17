@@ -51,6 +51,8 @@ things:
    LLM call reads the task plus one-line descriptions of all 457 APIs and
    picks the ≤20 it will likely need. Only those become tools. This is
    upstream's API-predictor design, kept as-is for a faithful baseline.
+   `--api-mode` changes it: `all` skips the pre-fill and exposes all 457 APIs
+   as tools (harder), `ground_truth` uses the oracle tool list (easier).
 3. **Runs the agent loop**: an Agents SDK `Agent` with upstream's
    instructions and demos, `tool_choice: auto`, `parallel_tool_calls: true`,
    and a 50-turn budget (`--max-steps`). A task ends when the agent calls
