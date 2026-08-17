@@ -54,6 +54,23 @@ def test_cli_rejects_flags_for_wrong_model_kind() -> None:
         _profile_from_args(_parse_args(["run", "--model", "gpt-4o", "--reasoning-effort", "high"]))
 
 
+def test_cli_flags_override_config() -> None:
+    config = RECIPE_DIR / "configs" / "model.toml"
+    profile = _profile_from_args(
+        _parse_args(["run", "--config", str(config), "--reasoning-effort", "high", "--max-output-tokens", "1234"])
+    )
+    assert profile.reasoning_effort == "high"
+    assert profile.max_output_tokens == 1234
+    profile = _profile_from_args(
+        _parse_args(["run", "--config", str(config), "--model", "gpt-4.1", "--temperature", "0.7"])
+    )
+    assert profile.temperature == 0.7
+    with pytest.raises(SystemExit):
+        _profile_from_args(
+            _parse_args(["run", "--config", str(config), "--model", "gpt-4.1", "--reasoning-effort", "high"])
+        )
+
+
 def test_invalid_effort_rejected() -> None:
     with pytest.raises(ValueError):
         ModelProfile(name="gpt-5.6", family="reasoning", reasoning_effort="ultra")
