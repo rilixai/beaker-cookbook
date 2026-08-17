@@ -35,7 +35,7 @@ from appworld import load_task_ids  # noqa: E402
 from appworld.common.printer import table_data_to_string  # noqa: E402
 from appworld.evaluator import Metric, evaluate_dataset, evaluate_tasks  # noqa: E402
 
-from appworld_openai_agents_sdk.models import REASONING_EFFORTS, ModelProfile, infer_family  # noqa: E402
+from appworld_openai_agents_sdk.models import REASONING_EFFORTS, ModelProfile  # noqa: E402
 from appworld_openai_agents_sdk.runner import MAX_STEPS, run  # noqa: E402
 
 
@@ -127,19 +127,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _profile_from_args(args: argparse.Namespace) -> ModelProfile:
     if args.config is not None:
-        return ModelProfile.from_toml(args.config, model=args.model)
-    model = args.model or "gpt-5.6"
-    family = infer_family(model)
-    if family == "reasoning" and args.temperature is not None:
-        raise SystemExit(f"--temperature is not supported by reasoning models like {model!r} (the API rejects it).")
-    if family == "standard" and args.reasoning_effort is not None:
-        raise SystemExit(f"--reasoning-effort is not supported by non-reasoning models like {model!r}.")
-    return ModelProfile(
-        name=model,
-        reasoning_effort=args.reasoning_effort or "medium",
-        temperature=args.temperature if args.temperature is not None else 0.0,
-        max_output_tokens=args.max_output_tokens,
-    )
+        profile = ModelProfile.from_toml(args.config, model=args.model)
+    else:
+        profile = ModelProfile(name=args.model or "gpt-5.6")
+    if profile.family == "reasoning" and args.temperature is not None:
+        raise SystemExit(
+            f"--temperature is not supported by reasoning models like {profile.name!r} (the API rejects it)."
+        )
+    if profile.family == "standard" and args.reasoning_effort is not None:
+        raise SystemExit(f"--reasoning-effort is not supported by non-reasoning models like {profile.name!r}.")
+    if args.reasoning_effort is not None:
+        profile.reasoning_effort = args.reasoning_effort
+    if args.temperature is not None:
+        profile.temperature = args.temperature
+    if args.max_output_tokens is not None:
+        profile.max_output_tokens = args.max_output_tokens
+    return profile
 
 
 def _task_ids(args: argparse.Namespace) -> list[str]:
