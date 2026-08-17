@@ -24,8 +24,8 @@ All from the upstream repository at commit
 |---|---|---|
 | `src/appworld_openai_agents/vendored/openai_agents/run.py` | `experiments/code/openai_agents/run.py` | imports rewritten to package-relative; LitellmModel import made lazy |
 | `src/appworld_openai_agents/vendored/openai_agents/api_predictor.py` | `experiments/code/openai_agents/api_predictor.py` | imports rewritten to package-relative |
-| `src/appworld_openai_agents/vendored/openai_agents/language_model.py` | `experiments/code/openai_agents/language_model.py` | LitellmModel import made lazy |
-| `src/appworld_openai_agents/vendored/openai_agents/mcp.py` | `experiments/code/openai_agents/mcp.py` | imports rewritten to package-relative; MCP URL normalized to a trailing slash |
+| `src/appworld_openai_agents/vendored/openai_agents/language_model.py` | `experiments/code/openai_agents/language_model.py` | LitellmModel import made lazy (and the `_model` annotation widened accordingly) |
+| `src/appworld_openai_agents/vendored/openai_agents/mcp.py` | `experiments/code/openai_agents/mcp.py` | imports rewritten to package-relative; MCP URL normalized to a trailing slash; log streamer handles list-form tool outputs |
 | `src/appworld_openai_agents/vendored/common/api_predictor.py` | `experiments/code/common/api_predictor.py` | unmodified |
 | `src/appworld_openai_agents/vendored/common/logger.py` | `experiments/code/common/logger.py` | imports rewritten to package-relative |
 | `src/appworld_openai_agents/vendored/common/usage_tracker.py` | `experiments/code/common/usage_tracker.py` | unmodified |
