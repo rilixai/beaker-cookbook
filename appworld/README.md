@@ -32,11 +32,11 @@ uv run appworld install             # AppWorld's one-time self-setup
 uv run appworld download data       # benchmark data, all splits (~few hundred MB)
 export OPENAI_API_KEY=sk-...        # or: cp .env.example .env and fill it in
 
-# Smoke run: 3 dev tasks with a reasoning model (or --config configs/gpt-4.1.toml)
-uv run appworld-openai-agents run --config configs/gpt-5.6.toml --split dev --max-tasks 3
+# Smoke run: 3 dev tasks (edit configs/model.toml to change models)
+uv run appworld-openai-agents run --config configs/model.toml --split dev --max-tasks 3
 
 # Score it (prints TGC/SGC):
-uv run appworld-openai-agents evaluate --config configs/gpt-5.6.toml --split dev --max-tasks 3
+uv run appworld-openai-agents evaluate --config configs/model.toml --split dev --max-tasks 3
 ```
 
 The 3-task smoke run takes roughly 5–15 minutes (tasks are long, multi-step)
@@ -106,9 +106,9 @@ Both families use the OpenAI **Responses API** — the Agents SDK default for
 native OpenAI models (the config's `type: openai` resolves to the SDK's own
 OpenAI model class, not LitellmModel, so reasoning settings are honored).
 
-Two ready-to-run configs ship in [`configs/`](configs): `gpt-5.6.toml`
-(reasoning, effort `medium`) and `gpt-4.1.toml` (standard, temperature 0).
-Or skip configs and use flags:
+One ready-to-run config ships in [`configs/model.toml`](configs/model.toml)
+(defaults to `gpt-5.6`, effort `medium`; the standard-model knobs are
+commented out in it). Or skip the config and use flags:
 
 ```bash
 uv run appworld-openai-agents run --model gpt-5.6 --reasoning-effort high --split dev --max-tasks 3
@@ -139,7 +139,7 @@ before scaling up.
 | `src/appworld_openai_agents/runner.py` | upstream's jsonnet config, translated (max_steps=50, api_predictor, server setup) |
 | `src/appworld_openai_agents/vendored/` | upstream agent code, verbatim modulo imports (Apache-2.0) |
 | `src/appworld_openai_agents/prompts/` | upstream agent + api_predictor prompts and demos |
-| `configs/` | the two example model configs (reasoning + standard) |
+| `configs/` | the example model config |
 
 ## Next steps (not implemented yet)
 
