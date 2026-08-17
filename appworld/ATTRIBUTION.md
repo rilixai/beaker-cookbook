@@ -54,11 +54,32 @@ Changes to vendored `.py` files (each file's header states its own):
    of content blocks rather than a JSON string (observed with gpt-4o), which
    otherwise crashed the run in `json.loads`.
 
-Agent behavior is unchanged.
-The upstream jsonnet experiment config
+The agent code itself is unchanged. The upstream jsonnet experiment config
 (`experiments/configs/openai_agents_mcp_agent/openai/.../*.jsonnet`) was
-translated — semantics preserved — into Python/TOML in this recipe's
-`src/appworld_openai_agents/runner.py` + `configs/*.toml`.
+translated into Python/TOML in this recipe's
+`src/appworld_openai_agents/runner.py` + `configs/model.toml`. The agent-loop
+keys (`max_steps`, prompts, api_predictor mode/demos/cap, server setup,
+`random_seed`, `tool_choice`, `parallel_tool_calls`) carry over key-for-key,
+with these deliberate deviations from the reference config:
+
+- **Agent API: Responses instead of Chat Completions.** Upstream's reference
+  jsonnet sets `api_type: "chat_completions"` for the agent loop; this recipe
+  defaults to the Responses API (configurable back via `api_type` in the
+  TOML), because the `reasoning` effort setting for GPT-5-family models is
+  only honored there. This changes the wire API relative to upstream's
+  published gpt-4o baseline run.
+- **An output-token cap is always sent.** Upstream's settings carry no
+  `max_tokens`; this recipe always sends a per-request cap (65,536 reasoning
+  / 16,384 standard by default, `max_output_tokens` to override) so long
+  reasoning trajectories fail loudly rather than silently truncating.
+- **`retrieve_apis: true` is not carried over.** The key appears in the
+  upstream jsonnet but is read by none of upstream's Python code (dead
+  config); the API-predictor pass it alludes to is controlled by the
+  predictor's `mode: "predicted"`, which is preserved.
+- **`type`, `seed`, and `cost_per_token` inside `settings` are not carried
+  over.** The installed `openai-agents` `ModelSettings` has no such fields
+  and silently ignores unknown keys, so upstream's own run never sends them
+  to the API either — dropping them is behavior-identical.
 
 The AppWorld *environment* (apps, tasks, servers, evaluator) is **not**
 vendored; it is consumed as the pinned external `appworld` package (installed

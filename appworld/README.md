@@ -19,6 +19,8 @@ Git LFS must come first: the pinned `appworld` dependency ships its databases
 as LFS objects, and `appworld install` fails without them. From this folder:
 
 ```bash
+export UV_GIT_LFS=1                 # uv skips LFS smudge by default; without this the
+                                    # appworld databases arrive as pointer files
 uv sync --group dev                 # install (appworld + openai-agents, pinned)
 uv run appworld install             # AppWorld's one-time self-setup
 uv run appworld download data       # benchmark data, all splits (~few hundred MB)
@@ -39,8 +41,8 @@ full split.
 
 ## What actually runs
 
-The vendored upstream code (`src/appworld_openai_agents/vendored/`, unchanged
-apart from import paths — see [ATTRIBUTION.md](ATTRIBUTION.md)) does four
+The vendored upstream code (`src/appworld_openai_agents/vendored/`, changed
+only in the small ways listed in [ATTRIBUTION.md](ATTRIBUTION.md)) does four
 things:
 
 1. **Starts the AppWorld servers** locally. The agent's tools are the
@@ -48,8 +50,7 @@ things:
 2. **Predicts which APIs the task needs.** Before the agent loop, a separate
    LLM call reads the task plus one-line descriptions of all 457 APIs and
    picks the ≤20 it will likely need. Only those become tools. This is
-   upstream's `retrieve_apis: true` design, kept as-is for a faithful
-   baseline.
+   upstream's API-predictor design, kept as-is for a faithful baseline.
 3. **Runs the agent loop**: an Agents SDK `Agent` with upstream's
    instructions and demos, `tool_choice: auto`, `parallel_tool_calls: true`,
    and a 50-turn budget (`--max-steps`). A task ends when the agent calls
@@ -66,7 +67,7 @@ solutions are withheld):
 
 | Split | Tasks | Use |
 |---|---|---|
-| `dev` | 60 | default smoke/validation slice (full ground truth) |
+| `dev` | 57 | default smoke/validation slice (full ground truth) |
 | `test_normal` | 168 | main baseline |
 | `test_challenge` | 417 | main baseline (harder) |
 | `train` | 90 | training/demos |

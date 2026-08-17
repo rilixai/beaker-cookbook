@@ -18,6 +18,8 @@ from appworld_openai_agents.runner import PROMPTS_DIR, build_runner_config
 RECIPE_DIR = Path(__file__).parent.parent
 
 
+# NOTE: ModelSettings silently ignores unknown kwargs, so constructing it is a
+# smoke check only — the explicit key assertions below do the real validation.
 def _model_settings_kwargs(settings: dict) -> dict:
     return {k: v for k, v in settings.items() if k not in ("api_type", "base_url", "api_key_env_name")}
 

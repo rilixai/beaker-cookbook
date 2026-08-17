@@ -42,6 +42,8 @@ REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 # Sensible per-family defaults for the per-request output-token budget.
 # Reasoning tokens count toward the output budget, so reasoning models get a
 # much larger default to avoid truncated trajectories.
+# NOTE: older snapshots have smaller output limits (e.g. gpt-4o-2024-05-13
+# caps at 4,096) — set `max_output_tokens` at or below the model's limit.
 DEFAULT_MAX_OUTPUT_TOKENS: dict[ModelFamily, int] = {
     "reasoning": 65536,
     "standard": 16384,
@@ -55,10 +57,10 @@ class ModelProfile:
 
     name: str
     family: ModelFamily | None = None  # inferred from name if not set
-    # `responses` is the OpenAI Agents SDK default for native OpenAI models and
-    # serves both reasoning and non-reasoning models; it is what upstream's
-    # `type: openai` routes to (a plain model-name string resolved by the SDK,
-    # NOT LitellmModel), so reasoning settings are honored.
+    # Deliberate deviation from upstream's reference config (which sets
+    # `chat_completions`): the Responses API is the only place the `reasoning`
+    # effort setting is honored, and it serves standard models too. See
+    # ATTRIBUTION.md. Routing stays native-OpenAI (not LitellmModel) either way.
     api_type: Literal["responses", "chat_completions"] = "responses"
     reasoning_effort: str = "medium"  # reasoning family only
     temperature: float = 0.0  # standard family only

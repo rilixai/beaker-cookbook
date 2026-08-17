@@ -4,8 +4,9 @@ This is the Python translation of upstream's reference jsonnet config
 (``experiments/configs/openai_agents_mcp_agent/openai/.../*.jsonnet`` at the
 vendored commit), with the model block supplied by a capability-aware
 :class:`~appworld_openai_agents.models.ModelProfile` instead of being
-hardcoded. The agent-loop semantics (max_steps=50, retrieve_apis=true, the
-api_predictor pass, server setup) are preserved.
+hardcoded. The agent-loop semantics (max_steps=50, the api_predictor pass,
+server setup) are preserved; deliberate deviations from the reference config
+are listed in ATTRIBUTION.md.
 """
 
 from __future__ import annotations

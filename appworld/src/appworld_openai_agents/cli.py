@@ -2,7 +2,7 @@
 
 Run as ``uv run appworld-openai-agents <command> ...`` (or ``python -m
 appworld_openai_agents.cli <command> ...``) after installing this project from
-its directory (``cd appworld_openai_agents && uv sync --group dev``), and
+its directory (``cd appworld && uv sync --group dev``), and
 after ``appworld install`` + ``appworld download data``.
 
 Subcommands:
