@@ -6,10 +6,13 @@ tasks (send money, order things, manage playlists) for a supervisor. Every
 task is scored by real evaluation code, not string matching. It received the ACL
 2024 Best Resource Paper award ([arXiv:2407.18901](https://arxiv.org/abs/2407.18901)).
 
-This recipe vendors the benchmark's own OpenAI Agents SDK agent so it runs
-standalone, and adds a small model layer on top so you can point it at any
-OpenAI model — reasoning (GPT-5 family) or not (GPT-4.1/4o) — by changing a
-flag or a TOML file.
+This recipe is a ReAct-style code agent built on the OpenAI Agents SDK: the
+agent gets one tool, `execute_python`, backed by AppWorld's own Python
+environment, where the apps are callable as `apis.<app>.<api>(...)`. Nothing
+is pre-selected for it — it discovers the APIs it needs at runtime through the
+`api_docs` app, like the AppWorld paper's ReAct baselines. A small model layer
+on top lets you point it at any OpenAI model — reasoning (GPT-5 family) or not
+(GPT-4.1/4o) — by changing a flag or a TOML file.
 
 ## Quick start (< 5 minutes)
 
@@ -41,23 +44,20 @@ full split.
 
 ## What actually runs
 
-The vendored upstream code (`src/appworld_openai_agents/vendored/`, changed
-only in the small ways listed in [ATTRIBUTION.md](ATTRIBUTION.md)) does four
-things:
+Per task (`src/appworld_openai_agents/code_agent.py`):
 
-1. **Starts the AppWorld servers** locally. The agent's tools are the
-   AppWorld APIs, exposed over MCP.
-2. **Predicts which APIs the task needs.** Before the agent loop, a separate
-   LLM call reads the task plus one-line descriptions of all 457 APIs and
-   picks the ≤20 it will likely need. Only those become tools. This is
-   upstream's API-predictor design, kept as-is for a faithful baseline.
-   `--api-mode` changes it: `all` skips the pre-fill and exposes all 457 APIs
-   as tools (harder), `ground_truth` uses the oracle tool list (easier).
-3. **Runs the agent loop**: an Agents SDK `Agent` with upstream's
-   instructions and demos, `tool_choice: auto`, `parallel_tool_calls: true`,
-   and a 50-turn budget (`--max-steps`). A task ends when the agent calls
-   `supervisor__complete_task` or runs out of turns.
-4. **Writes predictions** under `./experiments/outputs/<experiment-name>/`
+1. **A fresh AppWorld world is opened** for the task, with an in-process
+   Python interpreter where the apps are callable as `apis.<app>.<api>(...)`.
+   Variables persist across steps.
+2. **The agent loop runs on the Agents SDK**: an `Agent` with instructions
+   adapted from upstream's ReAct prompt (task, supervisor identity, app
+   descriptions, one worked demo) and a single `execute_python` tool. Each
+   turn the model submits a code chunk; the printed output (or traceback)
+   comes back as the observation. No API list is pre-filled — the agent looks
+   things up with `apis.api_docs.show_api_descriptions(...)` etc. as it goes.
+3. **A task ends** when the agent runs `apis.supervisor.complete_task(...)`
+   in code, or when the 50-step budget (`--max-steps`) runs out.
+4. **Predictions are written** under `./experiments/outputs/<experiment-name>/`
    in the format `appworld evaluate` expects. `evaluate` prints **TGC**
    (Task Goal Completion) and **SGC** (Scenario Goal Completion).
 
@@ -97,8 +97,7 @@ If the auto-detection ever guesses wrong for a new model name, set
 override it.
 
 Both families use the OpenAI **Responses API** — the Agents SDK default for
-native OpenAI models (the config's `type: openai` resolves to the SDK's own
-OpenAI model class, not LitellmModel, so reasoning settings are honored).
+native OpenAI models, and the only place reasoning settings are honored.
 
 [`configs/model.toml`](configs/model.toml) has one block per model, each
 holding just the parameters that model supports; `--model <name>` picks the
@@ -114,11 +113,8 @@ only with standard ones — passing one to the wrong kind of model is an error.)
 
 `--max-output-tokens` caps output tokens per request. **Reasoning tokens
 count toward that cap**, so reasoning models default to a much larger one
-(65,536 vs 16,384) to avoid truncated trajectories. One wrinkle: the API
-predictor uses Chat Completions (upstream's choice), where reasoning models
-take the cap as `max_completion_tokens`; the model layer handles that for
-you. Upstream's scaffold has no per-task cost cap — watch the smoke run
-before scaling up.
+(65,536 vs 16,384) to avoid truncated trajectories. There is no per-task
+cost cap — watch the smoke run before scaling up.
 
 > **Determinism note:** reasoning models accept no `temperature`/`seed`, so
 > runs are non-deterministic. For a citable number, run the eval N times and
@@ -130,17 +126,17 @@ before scaling up.
 |---|---|
 | `src/appworld_openai_agents/cli.py` | `run` / `evaluate` subcommands and all flags |
 | `src/appworld_openai_agents/models.py` | the model layer (`ModelProfile`, reasoning vs standard) |
-| `src/appworld_openai_agents/runner.py` | upstream's jsonnet config, translated (max_steps=50, api_predictor, server setup) |
-| `src/appworld_openai_agents/vendored/` | upstream agent code, verbatim modulo imports (Apache-2.0) |
-| `src/appworld_openai_agents/prompts/` | upstream agent + api_predictor prompts and demos |
+| `src/appworld_openai_agents/code_agent.py` | the agent: `execute_python` tool + Agents SDK loop |
+| `src/appworld_openai_agents/runner.py` | entry point (max_steps=50, random_seed=100) |
+| `src/appworld_openai_agents/prompts/react_code_agent/` | agent instructions, adapted from upstream's ReAct prompt (Apache-2.0) |
+| `src/appworld_openai_agents/vendored/` | upstream logging helpers, verbatim modulo imports (Apache-2.0) |
 | `configs/` | the example model config |
 
 ## Next steps (not implemented yet)
 
 - **Agent-owned `skills/` folder.** The injection point is where the agent's
-  system prompt is assembled: `run_agent_on_task` in
-  `src/appworld_openai_agents/vendored/openai_agents/run.py` renders
-  `prompts/function_calling_agent/instructions.txt` and sets
-  `agent.instructions = system_prompt`. A future `skills/` directory would be
-  loaded there and appended to the rendered instructions. Deliberately left
-  out of this baseline.
+  system prompt is assembled: `render_instructions` in
+  `src/appworld_openai_agents/code_agent.py` renders
+  `prompts/react_code_agent/instructions.txt` into `agent.instructions`. A
+  future `skills/` directory would be loaded there and appended to the
+  rendered instructions. Deliberately left out of this baseline.

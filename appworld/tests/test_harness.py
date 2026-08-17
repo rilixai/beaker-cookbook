@@ -1,8 +1,8 @@
 """Hermetic structural checks — no network, no API keys, no AppWorld data.
 
 They verify the property this recipe exists for: that the capability layer
-attaches exactly the right parameters per model family, and that the vendored
-scaffold + prompts + example configs are wired up and importable.
+attaches exactly the right parameters per model family, and that the agent,
+prompt, and example configs are wired up and importable.
 """
 
 from pathlib import Path
@@ -12,16 +12,10 @@ from agents.model_settings import ModelSettings
 
 from appworld_openai_agents.cli import _parse_args, _profile_from_args
 from appworld_openai_agents.models import DEFAULT_MAX_OUTPUT_TOKENS, ModelProfile
-from appworld_openai_agents.runner import PROMPTS_DIR, build_runner_config
+from appworld_openai_agents.runner import MAX_STEPS, PROMPTS_DIR
 
 
 RECIPE_DIR = Path(__file__).parent.parent
-
-
-# NOTE: ModelSettings silently ignores unknown kwargs, so constructing it is a
-# smoke check only — the explicit key assertions below do the real validation.
-def _model_settings_kwargs(settings: dict) -> dict:
-    return {k: v for k, v in settings.items() if k not in ("api_type", "base_url", "api_key_env_name")}
 
 
 def test_reasoning_profile_omits_sampling_params() -> None:
@@ -30,17 +24,14 @@ def test_reasoning_profile_omits_sampling_params() -> None:
     assert "top_p" not in settings
     assert "seed" not in settings
     assert settings["reasoning"].effort == "high"
-    assert settings["api_type"] == "responses"
-    # The dict must be consumable by the SDK's ModelSettings once the runner
-    # pops the routing keys.
-    ModelSettings(**_model_settings_kwargs(settings))
+    ModelSettings(**settings)
 
 
 def test_standard_profile_omits_reasoning() -> None:
     settings = ModelProfile(name="gpt-4.1", family="standard", temperature=0.3).settings()
     assert "reasoning" not in settings
     assert settings["temperature"] == 0.3
-    ModelSettings(**_model_settings_kwargs(settings))
+    ModelSettings(**settings)
 
 
 def test_family_default_output_budgets() -> None:
@@ -68,21 +59,6 @@ def test_invalid_effort_rejected() -> None:
         ModelProfile(name="gpt-5.6", family="reasoning", reasoning_effort="ultra")
 
 
-def test_predictor_settings_have_no_routing_keys() -> None:
-    settings = ModelProfile(name="gpt-5.6", family="reasoning").settings(for_agent=False)
-    assert "api_type" not in settings
-    assert "tool_choice" not in settings
-    # The predictor rides Chat Completions, where reasoning models reject
-    # `max_tokens` and take `max_completion_tokens` instead.
-    assert "max_tokens" not in settings
-    assert settings["extra_args"] == {"max_completion_tokens": DEFAULT_MAX_OUTPUT_TOKENS["reasoning"]}
-    ModelSettings(**settings)
-    standard = ModelProfile(name="gpt-4.1", family="standard").settings(for_agent=False)
-    assert standard["max_tokens"] == DEFAULT_MAX_OUTPUT_TOKENS["standard"]
-    assert "extra_args" not in standard
-    ModelSettings(**standard)
-
-
 def test_example_configs_load() -> None:
     config = RECIPE_DIR / "configs" / "model.toml"
     default = ModelProfile.from_toml(config)
@@ -94,40 +70,14 @@ def test_example_configs_load() -> None:
         ModelProfile.from_toml(config, model="not-a-model")
 
 
-def test_api_mode_selects_predictor_mode() -> None:
-    profile = ModelProfile(name="gpt-4.1", family="standard")
-    assert build_runner_config(profile)["api_predictor"]["mode"] == "predicted"
-    assert build_runner_config(profile)["api_predictor"]["max_predicted_apis"] == 20
-    all_predictor = build_runner_config(profile, api_mode="all")["api_predictor"]
-    assert all_predictor["mode"] == "all"
-    # Upstream truncates to max_predicted_apis in every mode; non-predicted
-    # modes must not be capped.
-    assert all_predictor["max_predicted_apis"] > 457
-    with pytest.raises(ValueError):
-        build_runner_config(profile, api_mode="nope")
+def test_agent_wiring() -> None:
+    from appworld_openai_agents.code_agent import run_code_agent_on_tasks  # noqa: F401
+
+    assert MAX_STEPS == 50
+    assert (PROMPTS_DIR / "react_code_agent" / "instructions.txt").is_file()
 
 
-def test_runner_config_matches_upstream_semantics() -> None:
-    config = build_runner_config(ModelProfile(name="gpt-4.1", family="standard"))
-    agent = config["agent"]
-    assert agent["max_steps"] == 50
-    assert agent["model"]["type"] == "openai"
-    assert agent["model"]["settings"]["tool_choice"] == "auto"
-    assert agent["model"]["settings"]["parallel_tool_calls"] is True
-    predictor = config["api_predictor"]
-    assert predictor["mode"] == "predicted"
-    assert predictor["max_predicted_apis"] == 20
-    assert config["appworld"]["start_servers"] is True
-    for key in ("prompt_file_path", "demo_messages_file_path"):
-        assert Path(agent[key]).is_file()
-    assert Path(predictor["prompt_file_path"]).is_file()
-    assert (PROMPTS_DIR / "function_calling_agent" / "demos.json").is_file()
-
-
-def test_vendored_scaffold_importable_and_self_contained() -> None:
-    from appworld_openai_agents.vendored.openai_agents import run as vendored_run
-
-    assert hasattr(vendored_run, "run_agent_on_tasks")
+def test_vendored_files_self_contained() -> None:
     vendored_dir = RECIPE_DIR / "src" / "appworld_openai_agents" / "vendored"
     for path in vendored_dir.rglob("*.py"):
         for line in path.read_text().splitlines():

@@ -22,64 +22,30 @@ All from the upstream repository at commit
 
 | File in this recipe | Upstream path | Modified |
 |---|---|---|
-| `src/appworld_openai_agents/vendored/openai_agents/run.py` | `experiments/code/openai_agents/run.py` | imports rewritten to absolute `appworld_openai_agents.*` imports; LitellmModel import made lazy |
-| `src/appworld_openai_agents/vendored/openai_agents/api_predictor.py` | `experiments/code/openai_agents/api_predictor.py` | imports rewritten to absolute `appworld_openai_agents.*` imports |
-| `src/appworld_openai_agents/vendored/openai_agents/language_model.py` | `experiments/code/openai_agents/language_model.py` | LitellmModel import made lazy (and the `_model` annotation widened accordingly) |
-| `src/appworld_openai_agents/vendored/openai_agents/mcp.py` | `experiments/code/openai_agents/mcp.py` | imports rewritten to absolute `appworld_openai_agents.*` imports; MCP URL normalized to a trailing slash; log streamer handles list-form tool outputs |
-| `src/appworld_openai_agents/vendored/common/api_predictor.py` | `experiments/code/common/api_predictor.py` | unmodified |
 | `src/appworld_openai_agents/vendored/common/logger.py` | `experiments/code/common/logger.py` | imports rewritten to absolute `appworld_openai_agents.*` imports |
 | `src/appworld_openai_agents/vendored/common/usage_tracker.py` | `experiments/code/common/usage_tracker.py` | unmodified |
-| `src/appworld_openai_agents/vendored/common/utils.py` | `experiments/code/common/utils.py` | imports rewritten to absolute `appworld_openai_agents.*` imports |
-| `src/appworld_openai_agents/prompts/api_predictor.txt` | `experiments/prompts/api_predictor.txt` | unmodified |
-| `src/appworld_openai_agents/prompts/function_calling_agent/instructions.txt` | `experiments/prompts/function_calling_agent/instructions.txt` | unmodified |
-| `src/appworld_openai_agents/prompts/function_calling_agent/demos.json` | `experiments/prompts/function_calling_agent/demos.json` | unmodified |
+| `src/appworld_openai_agents/prompts/react_code_agent/instructions.txt` | `experiments/prompts/react_code_agent/instructions.txt` | adapted: code is submitted via the `execute_python` tool instead of fenced ```python blocks in the message text; wording updated to match |
 
-The prompt/demo files carry no in-file provenance header because a header
-would change the prompt content itself (and JSON has no comments); their
-provenance is recorded here instead.
+The prompt file carries no in-file provenance header because a header would
+change the prompt content itself; its provenance is recorded here instead.
 
 ## Modifications (Apache-2.0 §4(b) statement of changes)
 
-Changes to vendored `.py` files (each file's header states its own):
+1. Internal `appworld_agents.code.*` imports rewritten to absolute
+   `appworld_openai_agents.*` imports so the recipe is self-contained.
+2. The ReAct instructions were adapted from upstream's
+   `react_code_agent/instructions.txt`: upstream's agent emits fenced
+   ```python blocks in plain messages, this recipe's agent submits code
+   through an `execute_python` function tool, so the submission instructions
+   and demo formatting were updated. The environment semantics (persistent
+   variables, `apis.<app>.<api>` calls, `api_docs` discovery,
+   `apis.supervisor.complete_task`) and the worked demo task are upstream's.
 
-1. Internal `appworld_agents.code.*` imports rewritten to absolute `appworld_openai_agents.*` imports
-   imports so the recipe is self-contained.
-2. In `run.py` and `language_model.py`, the `LitellmModel` import was moved
-   inside the `type == "litellm"` branch, because `litellm` is an optional
-   extra this recipe does not install (it targets native OpenAI models).
-3. In `mcp.py`, the MCP server URL is normalized to end with a trailing
-   slash: the mcp 1.x streamable-http client otherwise fails on the server's
-   307 redirect from `/mcp` to `/mcp/`.
-4. In `mcp.py`, the log streamer handles tool outputs that arrive as a list
-   of content blocks rather than a JSON string (observed with gpt-4o), which
-   otherwise crashed the run in `json.loads`.
-
-The agent code itself is unchanged. The upstream jsonnet experiment config
-(`experiments/configs/openai_agents_mcp_agent/openai/.../*.jsonnet`) was
-translated into Python/TOML in this recipe's
-`src/appworld_openai_agents/runner.py` + `configs/model.toml`. The agent-loop
-keys (`max_steps`, prompts, api_predictor mode/demos/cap, server setup,
-`random_seed`, `tool_choice`, `parallel_tool_calls`) carry over key-for-key,
-with these deliberate deviations from the reference config:
-
-- **Agent API: Responses instead of Chat Completions.** Upstream's reference
-  jsonnet sets `api_type: "chat_completions"` for the agent loop; this recipe
-  defaults to the Responses API (configurable back via `api_type` in the
-  TOML), because the `reasoning` effort setting for GPT-5-family models is
-  only honored there. This changes the wire API relative to upstream's
-  published gpt-4o baseline run.
-- **An output-token cap is always sent.** Upstream's settings carry no
-  `max_tokens`; this recipe always sends a per-request cap (65,536 reasoning
-  / 16,384 standard by default, `max_output_tokens` to override) so long
-  reasoning trajectories fail loudly rather than silently truncating.
-- **`retrieve_apis: true` is not carried over.** The key appears in the
-  upstream jsonnet but is read by none of upstream's Python code (dead
-  config); the API-predictor pass it alludes to is controlled by the
-  predictor's `mode: "predicted"`, which is preserved.
-- **`type`, `seed`, and `cost_per_token` inside `settings` are not carried
-  over.** The installed `openai-agents` `ModelSettings` has no such fields
-  and silently ignores unknown keys, so upstream's own run never sends them
-  to the API either — dropping them is behavior-identical.
+The agent loop itself (`src/appworld_openai_agents/code_agent.py`) is this
+recipe's own code, written against the OpenAI Agents SDK; it mirrors the
+semantics of upstream's ReAct baseline (`experiments/code/simplified/`):
+max_steps=50, random_seed=100, one code chunk per step executed with
+`world.execute`, episode ends on `world.task_completed()`.
 
 The AppWorld *environment* (apps, tasks, servers, evaluator) is **not**
 vendored; it is consumed as the pinned external `appworld` package (installed

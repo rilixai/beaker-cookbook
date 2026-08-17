@@ -6,8 +6,7 @@ its directory (``cd appworld && uv sync --group dev``), and
 after ``appworld install`` + ``appworld download data``.
 
 Subcommands:
-* ``run`` — start the AppWorld servers, run the vendored openai_agents agent
-  (with its api_predictor pass) over a split, and write predictions under
+* ``run`` — run the code agent over a split and write predictions under
   ``<output-dir>/experiments/outputs/<experiment-name>/``.
 * ``evaluate`` — score an experiment with AppWorld's evaluator and print
   TGC/SGC (Task / Scenario Goal Completion).
@@ -30,16 +29,15 @@ from appworld.common.printer import table_data_to_string
 from appworld.evaluator import Metric, evaluate_dataset, evaluate_tasks
 
 from appworld_openai_agents.models import REASONING_EFFORTS, ModelProfile, infer_family
-from appworld_openai_agents.runner import API_MODES, MAX_STEPS, run
+from appworld_openai_agents.runner import MAX_STEPS, run
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "AppWorld baseline: the benchmark's own OpenAI Agents SDK agent (MCP tools + "
-            "api_predictor), vendored, with a capability-aware model layer for sweeping "
-            "reasoning and non-reasoning OpenAI models. `run` produces predictions; "
-            "`evaluate` scores them (TGC/SGC)."
+            "AppWorld baseline: a ReAct-style code agent on the OpenAI Agents SDK, with a "
+            "capability-aware model layer for sweeping reasoning and non-reasoning OpenAI "
+            "models. `run` produces predictions; `evaluate` scores them (TGC/SGC)."
         ),
     )
     parser.add_argument(
@@ -96,16 +94,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Run/evaluate a single task id (overrides --split/--max-tasks task selection).",
     )
     parser.add_argument(
-        "--api-mode",
-        choices=API_MODES,
-        default="predicted",
-        help=(
-            "How the agent's tool list is chosen: `predicted` = LLM pre-pass picks ≤20 APIs "
-            "(upstream baseline), `all` = no pre-fill, all 457 APIs exposed (harder), "
-            "`ground_truth` = oracle tool list (easier). Default `predicted`."
-        ),
-    )
-    parser.add_argument(
         "--max-steps",
         type=int,
         default=MAX_STEPS,
@@ -115,7 +103,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--experiment-name",
         type=str,
         default=None,
-        help="Experiment (output folder) name. Default `openai_agents_<model>_<split>`.",
+        help="Experiment (output folder) name. Default `<agent>_<model>_<split>`.",
     )
     parser.add_argument(
         "--output-dir",
@@ -161,9 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     # AppWorld resolves data/ and experiments/outputs/ under APPWORLD_ROOT.
     os.environ["APPWORLD_ROOT"] = str(args.output_dir.resolve())
     profile = _profile_from_args(args)
-    experiment_name = args.experiment_name or "_".join(
-        ["openai_agents", profile.name, args.split] + ([args.api_mode] if args.api_mode != "predicted" else [])
-    )
+    experiment_name = args.experiment_name or "_".join(["code", profile.name, args.split])
 
     if args.command == "run":
         run(
@@ -171,7 +157,6 @@ def main(argv: list[str] | None = None) -> int:
             task_ids=_task_ids(args),
             profile=profile,
             max_steps=args.max_steps,
-            api_mode=args.api_mode,
         )
         evaluate_flags = [f"--split {args.split}", f"--experiment-name {experiment_name}"]
         if args.task_id:

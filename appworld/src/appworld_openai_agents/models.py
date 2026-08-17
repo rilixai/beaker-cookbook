@@ -11,9 +11,9 @@ for names the inference does not know about:
 * ``standard`` models take ``temperature`` / ``top_p`` as usual and reject the
   ``reasoning`` field.
 
-Unsupported parameters are *omitted*, never sent-and-caught. The output of
-:meth:`ModelProfile.to_model_config` is the ``model`` dict the vendored
-AppWorld ``openai_agents`` runner expects (``type`` / ``name`` / ``settings``).
+Unsupported parameters are *omitted*, never sent-and-caught.
+:meth:`ModelProfile.settings` is the kwargs dict for the Agents SDK's
+``ModelSettings``.
 """
 
 from __future__ import annotations
@@ -57,10 +57,8 @@ class ModelProfile:
 
     name: str
     family: ModelFamily | None = None  # inferred from name if not set
-    # Deliberate deviation from upstream's reference config (which sets
-    # `chat_completions`): the Responses API is the only place the `reasoning`
-    # effort setting is honored, and it serves standard models too. See
-    # ATTRIBUTION.md. Routing stays native-OpenAI (not LitellmModel) either way.
+    # The Responses API is the only place the `reasoning` effort setting is
+    # honored, and it serves standard models too.
     api_type: Literal["responses", "chat_completions"] = "responses"
     reasoning_effort: str = "medium"  # reasoning family only
     temperature: float = 0.0  # standard family only
@@ -77,46 +75,19 @@ class ModelProfile:
                 f"Invalid reasoning effort {self.reasoning_effort!r}; expected one of {REASONING_EFFORTS}."
             )
 
-    def settings(self, for_agent: bool = True) -> dict[str, Any]:
-        """The ``settings`` dict consumed by the vendored runner (it feeds
-        ``ModelSettings(**settings)`` after popping the routing keys)."""
+    def settings(self) -> dict[str, Any]:
+        """Kwargs for the Agents SDK's ``ModelSettings``."""
         family: ModelFamily = self.family or infer_family(self.name)
         max_output_tokens = self.max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS[family]
-        settings: dict[str, Any] = {"store": False}
-        if for_agent:
-            # Routing keys popped by the vendored runner before it builds
-            # ModelSettings. The predictor's LanguageModel builds ModelSettings
-            # directly, so it must not see them.
-            settings["api_type"] = self.api_type
-        if not for_agent and family == "reasoning":
-            # The predictor rides Chat Completions (upstream's LanguageModel
-            # uses OpenAIChatCompletionsModel), where reasoning models reject
-            # `max_tokens` and require `max_completion_tokens` instead.
-            settings["extra_args"] = {"max_completion_tokens": max_output_tokens}
-        else:
-            settings["max_tokens"] = max_output_tokens
+        settings: dict[str, Any] = {"store": False, "max_tokens": max_output_tokens}
         if family == "reasoning":
             settings["reasoning"] = Reasoning(effort=self.reasoning_effort)  # type: ignore[arg-type]
         else:
             settings["temperature"] = self.temperature
             if self.top_p is not None:
                 settings["top_p"] = self.top_p
-        if for_agent:
-            # Upstream reference config (openai_agents_mcp_agent): tool_choice
-            # auto + parallel tool calls, for all models.
-            settings["tool_choice"] = "auto"
-            settings["parallel_tool_calls"] = True
+        settings["tool_choice"] = "auto"
         return settings
-
-    def to_model_config(self, for_agent: bool = True) -> dict[str, Any]:
-        # `type: openai` + a plain name string routes to the SDK's native
-        # OpenAI model classes (Responses by default), not LitellmModel.
-        return {
-            "type": "openai",
-            "name": self.name,
-            "settings": self.settings(for_agent=for_agent),
-            "extras": {},
-        }
 
     @classmethod
     def from_toml(cls, path: Path, model: str | None = None) -> ModelProfile:
