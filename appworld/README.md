@@ -43,7 +43,7 @@ full split.
 
 ## What actually runs
 
-Per task (`src/appworld_openai_agents/code_agent.py`):
+Per task:
 
 1. **A fresh AppWorld world is opened** for the task, with an in-process
    Python interpreter where the apps are callable as `apis.<app>.<api>(...)`.
@@ -78,11 +78,9 @@ withheld ground truth.
 
 ## Switching models
 
-Whether a model is a reasoning model is detected from its name
-(`src/appworld_openai_agents/models.py`: GPT-5 / o-series → reasoning,
-everything else → standard), and that decides which parameters get sent.
-Parameters a model doesn't support are simply not sent — no
-send-and-catch-400:
+Whether a model is a reasoning model is detected from its name (GPT-5 /
+o-series → reasoning, everything else → standard), and that decides which
+parameters get sent — a model never receives a parameter it doesn't support:
 
 - **reasoning** (GPT-5 family: `gpt-5.6`, `gpt-5.6-sol`, `gpt-5.6-terra`,
   `gpt-5.6-luna`, ...): sends
@@ -90,13 +88,6 @@ send-and-catch-400:
   sends `temperature`/`top_p`/`seed` (the API rejects them with a 400).
 - **standard** (`gpt-4.1`, `gpt-4o`, ...): sends `temperature`/`top_p` as
   usual; never sends a `reasoning` field.
-
-If the auto-detection ever guesses wrong for a new model name, set
-`family = "reasoning"` or `family = "standard"` in the TOML config to
-override it.
-
-Both families use the OpenAI **Responses API** — the Agents SDK default for
-native OpenAI models, and the only place reasoning settings are honored.
 
 [`configs/model.toml`](configs/model.toml) has one block per model, each
 holding just the parameters that model supports; `--model <name>` picks the
@@ -133,9 +124,6 @@ cost cap — watch the smoke run before scaling up.
 
 ## Next steps (not implemented yet)
 
-- **Agent-owned `skills/` folder.** The injection point is where the agent's
-  system prompt is assembled: `render_instructions` in
-  `src/appworld_openai_agents/code_agent.py` renders
-  `prompts/react_code_agent/instructions.txt` into `agent.instructions`. A
-  future `skills/` directory would be loaded there and appended to the
-  rendered instructions. Deliberately left out of this baseline.
+- **Agent-owned `skills/` folder.** A future `skills/` directory of learned
+  playbooks/experience would be appended to the agent's instructions when the
+  system prompt is assembled. Deliberately left out of this baseline.
