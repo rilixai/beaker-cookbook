@@ -36,9 +36,8 @@ uv run appworld-openai-agents run --config configs/model.toml --split dev --max-
 uv run appworld-openai-agents evaluate --config configs/model.toml --split dev --max-tasks 3
 ```
 
-The 3-task smoke run takes roughly 5–15 minutes (tasks are long, multi-step)
-and costs on the order of $0.5–$2 depending on the model and reasoning
-effort. The real baselines are `--split test_normal` (168 tasks) and
+The 3-task smoke run takes a minute or two and costs well under $1, depending
+on the model and reasoning effort. The real baselines are `--split test_normal` (168 tasks) and
 `--split test_challenge` (417 tasks) — expect hours and tens of dollars per
 full split.
 
