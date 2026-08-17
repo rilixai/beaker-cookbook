@@ -22,14 +22,21 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import warnings
 from pathlib import Path
 
-from appworld import load_task_ids
-from appworld.common.printer import table_data_to_string
-from appworld.evaluator import Metric, evaluate_dataset, evaluate_tasks
 
-from appworld_openai_agents.models import REASONING_EFFORTS, ModelProfile, infer_family
-from appworld_openai_agents.runner import MAX_STEPS, run
+# The pinned appworld emits starlette deprecation warnings for every app
+# module it loads; they drown out the actual run output.
+warnings.filterwarnings("ignore", message=r".*HTTP_422_UNPROCESSABLE_ENTITY.*")
+warnings.filterwarnings("ignore", message=r".*starlette\.testclient.*")
+
+from appworld import load_task_ids  # noqa: E402
+from appworld.common.printer import table_data_to_string  # noqa: E402
+from appworld.evaluator import Metric, evaluate_dataset, evaluate_tasks  # noqa: E402
+
+from appworld_openai_agents.models import REASONING_EFFORTS, ModelProfile, infer_family  # noqa: E402
+from appworld_openai_agents.runner import MAX_STEPS, run  # noqa: E402
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
