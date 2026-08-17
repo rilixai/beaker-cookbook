@@ -82,8 +82,14 @@ def test_predictor_settings_have_no_routing_keys() -> None:
 
 
 def test_example_configs_load() -> None:
-    profile = ModelProfile.from_toml(RECIPE_DIR / "configs" / "model.toml")
-    assert profile.family == "reasoning" and profile.reasoning_effort == "medium"
+    config = RECIPE_DIR / "configs" / "model.toml"
+    default = ModelProfile.from_toml(config)
+    assert default.name == "gpt-5.6"
+    assert default.family == "reasoning" and default.reasoning_effort == "medium"
+    standard = ModelProfile.from_toml(config, model="gpt-4.1")
+    assert standard.family == "standard" and standard.temperature == 0.0
+    with pytest.raises(ValueError):
+        ModelProfile.from_toml(config, model="not-a-model")
 
 
 def test_runner_config_matches_upstream_semantics() -> None:

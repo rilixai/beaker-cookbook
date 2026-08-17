@@ -51,13 +51,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--config",
         type=Path,
         default=None,
-        help="TOML model config (see configs/). Overrides --model/--reasoning-effort/--temperature.",
+        help="TOML model config with one table per model (see configs/model.toml); --model picks the table.",
     )
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-5.6",
-        help="OpenAI model name. Default `gpt-5.6`.",
+        default=None,
+        help="OpenAI model name (with --config: which table to use). Default `gpt-5.6` / the config's `default`.",
     )
     parser.add_argument(
         "--reasoning-effort",
@@ -122,16 +122,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _profile_from_args(args: argparse.Namespace) -> ModelProfile:
     if args.config is not None:
-        return ModelProfile.from_toml(args.config)
-    family = infer_family(args.model)
+        return ModelProfile.from_toml(args.config, model=args.model)
+    model = args.model or "gpt-5.6"
+    family = infer_family(model)
     if family == "reasoning" and args.temperature is not None:
-        raise SystemExit(
-            f"--temperature is not supported by reasoning models like {args.model!r} (the API rejects it)."
-        )
+        raise SystemExit(f"--temperature is not supported by reasoning models like {model!r} (the API rejects it).")
     if family == "standard" and args.reasoning_effort is not None:
-        raise SystemExit(f"--reasoning-effort is not supported by non-reasoning models like {args.model!r}.")
+        raise SystemExit(f"--reasoning-effort is not supported by non-reasoning models like {model!r}.")
     return ModelProfile(
-        name=args.model,
+        name=model,
         reasoning_effort=args.reasoning_effort or "medium",
         temperature=args.temperature if args.temperature is not None else 0.0,
         max_output_tokens=args.max_output_tokens,

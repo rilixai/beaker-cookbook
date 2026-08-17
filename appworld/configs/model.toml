@@ -1,19 +1,20 @@
-# Model config. Change `name` to sweep models — whether it's a reasoning
-# model (gpt-5*/o-series) or a standard one is detected from the name, and
-# only the parameters that model supports get sent.
-[model]
-name = "gpt-5.6"
+# One block per model, holding just the parameters that model supports.
+# (Table names with dots must be quoted — TOML would otherwise nest them.)
+# Pick one with `--model <name>` (or the `default` below). Whether a model is
+# a reasoning model (gpt-5*/o-series) or a standard one is detected from its
+# name, and only supported parameters get sent.
+default = "gpt-5.6"
 
-# Reasoning models only (non-deterministic — run N times, report mean ± var):
+# Reasoning models (non-deterministic — run N times, report mean ± var):
+["gpt-5.6"]
 reasoning_effort = "medium"  # none|minimal|low|medium|high|xhigh|max
+# max_output_tokens = 65536  # per-request cap; reasoning tokens count toward it
 
-# Standard models only (e.g. name = "gpt-4.1" or "gpt-4o"):
-# temperature = 0.0
+# Standard models:
+["gpt-4.1"]
+temperature = 0.0
 # top_p = 1.0
+# max_output_tokens = 16384
 
-# Uncomment to override the per-request output-token cap (reasoning tokens
-# count toward it; defaults: 65536 reasoning, 16384 standard):
-# max_output_tokens = 65536
-
-# Escape hatch if name-based detection guesses wrong for a new model:
-# family = "reasoning"  # or "standard"
+["gpt-4o"]
+temperature = 0.0

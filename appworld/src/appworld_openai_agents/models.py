@@ -117,10 +117,17 @@ class ModelProfile:
         }
 
     @classmethod
-    def from_toml(cls, path: Path) -> ModelProfile:
+    def from_toml(cls, path: Path, model: str | None = None) -> ModelProfile:
+        """Load a profile from a TOML file with one table per model name
+        (plus a top-level ``default`` naming the table used when ``model`` is
+        not given)."""
         with open(path, "rb") as f:
             data = tomllib.load(f)
-        model = data.get("model")
-        if not isinstance(model, dict):
-            raise ValueError(f"{path}: expected a [model] table.")
-        return cls(**model)
+        tables = {k: v for k, v in data.items() if isinstance(v, dict)}
+        name = model or data.get("default")
+        if not isinstance(name, str):
+            raise ValueError(f"{path}: pass --model or set a top-level `default`.")
+        table = tables.get(name)
+        if table is None:
+            raise ValueError(f'{path}: no ["{name}"] table; available: {sorted(tables)}.')
+        return cls(name=name, **table)

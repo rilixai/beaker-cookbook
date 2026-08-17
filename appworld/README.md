@@ -24,7 +24,7 @@ uv run appworld install             # AppWorld's one-time self-setup
 uv run appworld download data       # benchmark data, all splits (~few hundred MB)
 export OPENAI_API_KEY=sk-...        # or: cp .env.example .env and fill it in
 
-# Smoke run: 3 dev tasks (edit configs/model.toml to change models)
+# Smoke run: 3 dev tasks (add --model gpt-4.1 etc. to pick another block of configs/model.toml)
 uv run appworld-openai-agents run --config configs/model.toml --split dev --max-tasks 3
 
 # Score it (prints TGC/SGC):
@@ -97,9 +97,9 @@ Both families use the OpenAI **Responses API** — the Agents SDK default for
 native OpenAI models (the config's `type: openai` resolves to the SDK's own
 OpenAI model class, not LitellmModel, so reasoning settings are honored).
 
-One ready-to-run config ships in [`configs/model.toml`](configs/model.toml)
-(defaults to `gpt-5.6`, effort `medium`; the standard-model knobs are
-commented out in it). Or skip the config and use flags:
+[`configs/model.toml`](configs/model.toml) has one block per model, each
+holding just the parameters that model supports; `--model <name>` picks the
+block (the file's `default` is `gpt-5.6`). Or skip the config and use flags:
 
 ```bash
 uv run appworld-openai-agents run --model gpt-5.6 --reasoning-effort high --split dev --max-tasks 3
