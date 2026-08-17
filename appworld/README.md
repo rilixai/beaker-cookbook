@@ -18,6 +18,14 @@ You need Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and
 Git LFS must come first: the pinned `appworld` dependency ships its databases
 as LFS objects, and `appworld install` fails without them. From this folder:
 
+> **If `uv sync` fails with an LFS error** (`smudge filter lfs failed`,
+> `remote missing object`, or `is a Git LFS pointer`): GitHub's LFS endpoint
+> is occasionally flaky, and uv caches partial clones. Run
+> `uv cache clean appworld` and retry. As a last resort, clone upstream
+> yourself (`git clone https://github.com/StonyBrookNLP/appworld.git && cd
+> appworld && git checkout a072b7a && git lfs pull`) and install it into the
+> venv with `uv pip install /path/to/appworld`.
+
 ```bash
 uv sync --group dev                 # install (appworld + openai-agents, pinned)
 uv run appworld install             # AppWorld's one-time self-setup
