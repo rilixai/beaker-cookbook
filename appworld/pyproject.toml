@@ -1,0 +1,99 @@
+[project]
+name = "appworld-openai-agents-sdk"
+version = "0.1.0"
+description = "AppWorld benchmark baseline: a ReAct-style code agent on the OpenAI Agents SDK, with a capability-aware model layer for sweeping OpenAI models."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "rilixai" }]
+dependencies = [
+  # The AppWorld environment + evaluator (NOT vendored). Pinned to the exact
+  # commit the prompt/helpers were vendored from.
+  "appworld @ git+https://github.com/StonyBrookNLP/appworld.git@a072b7a86e7c1d5b1d7175659d750ebb9b79f10a",
+  # The OpenAI Agents SDK driving the agent loop (Responses API, reasoning
+  # effort on GPT-5-family models).
+  "openai-agents>=0.20,<1",
+  # Must know the GPT-5 family + the `reasoning` field on Responses.
+  "openai>=2.54,<3",
+  # appworld @ a072b7a imports the pre-2.0 mcp Server API; pin so its own
+  # modules stay importable.
+  "mcp>=1.19,<2",
+  # appworld renders prompt templates with jinja2 but doesn't declare it.
+  "jinja2>=3.1",
+]
+
+[project.scripts]
+appworld-openai-agents-sdk = "appworld_openai_agents_sdk.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Standard src layout: the importable package lives at ``src/appworld_openai_agents_sdk``.
+[tool.hatch.build.targets.wheel]
+packages = ["src/appworld_openai_agents_sdk"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+# Dev tooling + lint/type/test config live in this project's own pyproject so
+# the folder is self-contained.
+
+[dependency-groups]
+dev = [
+  "ruff",
+  "mypy",
+  "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+
+[tool.ruff]
+line-length = 119
+# The vendored subtree mirrors upstream AppWorld verbatim (imports aside);
+# keep it out of lint/format so diffs against upstream stay reviewable.
+extend-exclude = [
+  "src/appworld_openai_agents_sdk/vendored",
+  # Local benchmark artifacts written by `appworld download data` and runs.
+  "data",
+  "experiments",
+]
+
+[tool.ruff.lint]
+ignore = ["C901", "E501", "E721", "E741", "F402", "F823"]
+select = ["C", "E", "F", "I", "W", "UP006", "UP007", "UP045"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402", "F401", "F403", "F811"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["appworld_openai_agents_sdk"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+show_error_codes = true
+files = ["src/appworld_openai_agents_sdk"]
+# The vendored subtree is typed to upstream's standard, not this repo's.
+exclude = ["src/appworld_openai_agents_sdk/vendored"]
+
+[[tool.mypy.overrides]]
+module = ["appworld_openai_agents_sdk.vendored.*"]
+follow_imports = "skip"
+
+# Upstream deps that ship without complete typing for our checks.
+[[tool.mypy.overrides]]
+module = ["appworld", "appworld.*"]
+ignore_missing_imports = true
+follow_imports = "skip"

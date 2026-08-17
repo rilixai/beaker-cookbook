@@ -17,6 +17,7 @@ production setups.*
 harvey_lab/       Legal-research agent over the Harvey LABs corpus
 hotpotqa/         Multi-hop QA — PydanticAI tool-using agent (retrieve_k + summarize)
 apex_agents/      Professional knowledge-work tasks — ReAct toolbelt agent, LLM rubric judge
+appworld/         AppWorld benchmark — ReAct code agent on the OpenAI Agents SDK, TGC/SGC eval
 ```
 
 Each folder contains everything you need to reproduce the recipe: a
@@ -33,7 +34,7 @@ a self-contained, standalone uv project (its own `pyproject.toml` +
 follow the commands in its README:
 
 ```bash
-cd harvey_lab        # or hotpotqa / apex_agents
+cd harvey_lab        # or hotpotqa / apex_agents / appworld
 uv sync --group dev
 ```
 
@@ -70,7 +71,7 @@ Run the checks from inside a recipe directory — each recipe carries its own
 lint/type/test config:
 
 ```bash
-cd harvey_lab        # or hotpotqa / apex_agents
+cd harvey_lab        # or hotpotqa / apex_agents / appworld
 uv sync --group dev
 uv run python -m pytest -q
 uv run ruff check
