@@ -54,7 +54,11 @@ def build_runner_config(
             "model_config": profile.to_model_config(for_agent=False),
             "prompt_file_path": str(PROMPTS_DIR / "api_predictor.txt"),
             "demo_task_ids": API_PREDICTOR_DEMO_TASK_IDS,
-            "max_predicted_apis": MAX_PREDICTED_APIS,
+            # Upstream's predictor truncates the API list to max_predicted_apis
+            # in every mode, so lift the cap for the non-predicted modes
+            # ("all" must expose all 457 APIs, "ground_truth" the full oracle
+            # list).
+            "max_predicted_apis": MAX_PREDICTED_APIS if api_mode == "predicted" else 10**9,
         },
         "appworld": {
             "start_servers": True,

@@ -97,7 +97,12 @@ def test_example_configs_load() -> None:
 def test_api_mode_selects_predictor_mode() -> None:
     profile = ModelProfile(name="gpt-4.1", family="standard")
     assert build_runner_config(profile)["api_predictor"]["mode"] == "predicted"
-    assert build_runner_config(profile, api_mode="all")["api_predictor"]["mode"] == "all"
+    assert build_runner_config(profile)["api_predictor"]["max_predicted_apis"] == 20
+    all_predictor = build_runner_config(profile, api_mode="all")["api_predictor"]
+    assert all_predictor["mode"] == "all"
+    # Upstream truncates to max_predicted_apis in every mode; non-predicted
+    # modes must not be capped.
+    assert all_predictor["max_predicted_apis"] > 457
     with pytest.raises(ValueError):
         build_runner_config(profile, api_mode="nope")
 
