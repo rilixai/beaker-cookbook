@@ -22,14 +22,14 @@ All from the upstream repository at commit
 
 | File in this recipe | Upstream path | Modified |
 |---|---|---|
-| `src/appworld_openai_agents/vendored/openai_agents/run.py` | `experiments/code/openai_agents/run.py` | imports rewritten to package-relative; LitellmModel import made lazy |
-| `src/appworld_openai_agents/vendored/openai_agents/api_predictor.py` | `experiments/code/openai_agents/api_predictor.py` | imports rewritten to package-relative |
+| `src/appworld_openai_agents/vendored/openai_agents/run.py` | `experiments/code/openai_agents/run.py` | imports rewritten to absolute `appworld_openai_agents.*` imports; LitellmModel import made lazy |
+| `src/appworld_openai_agents/vendored/openai_agents/api_predictor.py` | `experiments/code/openai_agents/api_predictor.py` | imports rewritten to absolute `appworld_openai_agents.*` imports |
 | `src/appworld_openai_agents/vendored/openai_agents/language_model.py` | `experiments/code/openai_agents/language_model.py` | LitellmModel import made lazy (and the `_model` annotation widened accordingly) |
-| `src/appworld_openai_agents/vendored/openai_agents/mcp.py` | `experiments/code/openai_agents/mcp.py` | imports rewritten to package-relative; MCP URL normalized to a trailing slash; log streamer handles list-form tool outputs |
+| `src/appworld_openai_agents/vendored/openai_agents/mcp.py` | `experiments/code/openai_agents/mcp.py` | imports rewritten to absolute `appworld_openai_agents.*` imports; MCP URL normalized to a trailing slash; log streamer handles list-form tool outputs |
 | `src/appworld_openai_agents/vendored/common/api_predictor.py` | `experiments/code/common/api_predictor.py` | unmodified |
-| `src/appworld_openai_agents/vendored/common/logger.py` | `experiments/code/common/logger.py` | imports rewritten to package-relative |
+| `src/appworld_openai_agents/vendored/common/logger.py` | `experiments/code/common/logger.py` | imports rewritten to absolute `appworld_openai_agents.*` imports |
 | `src/appworld_openai_agents/vendored/common/usage_tracker.py` | `experiments/code/common/usage_tracker.py` | unmodified |
-| `src/appworld_openai_agents/vendored/common/utils.py` | `experiments/code/common/utils.py` | imports rewritten to package-relative |
+| `src/appworld_openai_agents/vendored/common/utils.py` | `experiments/code/common/utils.py` | imports rewritten to absolute `appworld_openai_agents.*` imports |
 | `src/appworld_openai_agents/prompts/api_predictor.txt` | `experiments/prompts/api_predictor.txt` | unmodified |
 | `src/appworld_openai_agents/prompts/function_calling_agent/instructions.txt` | `experiments/prompts/function_calling_agent/instructions.txt` | unmodified |
 | `src/appworld_openai_agents/prompts/function_calling_agent/demos.json` | `experiments/prompts/function_calling_agent/demos.json` | unmodified |
@@ -42,7 +42,7 @@ provenance is recorded here instead.
 
 Changes to vendored `.py` files (each file's header states its own):
 
-1. Internal `appworld_agents.code.*` imports rewritten to package-relative
+1. Internal `appworld_agents.code.*` imports rewritten to absolute `appworld_openai_agents.*` imports
    imports so the recipe is self-contained.
 2. In `run.py` and `language_model.py`, the `LitellmModel` import was moved
    inside the `type == "litellm"` branch, because `litellm` is an optional

@@ -29,8 +29,8 @@ from appworld import load_task_ids
 from appworld.common.printer import table_data_to_string
 from appworld.evaluator import Metric, evaluate_dataset, evaluate_tasks
 
-from .models import REASONING_EFFORTS, ModelProfile, infer_family
-from .runner import MAX_STEPS, run
+from appworld_openai_agents.models import REASONING_EFFORTS, ModelProfile, infer_family
+from appworld_openai_agents.runner import MAX_STEPS, run
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

@@ -2,7 +2,7 @@
 # Source path: experiments/code/openai_agents/run.py
 # Commit: a072b7a86e7c1d5b1d7175659d750ebb9b79f10a
 # License: Apache-2.0 (see LICENSE in this recipe folder)
-# Modified: rewrote appworld_agents.code.* imports to package-relative imports; made the
+# Modified: rewrote appworld_agents.code.* imports to absolute appworld_openai_agents.* imports; made the
 # LitellmModel import lazy (litellm is an optional extra not installed by this recipe);
 # no logic changes.
 import asyncio
@@ -28,10 +28,10 @@ from appworld.common.random import get_unique_id
 from appworld.common.text import render_template
 from appworld.common.types import cast_dict
 from appworld.task import Task
-from ..common.logger import Logger
-from ..common.utils import fill_model_server_url
-from .api_predictor import APIPredictor
-from .mcp import AgentsMCP
+from appworld_openai_agents.vendored.common.logger import Logger
+from appworld_openai_agents.vendored.common.utils import fill_model_server_url
+from appworld_openai_agents.vendored.openai_agents.api_predictor import APIPredictor
+from appworld_openai_agents.vendored.openai_agents.mcp import AgentsMCP
 
 
 set_default_openai_api("chat_completions")

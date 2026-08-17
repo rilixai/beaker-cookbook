@@ -2,14 +2,14 @@
 # Source path: experiments/code/common/utils.py
 # Commit: a072b7a86e7c1d5b1d7175659d750ebb9b79f10a
 # License: Apache-2.0 (see LICENSE in this recipe folder)
-# Modified: rewrote appworld_agents.code.* imports to package-relative imports; no logic changes.
+# Modified: rewrote appworld_agents.code.* imports to absolute appworld_openai_agents.* imports; no logic changes.
 import os
 
 from appworld import load_task_ids
 from appworld.cli import extract_dataset_name
 from appworld.common.path_store import path_store
 from appworld.common.text import render_template
-from .usage_tracker import Usage
+from appworld_openai_agents.vendored.common.usage_tracker import Usage
 
 
 def fill_model_server_url(base_url: str) -> str:

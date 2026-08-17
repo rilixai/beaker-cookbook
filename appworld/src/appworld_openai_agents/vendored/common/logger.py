@@ -2,7 +2,7 @@
 # Source path: experiments/code/common/logger.py
 # Commit: a072b7a86e7c1d5b1d7175659d750ebb9b79f10a
 # License: Apache-2.0 (see LICENSE in this recipe folder)
-# Modified: rewrote appworld_agents.code.* imports to package-relative imports; no logic changes.
+# Modified: rewrote appworld_agents.code.* imports to absolute appworld_openai_agents.* imports; no logic changes.
 import json
 import os
 from typing import Any, TextIO
@@ -19,7 +19,7 @@ from appworld.common.io import (
     maybe_create_parent_directory,
 )
 from appworld.common.time import Timer
-from .usage_tracker import UsageTracker
+from appworld_openai_agents.vendored.common.usage_tracker import UsageTracker
 
 
 class Logger:

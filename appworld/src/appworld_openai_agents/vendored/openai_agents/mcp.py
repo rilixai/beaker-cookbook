@@ -2,7 +2,7 @@
 # Source path: experiments/code/openai_agents/mcp.py
 # Commit: a072b7a86e7c1d5b1d7175659d750ebb9b79f10a
 # License: Apache-2.0 (see LICENSE in this recipe folder)
-# Modified: rewrote appworld_agents.code.* imports to package-relative imports; normalize the
+# Modified: rewrote appworld_agents.code.* imports to absolute appworld_openai_agents.* imports; normalize the
 # MCP URL to a trailing slash (the mcp 1.x streamable-http client otherwise trips on the
 # server's 307 redirect from /mcp to /mcp/); log streamer handles tool outputs that arrive
 # as a list of content blocks instead of a JSON string (seen with gpt-4o).
@@ -20,7 +20,7 @@ from rich import print
 from appworld.apps import get_all_apps
 from appworld.common.constants import DEFAULT_REMOTE_APIS_URL
 from appworld.serve._mcp import build_mcp_config
-from ..common.logger import Logger
+from appworld_openai_agents.vendored.common.logger import Logger
 
 
 class AgentsMCP:

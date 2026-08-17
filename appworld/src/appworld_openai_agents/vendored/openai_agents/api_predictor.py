@@ -2,13 +2,13 @@
 # Source path: experiments/code/openai_agents/api_predictor.py
 # Commit: a072b7a86e7c1d5b1d7175659d750ebb9b79f10a
 # License: Apache-2.0 (see LICENSE in this recipe folder)
-# Modified: rewrote appworld_agents.code.* imports to package-relative imports; no logic changes.
+# Modified: rewrote appworld_agents.code.* imports to absolute appworld_openai_agents.* imports; no logic changes.
 from typing import Any
 
 from appworld.task import Task
-from ..common.api_predictor import VALID_MODES_LITERAL
-from ..common.api_predictor import APIPredictor as _APIPredictor
-from .language_model import LanguageModel
+from appworld_openai_agents.vendored.common.api_predictor import VALID_MODES_LITERAL
+from appworld_openai_agents.vendored.common.api_predictor import APIPredictor as _APIPredictor
+from appworld_openai_agents.vendored.openai_agents.language_model import LanguageModel
 
 
 class APIPredictor(_APIPredictor):  # type: ignore[misc]

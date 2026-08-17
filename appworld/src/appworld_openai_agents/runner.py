@@ -15,8 +15,8 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from .models import ModelProfile
-from .vendored.openai_agents.run import run_agent_on_tasks
+from appworld_openai_agents.models import ModelProfile
+from appworld_openai_agents.vendored.openai_agents.run import run_agent_on_tasks
 
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
