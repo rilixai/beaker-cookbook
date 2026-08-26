@@ -116,6 +116,24 @@ class TestRunner:
         assert r1.end_state is not None and r2.end_state is not None
         assert set(r1.end_state) == set(r2.end_state)
 
+    def test_client_cache_is_per_event_loop(self, monkeypatch: Any) -> None:
+        import asyncio
+
+        from automationbench_skills.runner import ModelSpec, get_client
+
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        spec = ModelSpec(name="gpt-5-mini")
+
+        async def grab() -> Any:
+            return get_client(spec)
+
+        async def grab_twice() -> tuple[Any, Any]:
+            return get_client(spec), get_client(spec)
+
+        first, second = asyncio.run(grab_twice())
+        assert first is second  # same loop -> shared client
+        assert asyncio.run(grab()) is not first  # new asyncio.run -> fresh client
+
     def test_env_is_cached(self) -> None:
         assert get_env(skills=False) is get_env(skills=False)
         assert get_env(skills=True) is not get_env(skills=False)

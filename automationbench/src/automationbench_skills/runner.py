@@ -84,7 +84,7 @@ class RunResult:
 
 
 _ENV_CACHE: dict[tuple[str, bool, int], Any] = {}
-_CLIENT_CACHE: dict[ModelSpec, Client] = {}
+_CLIENT_CACHE: dict[tuple[ModelSpec, Any], Client] = {}
 
 
 def get_env(toolset: str = "zapier", skills: bool = True, max_steps: int = DEFAULT_MAX_STEPS) -> Any:
@@ -137,11 +137,20 @@ def get_env(toolset: str = "zapier", skills: bool = True, max_steps: int = DEFAU
 
 
 def get_client(model: ModelSpec) -> Client:
-    if model not in _CLIENT_CACHE:
+    """Return the client for ``model`` on the current event loop.
+
+    The cache is keyed by (model, running loop): the async client's connection
+    pool binds to the loop it first runs under, so a client built inside one
+    ``asyncio.run`` cannot be reused inside the next. Repeated ``run_one``
+    calls therefore get a fresh client per loop, while rollouts sharing a loop
+    (e.g. ``run_split``) share one client and its connection pool.
+    """
+    key = (model, asyncio.get_running_loop())
+    if key not in _CLIENT_CACHE:
         resolved = model.resolved_api()
         key_var = resolve_api_key_var(resolved, model.api_key_var)
-        _CLIENT_CACHE[model] = build_client(resolved, key_var, model.base_url)
-    return _CLIENT_CACHE[model]
+        _CLIENT_CACHE[key] = build_client(resolved, key_var, model.base_url)
+    return _CLIENT_CACHE[key]
 
 
 def _rollout_input(sample: Sample) -> RolloutInput:

