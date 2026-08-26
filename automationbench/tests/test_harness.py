@@ -92,7 +92,7 @@ class TestSkillsTools:
             assert f"domains/{domain}: " in listing
         for app in ["gmail", "google_sheets", "google_drive", "slack", "salesforce"]:
             assert f"apps/{app}: " in listing
-        assert "Seeded empty" in read_skill("apps/gmail")
+        assert "unknown skill" not in read_skill("apps/gmail").lower()
 
 
 class TestRunner:

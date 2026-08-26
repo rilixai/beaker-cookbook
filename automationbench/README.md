@@ -42,8 +42,8 @@ skills/
   apps/{gmail,google_sheets,google_drive,slack,salesforce}/SKILL.md
 ```
 
-The shipped stubs are intentionally near-empty (frontmatter + a placeholder
-line): `list_skills` returns every ID with its description — no domain
+The shipped stubs are intentionally empty (frontmatter only):
+`list_skills` returns every ID with its description — no domain
 filtering — and the optimizer is expected to fill, add, split, and merge skills
 across both axes. The five seed apps are the highest-frequency apps across the
 tasks' `zapier_tools`.
