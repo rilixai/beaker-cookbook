@@ -18,7 +18,7 @@ from automationbench_skills.runner import DEFAULT_MAX_STEPS, DEFAULT_MODEL, Mode
 
 def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--split", choices=["train", "test"], default="test")
-    p.add_argument("--skills-dir", type=Path, default=None, help="Directory of skill .md files (read live)")
+    p.add_argument("--skills-dir", type=Path, default=None, help="Skills directory of SKILL.md folders (read live)")
     p.add_argument("--no-skills", action="store_true", help="Baseline arm: no skill tools registered")
     p.add_argument("--model", default=DEFAULT_MODEL)
     p.add_argument("--reasoning-effort", default=None)
@@ -28,6 +28,9 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--toolset", choices=["zapier", "api"], default="zapier")
     p.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
     p.add_argument("--max-concurrent", type=int, default=8)
+    p.add_argument(
+        "--task-timeout", type=float, default=None, help="Per-task rollout timeout in seconds (scores 0 on expiry)"
+    )
     p.add_argument("--limit", type=int, default=None, help="Run only the first N tasks of the split")
     p.add_argument("--output-dir", type=Path, default=None, help="Default: runs/<split>-<timestamp>")
 
@@ -92,6 +95,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         toolset=args.toolset,
         max_steps=args.max_steps,
         max_concurrent=args.max_concurrent,
+        timeout=args.task_timeout,
         on_result=on_result,
     )
     summary = summarize([r.to_json() for r in results])

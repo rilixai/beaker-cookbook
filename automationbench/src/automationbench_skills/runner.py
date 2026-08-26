@@ -190,12 +190,15 @@ async def run_one_async(
     skills_dir: Path | str | None = None,
     toolset: str = "zapier",
     max_steps: int = DEFAULT_MAX_STEPS,
+    timeout: float | None = None,
 ) -> RunResult:
     """Run ONE agent rollout on one task and score it with the benchmark rubric.
 
     Side-effect-free besides reading ``skills_dir``: the task's simulated world
     is created fresh inside the rollout and returned in ``RunResult.end_state``.
     ``skills_dir=None`` is the baseline arm — the skill tools are absent.
+    ``timeout`` (seconds) bounds the whole rollout; on expiry the task scores 0
+    with ``error="timeout"`` instead of hanging on a stuck API request.
     """
     if isinstance(model, str):
         model = ModelSpec(name=model)
@@ -203,13 +206,25 @@ async def run_one_async(
     set_skills_dir(skills_dir)
     client = get_client(model)
     sampling_args = build_sampling_args(model.name, model.resolved_api(), model.reasoning_effort, model.extra_body)
-    output = await env.run_rollout(
+    rollout = env.run_rollout(
         _rollout_input(sample),
         client,
         model.name,
         sampling_args or {},
         state_columns=STATE_COLUMNS,
     )
+    try:
+        output = await (asyncio.wait_for(rollout, timeout) if timeout is not None else rollout)
+    except TimeoutError:
+        return RunResult(
+            task_name=sample.task_name,
+            domain=sample.domain,
+            partial_credit=0.0,
+            task_completed_correctly=0.0,
+            trajectory=[],
+            end_state=None,
+            error=f"timeout after {timeout}s",
+        )
     return _to_result(sample, output)
 
 
@@ -220,9 +235,14 @@ def run_one(
     skills_dir: Path | str | None = None,
     toolset: str = "zapier",
     max_steps: int = DEFAULT_MAX_STEPS,
+    timeout: float | None = None,
 ) -> RunResult:
     """Synchronous wrapper around :func:`run_one_async`."""
-    return asyncio.run(run_one_async(sample, model=model, skills_dir=skills_dir, toolset=toolset, max_steps=max_steps))
+    return asyncio.run(
+        run_one_async(
+            sample, model=model, skills_dir=skills_dir, toolset=toolset, max_steps=max_steps, timeout=timeout
+        )
+    )
 
 
 async def run_split_async(
@@ -233,6 +253,7 @@ async def run_split_async(
     toolset: str = "zapier",
     max_steps: int = DEFAULT_MAX_STEPS,
     max_concurrent: int = 8,
+    timeout: float | None = None,
     on_result: Any | None = None,
 ) -> list[RunResult]:
     """Thin concurrency wrapper over :func:`run_one_async` (one shared skills_dir)."""
@@ -241,7 +262,7 @@ async def run_split_async(
     async def bounded(sample: Sample) -> RunResult:
         async with sem:
             result = await run_one_async(
-                sample, model=model, skills_dir=skills_dir, toolset=toolset, max_steps=max_steps
+                sample, model=model, skills_dir=skills_dir, toolset=toolset, max_steps=max_steps, timeout=timeout
             )
         if on_result is not None:
             on_result(result)
@@ -258,6 +279,7 @@ def run_split(
     toolset: str = "zapier",
     max_steps: int = DEFAULT_MAX_STEPS,
     max_concurrent: int = 8,
+    timeout: float | None = None,
     on_result: Any | None = None,
 ) -> list[RunResult]:
     """Synchronous wrapper around :func:`run_split_async`."""
@@ -269,6 +291,7 @@ def run_split(
             toolset=toolset,
             max_steps=max_steps,
             max_concurrent=max_concurrent,
+            timeout=timeout,
             on_result=on_result,
         )
     )

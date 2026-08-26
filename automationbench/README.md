@@ -22,6 +22,8 @@ uv run automationbench-skills evaluate --output-dir runs/<run-dir>
 plus `config.json` and `summary.json` into `--output-dir` (default
 `runs/<split>-<timestamp>`). `evaluate` prints pass rate (mean
 `task_completed_correctly`) and mean `partial_credit`, per domain and overall.
+`--task-timeout <seconds>` bounds each rollout (a stuck API request otherwise
+hangs the run); timed-out tasks score 0 with `error="timeout ..."`.
 
 ## Baseline vs. skills
 
@@ -84,6 +86,18 @@ roughly 40–60% for frontier models (see the upstream README's leaderboard).
 Caveat: the public strict pass rate is **not** the AutomationBench-AA number —
 AA's headline metric includes guardrail/hidden-task components and a different
 harness, so scores are not directly comparable.
+
+Reference runs with this harness on the frozen 150-task test split
+(`gpt-5-mini`, `--max-concurrent 16`, single seed):
+
+| arm | pass_rate | partial_credit |
+|---|---|---|
+| `--no-skills` baseline | 0.013 | 0.221 |
+| `--skills-dir skills` (empty seed stubs) | 0.053 | 0.294 |
+
+The stubs are frontmatter-only, so the gap is likely dominated by run-to-run
+variance at n=150 rather than the empty skills helping — average several runs
+before reading much into arm differences of this size.
 
 ## Beaker integration
 

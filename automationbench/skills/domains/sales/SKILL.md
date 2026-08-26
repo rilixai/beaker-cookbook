@@ -1,4 +1,4 @@
 ---
 name: sales
-description: Procedures and playbooks for sales-domain tasks (CRM records, pipelines, outreach).
+description: Procedures and playbooks for sales-domain tasks (CRM records, pipelines, outreach, etc.).
 ---
