@@ -58,22 +58,41 @@ class TestSplits:
 
 
 class TestSkillsTools:
-    def test_live_reload_and_listing(self, tmp_path: Path) -> None:
+    @staticmethod
+    def _write(root: Path, skill_id: str, description: str, body: str) -> None:
+        p = root / skill_id / "SKILL.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"---\nname: {skill_id.split('/')[-1]}\ndescription: {description}\n---\n{body}\n")
+
+    def test_nested_discovery_and_live_reload(self, tmp_path: Path) -> None:
         set_skills_dir(tmp_path)
         assert list_skills() == "No skills available."
-        (tmp_path / "alpha.md").write_text("# Alpha summary line\nbody text\n")
+        self._write(tmp_path, "apps/gmail", "Gmail procedures", "body text")
+        self._write(tmp_path, "domains/finance", "Finance playbooks", "finance body")
         listing = list_skills()
-        assert "alpha: Alpha summary line" in listing
-        assert "body text" in read_skill("alpha")
-        (tmp_path / "alpha.md").write_text("# Changed\nnew body\n")
-        assert "alpha: Changed" in list_skills()
-        assert "new body" in read_skill("alpha")
+        assert "apps/gmail: Gmail procedures" in listing
+        assert "domains/finance: Finance playbooks" in listing
+        assert "body text" in read_skill("apps/gmail")
+        assert "finance body" in read_skill("domains/finance")
+        self._write(tmp_path, "apps/gmail", "Changed", "new body")
+        assert "apps/gmail: Changed" in list_skills()
+        assert "new body" in read_skill("apps/gmail")
 
     def test_read_skill_missing(self, tmp_path: Path) -> None:
         set_skills_dir(tmp_path)
-        (tmp_path / "alpha.md").write_text("# A\n")
+        self._write(tmp_path, "apps/gmail", "Gmail", "body")
         message = read_skill("nope")
-        assert "unknown skill" in message.lower() and "alpha" in message
+        assert "unknown skill" in message.lower() and "apps/gmail" in message
+
+    def test_shipped_seed_stubs(self) -> None:
+        shipped = Path(__file__).parent.parent / "skills"
+        set_skills_dir(shipped)
+        listing = list_skills()
+        for domain in PUBLIC_DOMAINS:
+            assert f"domains/{domain}: " in listing
+        for app in ["gmail", "google_sheets", "google_drive", "slack", "salesforce"]:
+            assert f"apps/{app}: " in listing
+        assert "Seeded empty" in read_skill("apps/gmail")
 
 
 class TestRunner:
@@ -88,12 +107,14 @@ class TestRunner:
         assert result.trajectory and result.end_state is not None
 
     async def test_skills_arm_reads_live_files(self, tmp_path: Path) -> None:
-        (tmp_path / "howto.md").write_text("# How to do the thing\nSECRET-PROCEDURE\n")
+        howto = tmp_path / "apps" / "howto" / "SKILL.md"
+        howto.parent.mkdir(parents=True)
+        howto.write_text("---\nname: howto\ndescription: How to do the thing\n---\nSECRET-PROCEDURE\n")
         set_skills_dir(tmp_path)
         client = ScriptedClient(
             turns=[
                 {"tool_calls": [{"name": "list_skills"}]},
-                {"tool_calls": [{"name": "read_skill", "arguments": {"name": "howto"}}]},
+                {"tool_calls": [{"name": "read_skill", "arguments": {"skill_id": "apps/howto"}}]},
                 {"content": "done"},
             ]
         )

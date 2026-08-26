@@ -2,7 +2,7 @@
 
 [AutomationBench](https://github.com/zapier/AutomationBench) ([paper](https://arxiv.org/abs/2604.18934)) is Zapier's benchmark for agentic business automation: 600 public tasks across six domains (sales, marketing, operations, support, finance, hr) where an agent works in a simulated workspace of SaaS tools (Gmail, Sheets, Slack, CRMs, ...) and is scored by deterministic assertions on the final world state. A hosted variant, [AutomationBench-AA](https://artificialanalysis.ai/evaluations/automationbench), is run by Artificial Analysis.
 
-This recipe wraps the unmodified benchmark in a per-sample runner (`run_one`) plus a filesystem `skills/` hook: two extra tools (`list_skills`, `read_skill`) that read Markdown skill files live from disk on every call. That makes the harness directly drivable by **Beaker** — an optimizer that improves the agent purely by editing the `skills/` folder between rollouts. This recipe is the harness + baseline + skills hook only; it does not implement the optimizer.
+This recipe wraps the unmodified benchmark in a per-sample runner (`run_one`) plus a filesystem `skills/` hook: two extra tools (`list_skills`, `read_skill`) that read `SKILL.md` files live from disk on every call. That makes the harness directly drivable by **Beaker** — an optimizer that improves the agent purely by editing the `skills/` folder between rollouts. This recipe is the harness + baseline + skills hook only; it does not implement the optimizer.
 
 ## Quick start
 
@@ -11,7 +11,7 @@ cd automationbench
 uv sync --group dev
 export OPENAI_API_KEY=sk-...   # or copy .env.example to .env
 
-# Smoke run: 3 test tasks, with the starter skills
+# Smoke run: 3 test tasks, with the seed skill stubs
 uv run automationbench-skills run --split test --limit 3 --model gpt-5-mini --skills-dir skills
 
 # Aggregate a finished (or partial) run directory
@@ -28,10 +28,25 @@ plus `config.json` and `summary.json` into `--output-dir` (default
 - **Baseline**: `--no-skills` (or omit `--skills-dir`) — the skill tools are not
   registered at all; this is the stock benchmark agent.
 - **Skills arm**: `--skills-dir skills` — the agent gets `list_skills()` /
-  `read_skill(name)` over that directory. Files are re-read on every tool call,
-  so editing them between rollouts changes behavior with no restart. An empty
-  directory is valid (tools present, no skills). Three starter skeletons ship in
-  [`skills/`](skills/): Gmail sending, Sheets row lookup, Slack posting.
+  `read_skill(skill_id)` over that directory. Files are re-read on every tool
+  call, so editing them between rollouts changes behavior with no restart. An
+  empty directory is valid (tools present, no skills).
+
+Skills are folders on two axes, each holding a `SKILL.md` (YAML frontmatter
+`name`/`description` + markdown body, i.e. an Anthropic Agent Skill). A skill's
+ID is its path under `skills/`:
+
+```text
+skills/
+  domains/{sales,marketing,operations,support,finance,hr}/SKILL.md
+  apps/{gmail,google_sheets,google_drive,slack,salesforce}/SKILL.md
+```
+
+The shipped stubs are intentionally near-empty (frontmatter + a placeholder
+line): `list_skills` returns every ID with its description — no domain
+filtering — and the optimizer is expected to fill, add, split, and merge skills
+across both axes. The five seed apps are the highest-frequency apps across the
+tasks' `zapier_tools`.
 
 The benchmark's own domain system prompts are never modified; the only nudge to
 consult skills lives in the tools' own descriptions.
@@ -84,7 +99,7 @@ result.end_state  # final simulated WorldState
 ```
 
 An optimizer loop: run train samples, inspect trajectories/scores, edit
-`skills/*.md`, rerun — the environment is reused across calls and picks up
+`skills/**/SKILL.md`, rerun — the environment is reused across calls and picks up
 skill edits immediately. Evaluate on `test` only for final reporting.
 
 ## Development
