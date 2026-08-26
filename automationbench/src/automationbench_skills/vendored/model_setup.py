@@ -90,7 +90,7 @@ def build_sampling_args(
 def resolve_api_key_var(resolved_api: str, api_key_var: str = "OPENAI_API_KEY") -> str:
     """Which env var holds the key. The Anthropic/Gemini defaults only kick in when
     --api-key-var was left at its default, so an explicit var still wins."""
-    if resolved_api == "anthropic":
+    if resolved_api == "anthropic" and api_key_var == "OPENAI_API_KEY":
         return "ANTHROPIC_API_KEY"
     if resolved_api == "gemini_interactions" and api_key_var == "OPENAI_API_KEY":
         return "GEMINI_API_KEY"
@@ -108,7 +108,7 @@ def build_client(
         raise ValueError(f"No API key found. Set the {api_key_var} environment variable.")
 
     if resolved_api == "anthropic":
-        return StreamingAnthropicClient(AsyncAnthropic())
+        return StreamingAnthropicClient(AsyncAnthropic(api_key=os.environ[api_key_var]))
     if resolved_api == "gemini_interactions":
         return GeminiInteractionsClient(
             ClientConfig(
