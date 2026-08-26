@@ -16,6 +16,7 @@ from beaker import (
     CaseResult,
     CaseScore,
     DatasetRowContext,
+    InferenceTarget,
     OptimizationContext,
     Spec,
     inference_target,
@@ -129,10 +130,20 @@ class _TracingClient:
             return response
 
 
+def _application_default_gateway_target() -> InferenceTarget | None:
+    base_url = os.environ.get("BEAKER_INFERENCE_BASE_URL")
+    api_key = os.environ.get("BEAKER_INFERENCE_API_KEY")
+    if not base_url and not api_key:
+        return None
+    if not base_url or not api_key:
+        raise RuntimeError("Beaker application inference credentials are incomplete")
+    return InferenceTarget(base_url=base_url.rstrip("/"), api_key=api_key, model=f"openai:{DEFAULT_MODEL}")
+
+
 def _model_for_runtime(runtime: Any) -> tuple[ModelSpec, str, str | None]:
-    if not runtime.model:
+    target = inference_target(runtime) if runtime.model else _application_default_gateway_target()
+    if target is None:
         return ModelSpec(name=DEFAULT_MODEL), "openai", None
-    target = inference_target(runtime)
     provider = target.model.split(":", 1)[0] if ":" in target.model else "openai"
     reasoning_effort = runtime.model_capabilities.reasoning_effort if runtime.model_capabilities else None
     model = ModelSpec(
