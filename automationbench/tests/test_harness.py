@@ -154,6 +154,8 @@ class TestRunner:
         first, second = asyncio.run(grab_twice())
         assert first is second  # same loop -> shared client
         assert asyncio.run(grab()) is not first  # new asyncio.run -> fresh client
+        # closed-loop entries are evicted, so the cache doesn't grow across runs
+        assert len([k for k in runner_mod._CLIENT_CACHE if k[0] == spec]) == 1
 
     def test_env_is_cached(self) -> None:
         assert get_env(skills=False) is get_env(skills=False)

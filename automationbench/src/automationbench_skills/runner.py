@@ -145,6 +145,8 @@ def get_client(model: ModelSpec) -> Client:
     calls therefore get a fresh client per loop, while rollouts sharing a loop
     (e.g. ``run_split``) share one client and its connection pool.
     """
+    for stale in [k for k in _CLIENT_CACHE if k[1].is_closed()]:
+        del _CLIENT_CACHE[stale]
     key = (model, asyncio.get_running_loop())
     if key not in _CLIENT_CACHE:
         resolved = model.resolved_api()
