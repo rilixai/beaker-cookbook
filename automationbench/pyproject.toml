@@ -1,0 +1,91 @@
+[project]
+name = "automationbench-skills"
+version = "0.1.0"
+description = "AutomationBench harness with a filesystem skills/ hook: a per-sample runner (run_one) over the verifiers tool-calling rollout, frozen train/test splits, and deterministic assertion scoring."
+readme = "README.md"
+requires-python = ">=3.13"
+authors = [{ name = "rilixai" }]
+dependencies = [
+  # The benchmark itself: env (StatefulToolEnv), simulated tools, WorldState,
+  # deterministic rubric, and the 600 public task builders. NOT vendored.
+  # Pinned to the exact upstream commit this harness was built against.
+  "automation-bench @ git+https://github.com/zapier/AutomationBench.git@4a8e1061254004d9dac807054eed33fad7d1ff14",
+  # The generic tool-calling rollout loop + model clients. automation-bench
+  # declares >=0.2.0; pin the minor this recipe was verified against
+  # (run_rollout / RolloutInput / RolloutOutput surface).
+  "verifiers>=0.3.1,<0.4",
+  # Used directly for the combined task Dataset (also a verifiers dependency).
+  "datasets>=3.0",
+  "python-dotenv>=1.0",
+]
+
+[project.scripts]
+automationbench-skills = "automationbench_skills.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/automationbench_skills"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[dependency-groups]
+dev = [
+  "ruff",
+  "mypy",
+  "pytest",
+  "pytest-asyncio",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+pythonpath = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 119
+# The vendored subtree mirrors upstream AutomationBench (imports/structure
+# aside); keep it out of lint/format so diffs against upstream stay reviewable.
+extend-exclude = ["src/automationbench_skills/vendored"]
+
+[tool.ruff.lint]
+ignore = ["C901", "E501"]
+select = ["C", "E", "F", "I", "W", "UP006", "UP007", "UP045"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402", "F401", "F403"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["automationbench_skills"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+show_error_codes = true
+files = ["src/automationbench_skills"]
+# The vendored subtree is typed to upstream's standard, not this repo's.
+exclude = ["src/automationbench_skills/vendored"]
+
+[[tool.mypy.overrides]]
+module = ["automationbench_skills.vendored.*"]
+follow_imports = "skip"
+
+# Upstream deps that ship without complete typing for our checks.
+[[tool.mypy.overrides]]
+module = ["automationbench", "automationbench.*", "verifiers", "verifiers.*", "datasets", "datasets.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
