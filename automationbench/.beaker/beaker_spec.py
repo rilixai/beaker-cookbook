@@ -7,7 +7,7 @@ import os
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from beaker import (
     STANDARD_JSONL_CASE_SCHEMA,
@@ -102,14 +102,40 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
-class _TracingClient:
+class _TracingClient(Client[Any, Any, Any, Any]):
     def __init__(self, delegate: Client, runtime: Any, provider: str) -> None:
         self._delegate = delegate
         self._runtime = runtime
         self._provider = provider
+        super().__init__(delegate.client)
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._delegate, name)
+    def setup_client(self, config: Any) -> Any:
+        return self._delegate.setup_client(config)
+
+    async def to_native_tool(self, tool: Any) -> Any:
+        return await self._delegate.to_native_tool(tool)
+
+    async def to_native_prompt(self, messages: Any) -> tuple[Any, dict[str, Any]]:
+        return await self._delegate.to_native_prompt(messages)
+
+    async def get_native_response(
+        self,
+        prompt: Any,
+        model: str,
+        sampling_args: Any,
+        tools: list[Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        return await self._delegate.get_native_response(prompt, model, sampling_args, tools, **kwargs)
+
+    async def raise_from_native_response(self, response: Any) -> None:
+        await self._delegate.raise_from_native_response(response)
+
+    async def from_native_response(self, response: Any) -> Any:
+        return await self._delegate.from_native_response(response)
+
+    async def close(self) -> None:
+        await self._delegate.close()
 
     async def get_response(
         self,
@@ -179,7 +205,7 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
             os.environ[BEAKER_API_KEY_VAR] = api_key
         try:
             client = get_client(model)
-            traced_client = cast(Client, _TracingClient(client, runtime, provider))
+            traced_client = _TracingClient(client, runtime, provider)
             with runtime.trace.stage(
                 "automationbench.run_task",
                 inputs={"task_name": task_name, "domain": sample.domain},
