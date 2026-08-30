@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -85,22 +84,18 @@ def _samples_by_name() -> dict[str, Sample]:
     return {sample.task_name: sample for sample in load_samples()}
 
 
-def _model_for_runtime(runtime: Any) -> tuple[ModelSpec, str]:
+def _model_for_runtime(runtime: Any) -> ModelSpec:
     if not runtime.model:
-        return ModelSpec(), "openai"
+        return ModelSpec()
     target = inference_target(runtime)
     os.environ[_GATEWAY_KEY_VAR] = target.api_key
-    provider = target.model.partition(":")[0] or "beaker"
     reasoning_effort = runtime.model_capabilities.reasoning_effort if runtime.model_capabilities else None
-    return (
-        ModelSpec(
-            name=target.model,
-            base_url=target.base_url,
-            api_key_var=_GATEWAY_KEY_VAR,
-            api="chat_completions",
-            reasoning_effort=reasoning_effort,
-        ),
-        provider,
+    return ModelSpec(
+        name=target.model,
+        base_url=target.base_url,
+        api_key_var=_GATEWAY_KEY_VAR,
+        api="chat_completions",
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -110,19 +105,28 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
     sample = _samples_by_name().get(task_name)
     if sample is None:
         return CaseResult.failed(f"Unknown AutomationBench task: {task_name}")
-    model, provider = _model_for_runtime(runtime)
-    with runtime.trace.stage("automationbench.run", inputs={"task_name": task_name}):
-        with runtime.trace.model_call(
-            operation="chat",
-            provider=provider,
-            model=model.name,
-            input_messages=sample.prompt,
-        ) as call:
-            result = await run_one_async(sample, model=model, skills_dir=_SKILLS_DIR)
-            call.output(result.trajectory)
+    model = _model_for_runtime(runtime)
+    with runtime.trace.stage("automationbench.run", inputs={"task_name": task_name}) as stage:
+        result = await run_one_async(sample, model=model, skills_dir=_SKILLS_DIR)
+        output = {
+            "partial_credit": result.partial_credit,
+            "task_completed_correctly": result.task_completed_correctly,
+        }
+        stage.output(output)
+    context = {
+        "task_name": result.task_name,
+        "domain": result.domain,
+        "trajectory": result.trajectory,
+        "end_state": result.end_state,
+        "assertion_results": result.assertion_results,
+    }
     if result.error is not None:
-        return CaseResult.failed(str(result.error), retryable="timeout" in str(result.error).lower())
-    return CaseResult(output=json.loads(json.dumps(result.to_json(), default=str)))
+        return CaseResult.failed(
+            str(result.error),
+            context=context,
+            retryable="timeout" in str(result.error).lower(),
+        )
+    return CaseResult(output=output, context=context)
 
 
 class _PartialCreditScorer:
