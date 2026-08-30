@@ -87,8 +87,6 @@ def _samples_by_name() -> dict[str, Sample]:
 
 def _model_for_runtime(runtime: Any) -> tuple[ModelSpec, str]:
     if not runtime.model:
-        if runtime.run_id:
-            raise RuntimeError("Hosted AutomationBench rollouts require a selected model")
         return ModelSpec(), "openai"
     target = inference_target(runtime)
     os.environ[_GATEWAY_KEY_VAR] = target.api_key
