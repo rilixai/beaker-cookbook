@@ -1,0 +1,34 @@
+# Beaker project config. Safe to commit — holds no secrets.
+# `spec` owns the local @spec entrypoint used by GitHub-backed spec builds and
+# `beaker run smoke`. Run-time flags override values here when provided.
+spec:
+  agent_key: automationbench-skills
+  target: "beaker_spec:build_spec"
+  environment_base: "debian_slim:3.13"
+  source_dir: "automationbench"
+  package_import_root: ".beaker"
+  # Used only when a rollout does not select a Beaker gateway model and the
+  # repository's normal gpt-5-mini path is retained.
+  required_env:
+    - OPENAI_API_KEY
+agent_key: "automationbench-skills"
+# `config_defaults` below holds the launch defaults for hosted runs, and only
+# this top-level mapping is read: a key nested under `spec` is ignored.
+# Dataset defaults are optional conveniences. During onboarding, prefer passing
+# the same immutable `--dataset name@revision` or `--dataset-id` explicitly to
+# smoke and launch instead of committing an organization-specific selector.
+#   dataset_ref: my-dataset          # optional hosted default, `name` or `name@revision`
+#   dataset_id: <artifact_id>        # optional artifact default instead of a name
+#   local_dataset_path: beaker_dataset  # local directory, for `beaker run smoke`
+# Logical-target specs using `@spec(repository=None)` can map complete optimized
+# prompts/resources to repository paths. Repository optimization does not need
+# these mappings because its candidate is already a repository diff.
+# config_defaults:
+#   repository_destinations:
+#     - target_kind: resource
+#       target_name: wiki
+#       repository_path: docs/wiki
+#     - target_kind: prompt
+#       target_name: system
+#       repository_path: prompts/system.md
+config_defaults: {}
