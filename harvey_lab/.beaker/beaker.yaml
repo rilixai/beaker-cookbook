@@ -1,0 +1,24 @@
+# Beaker project config. Safe to commit — holds no secrets.
+# `spec` owns the local @spec entrypoint used by GitHub-backed spec builds and
+# `beaker run smoke`. Run-time flags override values here when provided.
+spec:
+  agent_key: harvey-lab-agent
+  target: "beaker_spec:build_spec"
+  environment_base: "debian_slim:3.12"
+  source_dir: "harvey_lab"
+  package_import_root: ".beaker"
+  # The task model can use a Beaker-selected gateway model. The rubric judge
+  # deliberately stays fixed so scores remain comparable across candidates.
+  required_env:
+    - OPENROUTER_API_KEY
+agent_key: "harvey-lab"
+# `config_defaults` below holds the launch defaults for hosted runs, and only
+# this top-level mapping is read: a key nested under `spec` is ignored.
+# Dataset defaults are optional conveniences. During onboarding, prefer passing
+# the same immutable `--dataset name@revision` or `--dataset-id` explicitly to
+# smoke and launch instead of committing an organization-specific selector.
+#   dataset_ref: my-dataset          # optional hosted default, `name` or `name@revision`
+#   dataset_id: <artifact_id>        # optional artifact default instead of a name
+#   local_dataset_path: beaker_dataset  # local directory, for `beaker run smoke`
+config_defaults:
+  local_dataset_path: beaker_dataset

@@ -140,6 +140,32 @@ uv run pytest -q
 Hermetic — a scripted Stirrup client over the local shell backend, a stub judge,
 and a fixture task tree: no network, no spend.
 
+## Beaker prompt optimization
+
+The Beaker spec in `.beaker/beaker_spec.py` optimizes the agent's
+`system_prompt` and `task_template`. Each case resolves a task from Harvey's
+pinned public LAB commit, runs the real Stirrup agent, and uses the existing
+rubric judge to maximize `criterion_pass_rate` while also reporting `all_pass`.
+
+The committed `beaker_dataset/` rows are references to the real frozen LAB
+task splits. Regenerate them after changing the split files or benchmark pin:
+
+```bash
+uv run python .beaker/export_dataset.py beaker_dataset
+uv run beaker run smoke --strict
+```
+
+For hosted runs, keep `OPENROUTER_API_KEY` in the selected Beaker agent's
+encrypted environment. Build and upload from a pushed branch before launching:
+
+```bash
+uv run beaker spec build-from-github --ref <branch>
+uv run beaker dataset upload beaker_dataset --name harvey-lab-public
+uv run beaker run trigger --ref <branch> --dataset harvey-lab-public
+```
+
+The final command starts a paid optimization run; run it only intentionally.
+
 ## Notes
 
 - **Where `code_exec` runs.** By default: a temp directory on your machine, no
