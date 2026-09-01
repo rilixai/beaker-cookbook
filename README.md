@@ -4,14 +4,14 @@
 
   <h3>Beaker, the autonomous AI engineer</h3>
 
-  Beaker runs experiments on your AI agents. It finds where they fail, tests
-  fixes, and keeps the ones that work.
+  Beaker autonomously experiments with your AI agents — finding failures,
+  testing fixes, and compounding the improvements that work.
 
   <a href="https://app.withbeaker.ai"><strong>Try for free →</strong></a> · <a href="https://withbeaker.ai">withbeaker.ai</a> · Docs (coming soon)
 </div>
 
 This repo has the agents we use to test Beaker. Each one is a real, runnable
-agent with its own local eval. Pick one, point Beaker at it, and see what the
+agent with its own local eval. Point Beaker at one agent, and see what the
 first round of experiments finds.
 
 ## Recipes
