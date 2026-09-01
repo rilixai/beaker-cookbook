@@ -191,6 +191,7 @@ async def run_one_async(
     toolset: str = "zapier",
     max_steps: int = DEFAULT_MAX_STEPS,
     timeout: float | None = None,
+    client: Client | None = None,
 ) -> RunResult:
     """Run ONE agent rollout on one task and score it with the benchmark rubric.
 
@@ -199,16 +200,18 @@ async def run_one_async(
     ``skills_dir=None`` is the baseline arm — the skill tools are absent.
     ``timeout`` (seconds) bounds the whole rollout; on expiry the task scores 0
     with ``error="timeout"`` instead of hanging on a stuck API request.
+    ``client`` is an optional injection seam (same type ``get_client`` returns);
+    the default ``None`` keeps production behavior unchanged.
     """
     if isinstance(model, str):
         model = ModelSpec(name=model)
     env = get_env(toolset=toolset, skills=skills_dir is not None, max_steps=max_steps)
     set_skills_dir(skills_dir)
-    client = get_client(model)
+    rollout_client = client if client is not None else get_client(model)
     sampling_args = build_sampling_args(model.name, model.resolved_api(), model.reasoning_effort, model.extra_body)
     rollout = env.run_rollout(
         _rollout_input(sample),
-        client,
+        rollout_client,
         model.name,
         sampling_args or {},
         state_columns=STATE_COLUMNS,
