@@ -1,82 +1,62 @@
-# rilixai-cookbook
+# beaker-cookbook
 <div align="center">
-  <img width="227" height="225" alt="31fdec74-bda3-4813-99ab-76f59f1f4484" src="https://github.com/user-attachments/assets/174d316a-24c0-4832-9f93-9c0a77a19433" />
+  <img width="227" height="225" alt="Beaker" src="https://github.com/user-attachments/assets/174d316a-24c0-4832-9f93-9c0a77a19433" />
 
+  **[withbeaker.ai](https://withbeaker.ai)** · [app.withbeaker.ai](https://app.withbeaker.ai) · [beaker-sdk on PyPI](https://pypi.org/project/beaker-sdk/)
 </div>
 
-
-*A collection of standalone agent recipes — each one a runnable agent
-plus a local evaluation — across different agent shapes, tasks, and
-production setups.*
-
-
+*Standalone agent recipes — each one a runnable agent plus a local
+evaluation — covering different agent shapes, tasks, and production setups.
+They are the reference systems we optimize with
+[Beaker](https://withbeaker.ai), and a good starting point for wiring your
+own agent into it.*
 
 ## Recipes
 
-```
-harvey_lab/       Legal-research agent over the Harvey LABs corpus
-hotpotqa/         Multi-hop QA — PydanticAI tool-using agent (retrieve_k + summarize)
-apex_agents/      Professional knowledge-work tasks — ReAct toolbelt agent, LLM rubric judge
-appworld/         AppWorld benchmark — ReAct code agent on the OpenAI Agents SDK, TGC/SGC eval
-automationbench/  Zapier AutomationBench — verifiers tool-calling agent + filesystem skills/ hook
-```
+| Recipe | What it is | Keys |
+|---|---|---|
+| [`harvey_lab/`](harvey_lab/) | Legal-research agent over the Harvey LAB corpus, rubric-graded by an LLM judge | `OPENROUTER_API_KEY` (optional `GITHUB_TOKEN` to fetch the corpus) |
+| [`hotpotqa/`](hotpotqa/) | Multi-hop QA — PydanticAI tool-using agent (`retrieve_k` + `summarize`) | `OPENAI_API_KEY` |
+| [`apex_agents/`](apex_agents/) | APEX-Agents professional knowledge-work tasks — ReAct toolbelt agent, LLM rubric judge | `HF_TOKEN` (gated dataset), `OPENAI_API_KEY` |
+| [`appworld/`](appworld/) | AppWorld benchmark — ReAct code agent on the OpenAI Agents SDK, TGC/SGC eval | `OPENAI_API_KEY` |
+| [`automationbench/`](automationbench/) | Zapier AutomationBench — verifiers tool-calling agent + filesystem `skills/` hook | `OPENAI_API_KEY` (or Anthropic / Gemini, see README) |
 
-Each folder contains everything you need to reproduce the recipe: a
-README with the canonical reproduce commands and expected scores, a
-CLI (`cli.py`) exposing `run` and `evaluate`, and a hermetic test
-suite so you can verify the harness end-to-end before spending
-anything on LLM calls.
+Each recipe is a self-contained uv project (own `pyproject.toml` +
+`uv.lock`; there is no root workspace) with:
+
+- a README with the canonical reproduce commands and expected scores,
+- a console script exposing `run` (execute the agent, dump outputs) and
+  `evaluate` (also score and write a summary),
+- a hermetic test suite so you can verify the harness before spending
+  anything on LLM calls,
+- frozen data splits (documented per recipe) so a recipe can be optimized
+  on one split and reported on a held-out one.
 
 ## Quick start
 
-Requires Python 3.12+ and [`uv`](https://docs.astral.sh/uv/). Each recipe is
-a self-contained, standalone uv project (its own `pyproject.toml` +
-`uv.lock`) — there is no root workspace. Pick a recipe, install it, and
-follow the commands in its README:
+Requires [`uv`](https://docs.astral.sh/uv/) and Python 3.12+ (3.13+ for
+`automationbench`). Pick a recipe, install it, export the keys from the
+table above, and follow its README:
 
 ```bash
-cd harvey_lab        # or hotpotqa / apex_agents / appworld / automationbench
+cd hotpotqa                      # or harvey_lab / apex_agents / appworld / automationbench
 uv sync --group dev
+export OPENAI_API_KEY=sk-...
+uv run hotpotqa evaluate --split test --test-size 20 --output-dir hotpotqa_run
 ```
 
-## Configuration
-
-The recipes need credentials for the LLM providers they call. The
-easiest setup is a `.env` file at the cookbook root; it is picked up
-automatically by the CLIs.
-
-| Variable | Required for | Where to get it |
-|---|---|---|
-| `OPENAI_API_KEY` | Every recipe's `cli.py` | [OpenAI dashboard](https://platform.openai.com/api-keys) |
-
-Some recipes need extra credentials — a judge model's provider key, or
-a HuggingFace token for a gated dataset. Each recipe's README lists
-what it needs.
-
-Per-recipe knobs like model choice, dataset size, and retrieval mode
-are documented in each recipe's README and surfaced as CLI flags, so
-you can usually go from "first time looking at this folder" to "smoke
-run" without touching code.
-
-## What runs where
-
-Everything runs locally. `<recipe>/cli.py` exposes two commands:
-`run` executes the agent over the selected cases and dumps its
-outputs, `evaluate` also scores them and writes a summary. Both read
-your provider keys from the environment and write results to a local
-`--output-dir`.
+Keys are read from the environment. `appworld/` and `automationbench/` also
+ship a `.env.example` you can copy to `.env` inside the recipe directory.
 
 ## Development
 
-Run the checks from inside a recipe directory — each recipe carries its own
-lint/type/test config:
+Each recipe carries its own lint / type / test config, and CI runs the same
+steps per recipe:
 
 ```bash
-cd harvey_lab        # or hotpotqa / apex_agents / appworld / automationbench
-uv sync --group dev
-uv run python -m pytest -q
-uv run ruff check
-uv run ruff format --check
+cd <recipe>
+uv sync --group dev --locked     # fails if uv.lock is stale — run `uv lock` after editing pyproject.toml
+uv run ruff check && uv run ruff format --check
 uv run python -m mypy
+uv run python -m pytest -q
 ```
-
