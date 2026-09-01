@@ -41,7 +41,7 @@ agent/       workspace.py (stage documents in, pull deliverables out)
              agent.py (wires code_exec + finish into Stirrup, runs one task)
              prompts.py
 data/        dataset.py (task records + splits), fetch.py (on-demand download)
-splits/      frozen {train,val,test}.txt task-id lists  → splits/README.md
+splits/      frozen {train,test}.txt task-id lists  → splits/README.md
 evaluation/  scoring.py (batched judge, one task), run_eval.py (all tasks)
 cli.py       `harvey-lab` console command; config.py: every model/budget knob
 ```
@@ -80,8 +80,8 @@ and resumably — no manual clone (`--tasks-root` uses an existing checkout's
 `criteria`) plus a `documents/` tree, and its ID is its path under `tasks/`,
 e.g. `contracts/banking/<slug>`.
 
-The train / val / test partition is **frozen**: the committed
-`splits/{train,val,test}.txt` lists (1560 / 100 / 100 tasks) are the source of
+The train / test partition is **frozen**: the committed
+`splits/{train,test}.txt` lists (1660 / 100 tasks) are the source of
 truth — see [`src/harvey_lab/splits/README.md`](src/harvey_lab/splits/README.md).
 `--split` picks one; `--limit N` runs the first N (any prefix stays
 representative).

@@ -12,6 +12,6 @@ Layout:
 * ``agent/`` — the Stirrup-driven legal agent (workspace + file tools + prompts).
 * ``data/`` — loads LAB task records from a local checkout + the frozen splits.
 * ``evaluation/`` — the batched rubric judge + the dataset eval runner.
-* ``splits/`` — frozen train/val/test task-id lists (see ``splits/README.md``).
+* ``splits/`` — frozen train/test task-id lists (see ``splits/README.md``).
 * ``cli.py`` — run the agent, or run + grade it.
 """

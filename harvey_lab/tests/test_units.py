@@ -579,15 +579,14 @@ def test_ensure_task_dirs_refetches_on_commit_change(tmp_path: Path, monkeypatch
 
 
 def test_frozen_splits_are_disjoint_and_capped() -> None:
-    train, val, test = read_split("train"), read_split("val"), read_split("test")
-    assert len(val) == 100
+    train, test = read_split("train"), read_split("test")
+    assert len(train) == 1660
     assert len(test) == 100
-    assert len(train) > 0
-    # Three-way disjoint, and every id is a practice-area-prefixed path.
-    assert set(train).isdisjoint(val)
+    assert len(train) + len(test) == 1760
+    # Two-way disjoint, and every id is a practice-area-prefixed path.
     assert set(train).isdisjoint(test)
-    assert set(val).isdisjoint(test)
-    assert all("/" in tid for tid in val)
+    assert all("/" in tid for tid in train)
+    assert all("/" in tid for tid in test)
 
 
 # ─── workspace ────────────────────────────────────────────────────────

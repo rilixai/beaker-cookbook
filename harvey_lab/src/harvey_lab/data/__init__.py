@@ -1,4 +1,4 @@
-"""Harvey LAB data loading + frozen train/val/test splits."""
+"""Harvey LAB data loading + frozen train/test splits."""
 
 from .dataset import (
     HarveyLabRecord,
