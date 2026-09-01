@@ -38,7 +38,7 @@ root workspace) and comes with:
 
 ## Quick start
 
-You need [`uv`](https://docs.astral.sh/uv/) and Python 3.12+ (3.13+ for
+You need [`uv`](https://docs.astral.sh/uv/) and Python 3.12 or higher (3.13+ for
 `automationbench`). Pick a recipe, install it, set your keys, and you're
 running:
 
