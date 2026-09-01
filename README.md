@@ -17,7 +17,7 @@ own agent into it.*
 |---|---|---|
 | [`harvey_lab/`](harvey_lab/) | Legal-research agent over the Harvey LAB corpus, rubric-graded by an LLM judge | `OPENROUTER_API_KEY` (optional `GITHUB_TOKEN` to fetch the corpus) |
 | [`hotpotqa/`](hotpotqa/) | Multi-hop QA — PydanticAI tool-using agent (`retrieve_k` + `summarize`) | `OPENAI_API_KEY` |
-| [`apex_agents/`](apex_agents/) | APEX-Agents professional knowledge-work tasks — ReAct toolbelt agent, LLM rubric judge | `HF_TOKEN` (gated dataset), `OPENAI_API_KEY` |
+| [`apex_agents/`](apex_agents/) | APEX-Agents professional knowledge-work tasks — ReAct toolbelt agent, LLM rubric judge | `HF_TOKEN` (gated dataset), `OPENAI_API_KEY` (agent), `GOOGLE_API_KEY` (Gemini judge) |
 | [`appworld/`](appworld/) | AppWorld benchmark — ReAct code agent on the OpenAI Agents SDK, TGC/SGC eval | `OPENAI_API_KEY` |
 | [`automationbench/`](automationbench/) | Zapier AutomationBench — verifiers tool-calling agent + filesystem `skills/` hook | `OPENAI_API_KEY` (or Anthropic / Gemini, see README) |
 
@@ -29,8 +29,8 @@ Each recipe is a self-contained uv project (own `pyproject.toml` +
   `evaluate` (also score and write a summary),
 - a hermetic test suite so you can verify the harness before spending
   anything on LLM calls,
-- frozen data splits (documented per recipe) so a recipe can be optimized
-  on one split and reported on a held-out one.
+- documented data splits (see each README for how they are defined) so a
+  recipe can be optimized on one split and reported on a held-out one.
 
 ## Quick start
 
@@ -45,8 +45,8 @@ export OPENAI_API_KEY=sk-...
 uv run hotpotqa evaluate --split test --test-size 20 --output-dir hotpotqa_run
 ```
 
-Keys are read from the environment. `appworld/` and `automationbench/` also
-ship a `.env.example` you can copy to `.env` inside the recipe directory.
+Keys are read from the environment (`export ...`). `automationbench/` also
+loads a `.env` from its recipe directory (`cp .env.example .env`).
 
 ## Development
 
