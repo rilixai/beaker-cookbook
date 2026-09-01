@@ -38,9 +38,8 @@ root workspace) and comes with:
 
 ## Quick start
 
-You need [`uv`](https://docs.astral.sh/uv/) and Python 3.12 or higher (3.13+ for
-`automationbench`). Pick a recipe, install it, set your keys, and you're
-running:
+You need [`uv`](https://docs.astral.sh/uv/) and Python 3.12 or higher. Pick a
+recipe, install it, set your keys, and you're running:
 
 ```bash
 cd hotpotqa                      # or harvey_lab / apex_agents / appworld / automationbench
