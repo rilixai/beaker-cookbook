@@ -67,5 +67,5 @@ uv run python -m pytest -q
 
 ## Stay in the loop
 
-More recipes are on the way. Star the repo to catch them, and follow
+We are working on more recipes. Star the repo, and follow
 [@withbeaker on X](https://x.com/withbeaker) for Beaker news.
