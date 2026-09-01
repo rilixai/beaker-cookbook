@@ -12,7 +12,7 @@ Subcommands:
   no model key, so it is the hook for warming the cache at environment-setup
   time rather than mid-run (see ``data/fetch.py``).
 
-Tasks come from the frozen ``splits/{train,val,test}.txt`` lists (see
+Tasks come from the frozen ``splits/{train,test}.txt`` lists (see
 ``splits/README.md``). By default only the needed task folders are fetched
 from GitHub at ``config.HARVEY_LABS_COMMIT`` into a local cache (see
 ``data/fetch.py``); pass ``--tasks-root`` to use an existing local
@@ -92,7 +92,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--split",
-        choices=("train", "val", "test"),
+        choices=("train", "test"),
         default="test",
         help="Which frozen split to run (splits/<split>.txt). Default: test.",
     )

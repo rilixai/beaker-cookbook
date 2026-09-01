@@ -19,9 +19,8 @@ from dataclasses import dataclass
 # into this exact tree.
 HARVEY_LABS_COMMIT = "1da4750171bc5a534960b3d82d15ba7fd2cf653f"
 
-# Global caps used when the frozen ``splits/{val,test}.txt`` were generated.
+# Global cap used when the frozen ``splits/test.txt`` was generated.
 # Recorded here for documentation; the split files are the source of truth.
-VAL_CAP = 100
 TEST_CAP = 100
 
 

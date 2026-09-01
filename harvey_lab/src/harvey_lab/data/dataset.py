@@ -19,7 +19,7 @@ tasks are discovered by walking for ``task.json`` recursively. A task's
 :class:`HarveyLabRecord` objects. No golden reference is materialized: the
 rubric ``match_criteria`` strings are the grading standard (an LLM judge
 scores each criterion pass/fail). :func:`read_split` returns the frozen
-train / val / test task-id lists in ``splits/`` (see ``splits/README.md``).
+train / test task-id lists in ``splits/`` (see ``splits/README.md``).
 """
 
 from __future__ import annotations
@@ -192,14 +192,14 @@ def load_records(
 
 
 def read_split(split: str) -> list[str]:
-    """Return the frozen task-id list for ``split`` in {train, val, test}.
+    """Return the frozen task-id list for ``split`` in {train, test}.
 
     Lists are stored round-robin across practice areas, so any prefix stays
     distribution-representative — a run cap can take the first N ids.
     """
     path = SPLITS_DIR / f"{split}.txt"
     if not path.is_file():
-        raise FileNotFoundError(f"No split file {path} (expected one of train/val/test).")
+        raise FileNotFoundError(f"No split file {path} (expected one of train/test).")
     return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
