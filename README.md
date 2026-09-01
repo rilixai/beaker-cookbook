@@ -10,9 +10,9 @@
   <a href="https://app.withbeaker.ai"><strong>Try for free →</strong></a> · <a href="https://withbeaker.ai">withbeaker.ai</a> · Docs (coming soon)
 </div>
 
-The cookbook is where we put Beaker to work. Every recipe is a real agent on a
-real benchmark — legal research, multi-hop QA, knowledge work, app control,
-automation — with a local eval you can run in minutes. Clone one, get a
+Every recipe in this cookbook is a real agent on a
+real benchmark (including legal research, multi-hop QA, knowledge work, app control,
+and enterprise automation) with a local eval you can run in minutes. Clone one, get a
 baseline, then point Beaker at it and see what the first round of experiments
 finds.
 
