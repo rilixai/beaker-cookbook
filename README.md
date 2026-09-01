@@ -2,14 +2,18 @@
 <div align="center">
   <img width="227" height="225" alt="Beaker" src="https://github.com/user-attachments/assets/174d316a-24c0-4832-9f93-9c0a77a19433" />
 
-  **[withbeaker.ai](https://withbeaker.ai)** · [app.withbeaker.ai](https://app.withbeaker.ai) · [beaker-sdk on PyPI](https://pypi.org/project/beaker-sdk/)
+  <h3>Beaker, the autonomous AI engineer</h3>
+
+  Beaker experiments with your AI agents — finding failures, testing fixes,
+  and compounding the improvements that work.
+
+  <a href="https://app.withbeaker.ai"><strong>Try for free →</strong></a> · <a href="https://withbeaker.ai">withbeaker.ai</a> · Docs (coming soon)
 </div>
 
-*Standalone agent recipes — each one a runnable agent plus a local
-evaluation — covering different agent shapes, tasks, and production setups.
-They are the reference systems we optimize with
-[Beaker](https://withbeaker.ai), and a good starting point for wiring your
-own agent into it.*
+*These recipes are the production-shaped agents we point Beaker at — each one
+a runnable agent plus a local evaluation, across different agent shapes,
+tasks, and production setups. Point Beaker at one, and see what the first
+round of experiments finds.*
 
 ## Recipes
 
@@ -60,3 +64,8 @@ uv run ruff check && uv run ruff format --check
 uv run python -m mypy
 uv run python -m pytest -q
 ```
+
+## Stay in the loop
+
+Star this repo to get notified as recipes land, and follow
+[@withbeaker on X](https://x.com/withbeaker) for Beaker updates.
