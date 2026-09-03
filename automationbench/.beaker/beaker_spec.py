@@ -61,6 +61,12 @@ class TracedChatCompletionsClient(RetryingOpenAIChatCompletionsClient):
         ) as call:
             response = await super().get_native_response(prompt, model, sampling_args, tools, **kwargs)
             call.output(response)
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                call.usage(
+                    input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                    output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+                )
             return response
 
 
