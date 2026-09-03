@@ -12,7 +12,7 @@ import tempfile
 from collections import defaultdict
 from pathlib import Path
 
-from automationbench_skills.data.tasks import PUBLIC_DOMAINS, load_split
+from automationbench_skills.data.tasks import PUBLIC_DOMAINS, Sample, load_split
 
 
 TRAIN_PER_DOMAIN = 4
@@ -21,17 +21,20 @@ DATASET_NAME = "automationbench-skills-quickstart"
 
 
 def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
-    by_domain: dict[str, list[str]] = defaultdict(list)
+    by_domain: dict[str, list[Sample]] = defaultdict(list)
     for sample in load_split(split):
-        by_domain[sample.domain].append(sample.task_name)
+        by_domain[sample.domain].append(sample)
     rows: list[dict[str, object]] = []
     for domain in PUBLIC_DOMAINS:
-        for task_name in by_domain[domain][:per_domain]:
+        for sample in by_domain[domain][:per_domain]:
             rows.append(
                 {
-                    "id": task_name,
-                    "input": {"task_name": task_name},
-                    "expected": {},
+                    "id": sample.task_name,
+                    "input": {"task_name": sample.task_name},
+                    # The task's assertions are what "correct" means for this
+                    # case; the spec's scorer evaluates them against the end
+                    # state and emits one Check per assertion.
+                    "expected": {"assertions": sample.info["assertions"]},
                     "metadata": {"domain": domain, "source_split": split},
                     "group_key": domain,
                 }
