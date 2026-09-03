@@ -40,9 +40,9 @@ from automationbench_skills.vendored.model_setup import build_sampling_args
 
 
 FIELD_NAMES = ["task_completed_correctly", "partial_credit"]
-# Published AutomationBench headline is strict pass rate; partial credit is
-# reported alongside it but does not drive the optimizer objective.
-FIELD_WEIGHTS = {"task_completed_correctly": 1.0, "partial_credit": 0.0}
+# Hill-climb on assertion partial credit. Strict pass rate is still recorded
+# as a field score but does not drive the optimizer objective.
+FIELD_WEIGHTS = {"partial_credit": 1.0, "task_completed_correctly": 0.0}
 DEFAULT_TIMEOUT_SECONDS = 180.0
 _GATEWAY_API_KEY_VAR = "OPENAI_API_KEY"
 
