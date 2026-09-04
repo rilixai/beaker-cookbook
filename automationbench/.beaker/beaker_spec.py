@@ -60,6 +60,7 @@ from automationbench_skills.data.tasks import Sample, load_samples
 from automationbench_skills.prompts import load_system_prompt, with_system_prompt
 from automationbench_skills.runner import (
     DEFAULT_MAX_STEPS,
+    DEFAULT_REASONING_EFFORT,
     STATE_COLUMNS,
     TIMEOUT_GRACE_SECONDS,
     ModelSpec,
@@ -191,11 +192,14 @@ def _model_for_runtime(runtime: Any) -> ModelSpec:
     if getattr(runtime, "model", None):
         target = inference_target(runtime)
         os.environ[_GATEWAY_API_KEY_VAR] = target.api_key
+        capabilities = runtime.model_capabilities
+        selected_effort = capabilities.reasoning_effort if capabilities else None
         return ModelSpec(
             name=target.model,
             base_url=target.base_url,
             api_key_var=_GATEWAY_API_KEY_VAR,
             api="chat_completions",
+            reasoning_effort=selected_effort or DEFAULT_REASONING_EFFORT,
         )
     return ModelSpec()
 

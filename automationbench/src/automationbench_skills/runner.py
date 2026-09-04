@@ -35,7 +35,8 @@ from automationbench_skills.vendored.model_setup import (
 )
 
 
-DEFAULT_MODEL = "gpt-5-mini"
+DEFAULT_MODEL = "gpt-5.6-luna"
+DEFAULT_REASONING_EFFORT = "max"
 DEFAULT_MAX_STEPS = 50  # upstream eval.py's --max-turns default
 # Scoring and cleanup run after the env's own timeout stops the loop; the outer
 # guard only catches a rollout stuck outside that loop.
@@ -54,7 +55,7 @@ class ModelSpec:
     base_url: str | None = None
     api_key_var: str = "OPENAI_API_KEY"
     api: str = "auto"  # or: anthropic | chat_completions | responses | gemini_interactions
-    reasoning_effort: str | None = None
+    reasoning_effort: str | None = DEFAULT_REASONING_EFFORT
     extra_body: str | None = None  # raw JSON merged into every request body
 
     def resolved_api(self) -> str:

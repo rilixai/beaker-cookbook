@@ -13,7 +13,14 @@ from typing import Any
 from dotenv import load_dotenv
 
 from automationbench_skills.evaluation.summary import format_summary, summarize
-from automationbench_skills.runner import DEFAULT_MAX_STEPS, DEFAULT_MODEL, ModelSpec, RunResult, run_split
+from automationbench_skills.runner import (
+    DEFAULT_MAX_STEPS,
+    DEFAULT_MODEL,
+    DEFAULT_REASONING_EFFORT,
+    ModelSpec,
+    RunResult,
+    run_split,
+)
 
 
 def _add_run_args(p: argparse.ArgumentParser) -> None:
@@ -27,7 +34,7 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
         help="Directory holding the agent's system prompt: system.md, or system_no_skills.md with --no-skills (read live)",
     )
     p.add_argument("--model", default=DEFAULT_MODEL)
-    p.add_argument("--reasoning-effort", default=None)
+    p.add_argument("--reasoning-effort", default=DEFAULT_REASONING_EFFORT)
     p.add_argument("--base-url", default=None, help="OpenAI-compatible gateway base URL")
     p.add_argument("--api-key-var", default="OPENAI_API_KEY")
     p.add_argument("--api", default="auto", help="auto|chat_completions|responses|anthropic|gemini_interactions")
