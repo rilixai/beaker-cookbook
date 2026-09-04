@@ -36,7 +36,7 @@ from automationbench_skills.vendored.model_setup import (
 
 
 DEFAULT_MODEL = "gpt-5.6-luna"
-DEFAULT_REASONING_EFFORT = "max"
+DEFAULT_REASONING_EFFORT = "xhigh"
 DEFAULT_MAX_STEPS = 50  # upstream eval.py's --max-turns default
 # Scoring and cleanup run after the env's own timeout stops the loop; the outer
 # guard only catches a rollout stuck outside that loop.

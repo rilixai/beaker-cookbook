@@ -62,7 +62,7 @@ were made and the leakage policy. The 200-task `simple` domain
 
 ## Models
 
-`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort max`. Routing
+`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort xhigh`. Routing
 follows the benchmark (`vendored/model_setup.py`): `claude-*` goes to
 Anthropic, `gemini-*` to the Gemini interactions API, everything else to OpenAI
 chat-completions/responses. `--reasoning-effort` maps to each API's reasoning
