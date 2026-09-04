@@ -2,7 +2,7 @@
 
 [AutomationBench](https://github.com/zapier/AutomationBench) ([paper](https://arxiv.org/abs/2604.18934)) is Zapier's benchmark for business automation agents: 600 public tasks in six domains (sales, marketing, operations, support, finance, hr). The agent works in a simulated workspace of SaaS tools (Gmail, Sheets, Slack, CRMs, ...) and is scored by deterministic assertions on the final state of that workspace. Artificial Analysis runs a hosted variant, [AutomationBench-AA](https://artificialanalysis.ai/evaluations/automationbench).
 
-This recipe runs the unmodified benchmark one task at a time (`run_one`) with an agent whose behavior is on disk: a system prompt in `prompts/system.md`, and a `skills/` folder the agent reads through two extra tools, `list_skills` and `read_skill`. Both are read from disk on every call, so Beaker can improve the agent by editing those files between rollouts. The optimizer itself is not part of this recipe.
+This recipe runs the unmodified benchmark one task at a time (`run_one`) with an agent whose behavior is on disk: a system prompt in `prompts/`, and a `skills/` folder the agent reads through two extra tools, `list_skills` and `read_skill`. Both are read from disk on every call, so Beaker can improve the agent by editing those files between rollouts. The optimizer itself is not part of this recipe.
 
 ## Quick start
 
@@ -27,13 +27,16 @@ with `error="timeout ..."`.
 
 ## Baseline vs. skills
 
-- **Baseline**: `--no-skills` (or no `--skills-dir`). The benchmark as shipped:
-  its system prompt, no skill tools.
-- **Skills**: `--skills-dir skills --prompts-dir prompts`. The system prompt is
-  `prompts/system.md`, the task message is the dataset's, and the agent has
-  `list_skills()` / `read_skill(skill_id)` over the skills directory. An empty
-  skills directory is fine. Without `--prompts-dir` the dataset's system prompt
-  is used.
+- **Baseline**: `--no-skills` (or no `--skills-dir`). No skill tools; the
+  system prompt is `prompts/system_no_skills.md`, which ships as the benchmark's
+  own prompt.
+- **Skills**: `--skills-dir skills`. The system prompt is `prompts/system.md`
+  (the benchmark's prompt plus a paragraph on using the skills) and the agent
+  has `list_skills()` / `read_skill(skill_id)` over the skills directory. An
+  empty skills directory is fine.
+
+In both arms the task message is the dataset's. `--prompts-dir prompts` selects
+the prompt directory; without it the dataset's system prompt is used.
 
 A skill is a folder with a `SKILL.md` (YAML frontmatter `name`/`description`,
 markdown body). Its ID is its path under `skills/`:
@@ -105,7 +108,7 @@ result.end_state  # final simulated WorldState
 ```
 
 The loop: run train tasks, look at trajectories and scores, edit
-`skills/**/SKILL.md` and `prompts/system.md`, run again. Edits are picked up
+`skills/**/SKILL.md` and `prompts/*.md`, run again. Edits are picked up
 immediately. Use `test` only for final numbers.
 
 `.beaker/` (`beaker.yaml`, `beaker_spec.py`, `upload_splits.py`) is a working
@@ -123,10 +126,10 @@ of assertions is checked against that world
 or does not. Assertions already true before the agent acted don't count, so
 doing nothing scores 0.
 
-**Optimize `partial_credit`**, the share of assertions that hold (0–1). It is
-the objective in `.beaker/beaker_spec.py` and gives a much denser signal than
-`task_completed_correctly` (all assertions hold), which is the strict pass rate:
-report it, don't optimize for it.
+**Prefer `partial_credit` as the metric to optimize**, the share of assertions
+that hold (0–1). It is the objective in `.beaker/beaker_spec.py` and gives a
+much denser signal than `task_completed_correctly` (all assertions hold), which
+is the strict pass rate: report it, don't optimize for it.
 
 In Beaker's case view each assertion is one check, named with the records it
 refers to (`salesforce_campaign_member_exists · David Park · Q1 Product Launch

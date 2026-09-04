@@ -9,9 +9,9 @@ then run held-out test.
 
 The ``AutomationBenchEnv`` is built once per (toolset, skills on/off,
 max_turns) and reused across calls — its ``setup_state`` resets the per-task
-world every rollout. Only the sample, the ``skills_dir`` contents and
-``prompts_dir/system.md`` vary per call; both are read live, so editing them
-between calls changes agent behavior with no env rebuild.
+world every rollout. Only the sample, the ``skills_dir`` contents and the
+prompt file in ``prompts_dir`` vary per call; both are read live, so editing
+them between calls changes agent behavior with no env rebuild.
 """
 
 from __future__ import annotations
@@ -200,8 +200,9 @@ async def run_one_async(
     Side-effect-free besides reading ``skills_dir`` and ``prompts_dir``: the
     task's simulated world is created fresh inside the rollout and returned in
     ``RunResult.end_state``. ``skills_dir=None`` is the baseline arm — the skill
-    tools are absent. ``prompts_dir/system.md`` is the agent's system prompt;
-    with ``None`` (or no such file) the dataset row's system message is used.
+    tools are absent. The agent's system prompt is ``prompts_dir/system.md``
+    (``system_no_skills.md`` in the baseline arm); with ``None`` (or no such
+    file) the dataset row's system message is used.
     ``timeout`` (seconds) bounds the whole rollout; on expiry the task scores 0
     with ``error="timeout"`` instead of hanging on a stuck API request.
     """
@@ -212,7 +213,7 @@ async def run_one_async(
     client = get_client(model)
     sampling_args = build_sampling_args(model.name, model.resolved_api(), model.reasoning_effort, model.extra_body)
     rollout = env.run_rollout(
-        _rollout_input(sample, load_system_prompt(prompts_dir)),
+        _rollout_input(sample, load_system_prompt(prompts_dir, skills=skills_dir is not None)),
         client,
         model.name,
         sampling_args or {},

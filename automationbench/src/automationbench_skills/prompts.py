@@ -1,4 +1,5 @@
-"""The agent's system prompt, ``prompts/system.md``.
+"""The agent's system prompt: ``prompts/system.md`` with skills,
+``prompts/system_no_skills.md`` without.
 
 The file is the whole system message; the task (user) message comes from the
 dataset row. It is read on every call, like the skills. With no prompts
@@ -12,12 +13,17 @@ from typing import Any
 
 
 SYSTEM_PROMPT_FILE = "system.md"
+NO_SKILLS_SYSTEM_PROMPT_FILE = "system_no_skills.md"
 
 
-def load_system_prompt(prompts_dir: Path | str | None) -> str | None:
+def system_prompt_file(*, skills: bool) -> str:
+    return SYSTEM_PROMPT_FILE if skills else NO_SKILLS_SYSTEM_PROMPT_FILE
+
+
+def load_system_prompt(prompts_dir: Path | str | None, *, skills: bool = True) -> str | None:
     if prompts_dir is None:
         return None
-    path = Path(prompts_dir) / SYSTEM_PROMPT_FILE
+    path = Path(prompts_dir) / system_prompt_file(skills=skills)
     if not path.is_file():
         return None
     text = path.read_text(encoding="utf-8").strip()

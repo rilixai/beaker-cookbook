@@ -121,13 +121,19 @@ class TestPrompts:
         assert load_system_prompt(tmp_path) == "first"
         (tmp_path / "system.md").write_text("second\n")
         assert load_system_prompt(tmp_path) == "second"
+        assert load_system_prompt(tmp_path, skills=False) is None
+        (tmp_path / "system_no_skills.md").write_text("plain\n")
+        assert load_system_prompt(tmp_path, skills=False) == "plain"
+        assert load_system_prompt(tmp_path) == "second"
 
-    def test_shipped_seed_starts_with_the_benchmark_prompt_verbatim(self) -> None:
-        text = load_system_prompt(RECIPE_ROOT / "prompts")
-        assert text is not None
+    def test_shipped_seeds_start_with_the_benchmark_prompt_verbatim(self) -> None:
         upstream = {s.prompt[0]["content"] for s in load_split("train") + load_split("test")}
         assert len(upstream) == 1
-        assert text.startswith(upstream.pop())
+        benchmark = upstream.pop().strip()
+        assert load_system_prompt(RECIPE_ROOT / "prompts", skills=False) == benchmark
+        text = load_system_prompt(RECIPE_ROOT / "prompts")
+        assert text is not None
+        assert text.startswith(benchmark)
         for domain in PUBLIC_DOMAINS:
             assert domain in text
         assert "list_skills" in text and "read_skill" in text
