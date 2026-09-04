@@ -116,27 +116,23 @@ An optimizer loop: run train samples, inspect trajectories/scores, edit
 `skills/**/SKILL.md`, rerun — the environment is reused across calls and picks up
 skill edits immediately. Evaluate on `test` only for final reporting.
 
+The Beaker integration is pre-configured in `.beaker/` (`beaker.yaml`,
+`beaker_spec.py`, `upload_splits.py`); nothing to wire up.
+
 ### How a case is scored
 
-There is no expected answer. Each task is a prompt ("add the director-level
-contacts to the Q1 webinar campaign") against a simulated world (Salesforce,
-Gmail, Sheets, ... as JSON records), and the agent acts on it through tools.
-Scoring inspects only the world afterwards, with a list of deterministic
-assertions per task: `salesforce_campaign_member_exists` for each contact that
-should be added, `..._not_exists` for each one that should be skipped,
-`gmail_message_sent_to`, `google_sheets_row_cell_equals`, and so on. Every
-assertion either holds or does not; `partial_credit` is the share that hold,
-`task_completed_correctly` is 1 only when all of them do. Assertions already
-true before the agent acted earn no credit (they are shown but excluded from
-the score), so an agent that does nothing scores 0 rather than passing every
-"don't do X".
+There is no expected answer. A task is a prompt against a simulated world
+(Salesforce, Gmail, Sheets, ... as JSON records); after the agent acts, a list
+of deterministic assertions is checked against that world
+(`salesforce_campaign_member_exists`, `gmail_message_sent_to`, ...). Each one
+holds or does not. `partial_credit` (share that hold) is the metric to optimize;
+`task_completed_correctly` (all hold) is the strict pass rate. Assertions already
+true before the agent acted are excluded, so doing nothing scores 0.
 
-In Beaker's case view each assertion is one check. Assertions refer to records
-by id, so the spec (`.beaker/beaker_spec.py`) resolves those ids against the
-world state to name the check (`salesforce_campaign_member_exists · David Park
-· Q1 Product Launch Webinar`); this is display only and does not change the
-score. A rollout the model or provider never completed is reported as a failed
-case, not a zero.
+In Beaker's case view each assertion is one check, named with the records it
+refers to (`salesforce_campaign_member_exists · David Park · Q1 Product Launch
+Webinar`) instead of raw ids; display only. A rollout the model or provider
+never completed is a failed case, not a zero.
 
 ## Development
 

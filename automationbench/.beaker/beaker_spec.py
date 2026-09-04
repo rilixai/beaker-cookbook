@@ -53,6 +53,7 @@ from beaker import (
 )
 from beaker.sdk.utils import to_json_safe
 from beaker.tracing import current_trace
+from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
 from verifiers.types import ClientConfig, RolloutInput
 
 from automationbench_skills.data.tasks import Sample, load_samples
@@ -205,6 +206,18 @@ def _traced_client(model: ModelSpec) -> _TracedChatCompletionsClient:
     )
 
 
+def _rollout_error(raw: Any) -> BaseException | None:
+    # ``run_rollout`` returns the serialized ``ErrorData`` mapping, not the
+    # exception; rebuild the most specific ``vf.Error`` from its error chain.
+    if raw is None:
+        return None
+    if isinstance(raw, BaseException):
+        return raw
+    if is_error_data(raw):
+        return error_from_data(raw)
+    return vf.Error(str(raw))
+
+
 async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
     del targets
     try:
@@ -240,7 +253,7 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
             output = await asyncio.wait_for(rollout, DEFAULT_TIMEOUT_SECONDS)
             completion = output.get("completion") or []
             trajectory = [m if isinstance(m, dict) else m.model_dump(mode="json") for m in completion]
-            result_error = output.get("error")
+            result_error = _rollout_error(output.get("error"))
             end_state = output.get("_end_state")
             # verifiers swallows rollout exceptions into ``state["error"]`` and
             # still grades the untouched world. A model/provider/infra failure
