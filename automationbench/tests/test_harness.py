@@ -269,3 +269,70 @@ class TestSummary:
         assert summary["overall"]["tasks"] == 3
         text = format_summary(summary)
         assert "overall" in text and "sales" in text
+
+
+def _load_spec_module() -> Any:
+    import importlib.util
+    import sys
+
+    path = RECIPE_ROOT / ".beaker" / "beaker_spec.py"
+    spec = importlib.util.spec_from_file_location("automationbench_beaker_spec", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _tool_spans(capture_root: Path) -> list[dict[str, Any]]:
+    spans: list[dict[str, Any]] = []
+    for path in capture_root.rglob("*.otlp.jsonl"):
+        for line in path.read_text().splitlines():
+            for resource in json.loads(line).get("resourceSpans", []):
+                for scope in resource.get("scopeSpans", []):
+                    for span in scope.get("spans", []):
+                        attrs = {a["key"]: next(iter(a["value"].values())) for a in span.get("attributes", [])}
+                        if attrs.get("beaker.operation.kind") == "tool":
+                            spans.append({"name": span["name"], "status": span.get("status") or {}, "attrs": attrs})
+    return spans
+
+
+class TestBeakerSpecTracing:
+    async def test_every_tool_execution_is_its_own_span(self, tmp_path: Path) -> None:
+        from beaker.tracing import local_capture
+
+        spec_module = _load_spec_module()
+        env = get_env(skills=True, env_class=spec_module._TracedAutomationBenchEnv)
+        set_skills_dir(RECIPE_ROOT / "skills")
+        client = ScriptedClient(
+            turns=[
+                {"tool_calls": [{"name": "list_skills"}]},
+                {"tool_calls": [{"name": "search_tools", "arguments": {"query": "email"}}]},
+                {
+                    "tool_calls": [
+                        {"name": "execute_tool", "arguments": {"tool_name": "no_such_tool", "arguments": "{}"}}
+                    ]
+                },
+                {"content": "done"},
+            ]
+        )
+        with local_capture(tmp_path, case_id="case", strict_evidence=False) as capture:
+            await env.run_rollout(
+                _rollout_input(_sample(), None), client, "scripted-model", {}, state_columns=STATE_COLUMNS
+            )
+
+        assert capture.receipt is not None and capture.receipt.counts["tool_calls"] == 3
+        spans = {span["name"]: span for span in _tool_spans(tmp_path)}
+        assert set(spans) == {"list_skills", "search_tools", "execute_tool"}
+        for span in spans.values():
+            assert span["attrs"]["gen_ai.tool.name"] == span["name"]
+            assert span["attrs"]["gen_ai.tool.call.id"] == "call_0"
+            # The injected simulated world is the fixture, not a model argument.
+            assert "world" not in json.loads(span["attrs"]["input.value"])
+        assert json.loads(spans["search_tools"]["attrs"]["input.value"]) == {"query": "email"}
+        assert spans["search_tools"]["attrs"]["output.value"]  # the result the model saw
+        assert spans["search_tools"]["status"] == {}
+        failed = spans["execute_tool"]
+        assert json.loads(failed["attrs"]["input.value"]) == {"tool_name": "no_such_tool", "arguments": "{}"}
+        assert failed["status"]["code"] == 2 and "no_such_tool" in failed["status"]["message"]
+        assert "output.value" not in failed["attrs"]

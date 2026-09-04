@@ -17,8 +17,9 @@ world state so each check reads as ``salesforce_campaign_member_exists · David
 Park · Q1 Product Launch Webinar`` rather than a dict of ids.
 
 Model calls are traced by subclassing the verifiers client (see
-``_TracedChatCompletionsClient``); the verifiers rollout is what talks to the
-model, so there is no framework integration to enable here.
+``_TracedChatCompletionsClient``) and tool executions by subclassing the env
+(``_TracedAutomationBenchEnv``); the verifiers rollout is what talks to the
+model and runs the tools, so there is no framework integration to enable here.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ import verifiers as vf
 from automationbench.clients import RetryingOpenAIChatCompletionsClient
 from automationbench.rubric import partial_credit
 from automationbench.rubric.registry import AssertionRegistry
+from automationbench.runner import AutomationBenchEnv
 from automationbench.schema.world import WorldState
 from beaker import (
     STANDARD_JSONL_CASE_SCHEMA,
@@ -165,6 +167,25 @@ class _TracedChatCompletionsClient(RetryingOpenAIChatCompletionsClient):
             return response
 
 
+class _TracedAutomationBenchEnv(AutomationBenchEnv):
+    """The benchmark env with a Beaker tool span around every tool execution.
+
+    ``call_tool`` is the one method every tool call (skill tools and the
+    benchmark's ``search_tools``/``execute_tool`` meta-tools) goes through, so
+    each span carries the tool name, the model's arguments, the result the
+    model saw, and the execution's duration and error. The env injects the
+    simulated ``world`` into the arguments before this point; it is the hidden
+    fixture, not something the model sent, so it is left out of the span.
+    """
+
+    async def call_tool(self, tool_name: str, tool_args: dict[str, Any], tool_call_id: str, **kwargs: Any) -> Any:
+        arguments = {key: value for key, value in tool_args.items() if key != "world"}
+        with current_trace().tool_call(tool_name, arguments=arguments, call_id=tool_call_id) as call:
+            message = await super().call_tool(tool_name, tool_args, tool_call_id, **kwargs)
+            call.output(to_json_safe(getattr(message, "content", message)))
+            return message
+
+
 @cache
 def _samples_by_name() -> dict[str, Sample]:
     return {sample.task_name: sample for sample in load_samples()}
@@ -258,6 +279,7 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
                 skills=True,
                 max_steps=DEFAULT_MAX_STEPS,
                 timeout=DEFAULT_TIMEOUT_SECONDS,
+                env_class=_TracedAutomationBenchEnv,
             )
             set_skills_dir(skills_dir)
             client = _traced_client(model)
@@ -303,8 +325,8 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
             return CaseResult.failed(str(exc), retryable=True)
 
         error = None if result_error is None else f"{type(result_error).__name__}: {result_error}"
-        # The scorer needs the error and the end state; the model/tool turns are
-        # already in the trace via ``_TracedChatCompletionsClient``.
+        # The scorer needs the error and the end state; the model and tool
+        # turns are already in the trace as their own spans.
         stage.output({"error": error, "messages": len(completion)})
         return CaseResult(
             output=None,

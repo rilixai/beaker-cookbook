@@ -114,9 +114,9 @@ immediately. Use `test` only for final numbers.
 
 `.beaker/` (`beaker.yaml`, `beaker_spec.py`, `upload_splits.py`) is a working
 Beaker integration: it runs a case, scores it with the benchmark's rubric and
-traces every model call. Start from it rather than from scratch. The candidate
-is `repository=("skills", "prompts")`, i.e. the skill files and the system
-prompt.
+traces every model call and tool execution. Start from it rather than from
+scratch. The candidate is `repository=("skills", "prompts")`, i.e. the skill
+files and the system prompt.
 
 ### How a case is scored
 

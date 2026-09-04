@@ -89,7 +89,7 @@ class RunResult:
         }
 
 
-_ENV_CACHE: dict[tuple[str, bool, int, float | None], Any] = {}
+_ENV_CACHE: dict[tuple[str, bool, int, float | None, type | None], Any] = {}
 _CLIENT_CACHE: dict[tuple[ModelSpec, Any], Client] = {}
 
 
@@ -98,8 +98,12 @@ def get_env(
     skills: bool = True,
     max_steps: int = DEFAULT_MAX_STEPS,
     timeout: float | None = None,
+    env_class: type | None = None,
 ) -> Any:
     """Build (once) and return the shared AutomationBenchEnv.
+
+    ``env_class`` is an ``AutomationBenchEnv`` subclass to build instead of the
+    upstream env (e.g. one that traces each ``call_tool``).
 
     The skill tools are registered via the env's ``tools=`` parameter; under
     the ``zapier`` (meta-tools) and ``api`` toolsets, added tools survive
@@ -116,7 +120,7 @@ def get_env(
             "toolset='limited_zapier' filters tools to each task's declared list at "
             "setup_state, which drops the skill tools. Use toolset='zapier' (default)."
         )
-    key = (toolset, skills, max_steps, timeout)
+    key = (toolset, skills, max_steps, timeout, env_class)
     if key not in _ENV_CACHE:
         import json
 
@@ -125,6 +129,8 @@ def get_env(
         from datasets import Dataset
 
         from automationbench_skills.data.tasks import load_samples
+
+        build_env = env_class or AutomationBenchEnv
 
         # The env's own dataset only backs env.evaluate(); this recipe drives
         # rollouts explicitly through run_rollout, so a 1-row placeholder
@@ -141,7 +147,7 @@ def get_env(
                 }
             ]
         )
-        _ENV_CACHE[key] = AutomationBenchEnv(
+        _ENV_CACHE[key] = build_env(
             dataset=dataset,
             rubric=create_rubric(),
             tools=list(SKILL_TOOLS) if skills else None,
