@@ -20,6 +20,12 @@ TEST_PER_DOMAIN = 2
 DATASET_NAME = "automationbench-skills-quickstart"
 
 
+def _user_prompt(sample: Sample) -> str:
+    return "\n\n".join(
+        str(message.get("content") or "") for message in sample.prompt if message.get("role") == "user"
+    ).strip()
+
+
 def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
     by_domain: dict[str, list[Sample]] = defaultdict(list)
     for sample in load_split(split):
@@ -30,7 +36,10 @@ def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
             rows.append(
                 {
                     "id": sample.task_name,
-                    "input": {"task_name": sample.task_name},
+                    # The spec loads the task by name; ``prompt`` is what the
+                    # agent was asked, so the case view shows the ask next to
+                    # the assertion checks.
+                    "input": {"task_name": sample.task_name, "prompt": _user_prompt(sample)},
                     # The task's assertions are what "correct" means for this
                     # case; the spec's scorer evaluates them against the end
                     # state and emits one Check per assertion.
