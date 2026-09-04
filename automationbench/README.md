@@ -116,6 +116,30 @@ An optimizer loop: run train samples, inspect trajectories/scores, edit
 `skills/**/SKILL.md`, rerun — the environment is reused across calls and picks up
 skill edits immediately. Evaluate on `test` only for final reporting.
 
+`.beaker/` (`beaker.yaml`, `beaker_spec.py`, `upload_splits.py`) is a working
+Beaker integration to start from: it runs a case, scores it with the benchmark's
+own rubric, and traces every model call. Adjust it rather than wiring one up
+from scratch.
+
+### How a case is scored
+
+There is no expected answer. A task is a prompt against a simulated world
+(Salesforce, Gmail, Sheets, ... as JSON records); after the agent acts, a list
+of deterministic assertions is checked against that world
+(`salesforce_campaign_member_exists`, `gmail_message_sent_to`, ...). Each one
+holds or does not. Assertions already true before the agent acted are excluded,
+so doing nothing scores 0.
+
+**Prefer `partial_credit` as the metric to optimize** (share of assertions that
+hold, 0–1): it is the default objective in `.beaker/beaker_spec.py` and gives a
+denser signal per task than `task_completed_correctly` (all hold), the strict
+pass rate, which is still worth reporting.
+
+In Beaker's case view each assertion is one check, named with the records it
+refers to (`salesforce_campaign_member_exists · David Park · Q1 Product Launch
+Webinar`) instead of raw ids; display only. A rollout the model or provider
+never completed is a failed case, not a zero.
+
 ## Development
 
 ```bash

@@ -9,6 +9,15 @@ Contract: the dataset row's ``expected`` holds the task's assertion list
 final world state in ``context["end_state"]``, and the scorer runs the
 benchmark's own ``partial_credit`` rubric against that state, emitting one
 ``Check`` per assertion so the optimizer sees which requirements failed.
+
+Assertions reference simulated records by opaque id (``"contact_id":
+"003xx000004MNO1"``); the scorer resolves those against the initial and end
+world state so each check reads as ``salesforce_campaign_member_exists · David
+Park · Q1 Product Launch Webinar`` rather than a dict of ids.
+
+Model calls are traced by subclassing the verifiers client (see
+``_TracedChatCompletionsClient``); the verifiers rollout is what talks to the
+model, so there is no framework integration to enable here.
 """
 
 from __future__ import annotations
@@ -22,8 +31,10 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
+import verifiers as vf
 from automationbench.clients import RetryingOpenAIChatCompletionsClient
 from automationbench.rubric import partial_credit
+from automationbench.rubric.registry import AssertionRegistry
 from automationbench.schema.world import WorldState
 from beaker import (
     STANDARD_JSONL_CASE_SCHEMA,
@@ -41,6 +52,7 @@ from beaker import (
 )
 from beaker.sdk.utils import to_json_safe
 from beaker.tracing import current_trace
+from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
 from verifiers.types import ClientConfig, RolloutInput
 
 from automationbench_skills.data.tasks import Sample, load_samples
@@ -118,7 +130,17 @@ class _TaskDataLoader(CaseDataLoader[_TaskRow]):
 
 
 class _TracedChatCompletionsClient(RetryingOpenAIChatCompletionsClient):
-    """Same client the harness already accepts, with Beaker spans on each call."""
+    """Same client the harness already accepts, with Beaker spans on each call.
+
+    verifiers drives the agent loop itself and takes the client object as a
+    parameter, so Beaker's LiteLLM/OpenAI/Anthropic integrations never see the
+    calls. Subclassing keeps the exact type the harness checks for and wraps
+    the one method every turn goes through: each span carries the full message
+    list for that turn (tool calls and simulated tool results included, since
+    they come back as messages) and the provider response, which is where the
+    run's token usage and model-call counts come from. Only the candidate's
+    calls are traced; the assertion rubric is deterministic and makes none.
+    """
 
     async def get_native_response(
         self, prompt: Any, model: str, sampling_args: Any, tools: Any = None, **kwargs: Any
@@ -183,6 +205,18 @@ def _traced_client(model: ModelSpec) -> _TracedChatCompletionsClient:
     )
 
 
+def _rollout_error(raw: Any) -> BaseException | None:
+    # ``run_rollout`` returns the serialized ``ErrorData`` mapping, not the
+    # exception; rebuild the most specific ``vf.Error`` from its error chain.
+    if raw is None:
+        return None
+    if isinstance(raw, BaseException):
+        return raw
+    if is_error_data(raw):
+        return error_from_data(raw)
+    return vf.Error(str(raw))
+
+
 async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
     del targets
     try:
@@ -217,9 +251,16 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
             )
             output = await asyncio.wait_for(rollout, DEFAULT_TIMEOUT_SECONDS)
             completion = output.get("completion") or []
-            trajectory = [m if isinstance(m, dict) else m.model_dump(mode="json") for m in completion]
-            result_error = output.get("error")
+            result_error = _rollout_error(output.get("error"))
             end_state = output.get("_end_state")
+            # verifiers swallows rollout exceptions into ``state["error"]`` and
+            # still grades the untouched world. A model/provider/infra failure
+            # means the agent never got to act, so the case did not run; an
+            # agent-side failure (bad tool call, overlong prompt) is the
+            # candidate's fault and keeps its earned score.
+            if isinstance(result_error, vf.ModelError | vf.InfraError):
+                stage.output({"error": f"{type(result_error).__name__}: {result_error}"})
+                return CaseResult.failed(f"{type(result_error).__name__}: {result_error}", retryable=True)
         except TimeoutError:
             timeout = f"timeout after {DEFAULT_TIMEOUT_SECONDS}s"
             stage.output({"error": timeout})
@@ -231,8 +272,10 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
         except Exception as exc:
             return CaseResult.failed(str(exc), retryable=True)
 
-        error = None if result_error is None else str(result_error)
-        stage.output({"error": error, "messages": len(trajectory)})
+        error = None if result_error is None else f"{type(result_error).__name__}: {result_error}"
+        # The scorer needs the error and the end state; the model/tool turns are
+        # already in the trace via ``_TracedChatCompletionsClient``.
+        stage.output({"error": error, "messages": len(completion)})
         return CaseResult(
             output=None,
             output_kind="none",
@@ -240,7 +283,6 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
                 "task_name": sample.task_name,
                 "domain": sample.domain,
                 "error": error,
-                "trajectory": to_json_safe(trajectory),
                 "end_state": to_json_safe(end_state),
             },
         )
@@ -250,11 +292,16 @@ _SERVICE_FIELDS = sorted((str(f) for f in WorldState.model_fields if f != "meta"
 
 
 def _service_for(assertion_type: str) -> str | None:
-    """WorldState service an assertion type targets (``gmail_message_sent_to`` -> ``gmail``)."""
+    """WorldState service an assertion type targets (``gmail_message_sent_to`` -> ``gmail``).
+
+    Falls back to the type's first token when it names an app split over several
+    services (``facebook_page_post_exists`` -> ``facebook``).
+    """
     for service in _SERVICE_FIELDS:
         if assertion_type == service or assertion_type.startswith(service + "_"):
             return service
-    return None
+    head = assertion_type.split("_", 1)[0]
+    return head if any(service.startswith(head + "_") for service in _SERVICE_FIELDS) else None
 
 
 def _assertions_for(case: Case) -> list[dict[str, Any]]:
@@ -262,10 +309,56 @@ def _assertions_for(case: Case) -> list[dict[str, Any]]:
     return [dict(a) for a in expected.get("assertions") or []]
 
 
-def _check(outcome: Mapping[str, Any], *, error: str | None) -> Check:
+# Simulated records carry ``id``; the readable field varies by app.
+_LABEL_FIELDS = ("name", "title", "subject", "campaign_name", "account_name", "summary", "topic", "text", "email")
+_LABEL_MAX_CHARS = 60
+
+
+def _entity_index(*states: Any) -> dict[str, str]:
+    """``record id -> readable label`` for every record in the given world states.
+
+    Earlier states win, so a record renamed by the agent keeps the task author's name.
+    """
+    index: dict[str, str] = {}
+
+    def walk(node: Any) -> None:
+        if isinstance(node, Mapping):
+            label = " ".join(str(node[k]) for k in ("first_name", "last_name") if node.get(k)) or next(
+                (node[k].strip() for k in _LABEL_FIELDS if isinstance(node.get(k), str) and node[k].strip()), ""
+            )
+            if label and isinstance(node.get("id"), str | int):
+                index.setdefault(str(node["id"]), label)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    for state in states:
+        walk(state)
+    return index
+
+
+def _clip(text: str) -> str:
+    return text if len(text) <= _LABEL_MAX_CHARS else text[: _LABEL_MAX_CHARS - 1] + "…"
+
+
+def _check(
+    outcome: Mapping[str, Any], *, error: str | None, entities: Mapping[str, str], held_initially: bool = False
+) -> Check:
+    assertion_type = str(outcome["type"])
     params = dict(outcome.get("params") or {})
     passed = bool(outcome.get("passed"))
     excluded = bool(outcome.get("excluded"))
+
+    # ``type · param values``; an id is swapped for the record's label when the
+    # world state knows it ("David Park" rather than "003xx000004MNO1").
+    rendered = [
+        entities.get(str(v), v if isinstance(v, str) else json.dumps(to_json_safe(v), default=str))
+        for k, v in params.items()
+        if k not in ("scored", "excluded")
+    ]
+    name = " · ".join([assertion_type, *(_clip(v) for v in rendered)])
     if excluded:
         message = (
             "excluded from scoring by the task author"
@@ -275,13 +368,14 @@ def _check(outcome: Mapping[str, Any], *, error: str | None) -> Check:
     elif passed:
         message = None
     else:
-        message = "not satisfied by the end state" + (f" (rollout error: {error})" if error else "")
+        message = (
+            "satisfied in the initial state; broken by the run" if held_initially else "not satisfied by the end state"
+        ) + (f" (rollout error: {error})" if error else "")
     return Check(
-        name=str(outcome["type"]),
+        name=name,
         verdict="pass" if passed else "fail",
-        description=json.dumps(params, sort_keys=True, default=str) if params else None,
         message=message,
-        group=_service_for(str(outcome["type"])),
+        group=_service_for(assertion_type),
         informational=excluded,
     )
 
@@ -299,11 +393,17 @@ class _AssertionScorer:
         context = result.context if isinstance(result.context, Mapping) else {}
         error = None if context.get("error") is None else str(context["error"])
         end_state = context.get("end_state")
+        initial_state = _sample_for_case(case).info.get("initial_state") or {}
+        entities = _entity_index(initial_state, end_state if isinstance(end_state, Mapping) else {})
+        initial_world = WorldState(**initial_state) if initial_state else None
+        held_initially = [
+            initial_world is not None and bool(AssertionRegistry.check(initial_world, a)) for a in assertions
+        ]
         if isinstance(end_state, Mapping):
             state: dict[str, Any] = {
                 "info": {"assertions": assertions},
                 "world": WorldState(**end_state),
-                "initial_state": _sample_for_case(case).info.get("initial_state") or {},
+                "initial_state": initial_state,
             }
             partial = float(partial_credit(state))
             outcomes: list[Mapping[str, Any]] = list(state.get("_assertion_results") or [])
@@ -327,7 +427,10 @@ class _AssertionScorer:
             field_scores=scores,
             objective=objective_score(scores, field_weights=FIELD_WEIGHTS),
             key="default",
-            checks=tuple(_check(outcome, error=error) for outcome in outcomes),
+            checks=tuple(
+                _check(outcome, error=error, entities=entities, held_initially=held)
+                for outcome, held in zip(outcomes, held_initially, strict=True)
+            ),
         )
 
 
