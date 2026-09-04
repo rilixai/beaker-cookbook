@@ -1,8 +1,9 @@
 """Beaker repository optimization spec for AutomationBench skills.
 
-The candidate is the live ``skills/`` tree. Evaluation policy stays here:
-load a frozen-split task by name, run the harness ``run_one`` path, and score
-the benchmark's deterministic assertion metrics.
+The candidate is the live ``skills/`` tree and the agent's system prompt,
+``prompts/system.md``. Evaluation policy stays here: load a frozen-split task
+by name, run the harness ``run_one`` path, and score the benchmark's
+deterministic assertion metrics.
 
 Contract: the dataset row's ``expected`` holds the task's assertion list
 (``{"assertions": [...]}``), ``run_case`` returns no answer and reports the
@@ -56,6 +57,7 @@ from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
 from verifiers.types import ClientConfig, RolloutInput
 
 from automationbench_skills.data.tasks import Sample, load_samples
+from automationbench_skills.prompts import load_system_prompt, with_system_prompt
 from automationbench_skills.runner import DEFAULT_MAX_STEPS, STATE_COLUMNS, ModelSpec, get_env
 from automationbench_skills.skills_tools import set_skills_dir
 from automationbench_skills.vendored.model_setup import build_sampling_args
@@ -161,11 +163,12 @@ def _samples_by_name() -> dict[str, Sample]:
     return {sample.task_name: sample for sample in load_samples()}
 
 
-def _skills_dir() -> Path:
-    for candidate in (Path.cwd() / "skills", Path(__file__).resolve().parents[1] / "skills"):
-        if candidate.is_dir():
+def _candidate_root() -> Path:
+    """Directory holding the ``skills/`` and ``prompts/`` trees."""
+    for candidate in (Path.cwd(), Path(__file__).resolve().parents[1]):
+        if (candidate / "skills").is_dir():
             return candidate
-    return Path.cwd() / "skills"
+    return Path.cwd()
 
 
 def _sample_for_case(case: Case) -> Sample:
@@ -225,10 +228,19 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
         return CaseResult.failed(str(exc), retryable=False)
 
     model = _model_for_runtime(runtime)
-    skills_dir = _skills_dir()
+    root = _candidate_root()
+    skills_dir = root / "skills"
+    prompts_dir = root / "prompts"
+    system_prompt = load_system_prompt(prompts_dir)
     with runtime.trace.stage(
         "automationbench.run_one",
-        inputs={"case_id": case.case_id, "task_name": sample.task_name, "skills_dir": str(skills_dir)},
+        inputs={
+            "case_id": case.case_id,
+            "task_name": sample.task_name,
+            "skills_dir": str(skills_dir),
+            "prompts_dir": str(prompts_dir),
+            "system_prompt_chars": len(system_prompt or ""),
+        },
     ) as stage:
         try:
             env = get_env(toolset="zapier", skills=True, max_steps=DEFAULT_MAX_STEPS)
@@ -239,7 +251,7 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
             )
             rollout = env.run_rollout(
                 RolloutInput(
-                    prompt=sample.prompt,
+                    prompt=with_system_prompt(sample.prompt, system_prompt),
                     example_id=sample.index,
                     answer=sample.answer,
                     info=sample.info,
@@ -436,7 +448,7 @@ class _AssertionScorer:
 
 @spec(
     dataset_schema=STANDARD_JSONL_CASE_SCHEMA,
-    repository=("skills",),
+    repository=("skills", "prompts"),
 )
 def build_spec(ctx: OptimizationContext) -> Spec:
     del ctx
