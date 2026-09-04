@@ -14,13 +14,18 @@ The tools read the directory **live on every call** — nothing is cached — so
 optimizer can add/edit/split/merge skill folders between ``run_one`` calls and
 the very next rollout sees the new contents, with no environment rebuild.
 
-The only "consult your skills" nudge lives in the tool descriptions
-(docstrings); the benchmark's per-domain system prompts are never touched.
+The "consult your skills" nudge lives in the tool descriptions (docstrings)
+and in the skills-mode system prompt (``prompts/system.md``, see
+``prompts.py``).
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 class _ActiveSkillsDir:
@@ -120,3 +125,69 @@ def read_skill(skill_id: str) -> str:
 
 
 SKILL_TOOLS = [list_skills, read_skill]
+
+
+@dataclass(frozen=True)
+class SkillUsage:
+    """Which skill tools a finished rollout called, from its completion messages.
+
+    ``reads`` maps skill id -> 1-based assistant turn of its first ``read_skill``.
+    """
+
+    listed: bool
+    reads: dict[str, int]
+
+    def to_json(self) -> dict[str, Any]:
+        return {"listed": self.listed, "reads": dict(self.reads)}
+
+    @classmethod
+    def from_json(cls, data: Any) -> SkillUsage | None:
+        if not isinstance(data, Mapping):
+            return None
+        reads = data.get("reads")
+        return cls(
+            listed=bool(data.get("listed")),
+            reads={str(k): int(v) for k, v in reads.items()} if isinstance(reads, Mapping) else {},
+        )
+
+
+def _loads(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except ValueError:
+        return None
+
+
+def _tool_call_fields(call: Any) -> tuple[str, Any]:
+    """``(name, arguments)`` from a completion tool call: OpenAI-style
+    ``{"function": {...}}``, flat ``{"name", "arguments"}``, or the JSON string
+    of either (verifiers stores tool calls both ways)."""
+    call = _loads(call)
+    if not isinstance(call, Mapping):
+        return "", None
+    function = call.get("function")
+    source = function if isinstance(function, Mapping) else call
+    return str(source.get("name") or ""), _loads(source.get("arguments"))
+
+
+def skill_usage(completion: Iterable[Any]) -> SkillUsage:
+    """Skill tool calls in a rollout's completion (dicts or verifiers message models)."""
+    listed = False
+    reads: dict[str, int] = {}
+    turn = 0
+    for message in completion:
+        data = message if isinstance(message, Mapping) else message.model_dump(mode="json")
+        if data.get("role") != "assistant":
+            continue
+        turn += 1
+        for call in data.get("tool_calls") or []:
+            name, arguments = _tool_call_fields(call)
+            if name == "list_skills":
+                listed = True
+            elif name == "read_skill" and isinstance(arguments, Mapping):
+                skill_id = arguments.get("skill_id")
+                if isinstance(skill_id, str) and skill_id.strip():
+                    reads.setdefault(skill_id.strip().strip("/"), turn)
+    return SkillUsage(listed=listed, reads=reads)

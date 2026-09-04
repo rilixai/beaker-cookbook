@@ -1,16 +1,17 @@
 """The core export: a single agent inference on a single task, as a function.
 
-``run_one(sample, model=..., skills_dir=...)`` executes ONE verifiers rollout
-(``env.run_rollout`` — generate + deterministic rubric scoring) and returns
-both metrics plus the trajectory and end-of-rollout world state. A future
-Beaker optimizer calls it in a loop: run a train sample, inspect
-trajectory+score, edit files in ``skills_dir``, repeat, then run held-out test.
+``run_one(sample, model=..., skills_dir=..., prompts_dir=...)`` executes ONE
+verifiers rollout (``env.run_rollout`` — generate + deterministic rubric
+scoring) and returns both metrics plus the trajectory and end-of-rollout world
+state. The Beaker optimizer calls it in a loop: run a train sample, inspect
+trajectory+score, edit files in ``skills_dir`` and ``prompts_dir``, repeat,
+then run held-out test.
 
 The ``AutomationBenchEnv`` is built once per (toolset, skills on/off,
 max_turns) and reused across calls — its ``setup_state`` resets the per-task
-world every rollout. Only the sample and the ``skills_dir`` contents vary per
-call; the skill tools re-read the directory live, so editing skill files
-between calls changes agent behavior with no env rebuild.
+world every rollout. Only the sample, the ``skills_dir`` contents and the
+``prompts_dir/system.md`` system prompt vary per call; both are read live, so
+editing them between calls changes agent behavior with no env rebuild.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from verifiers.clients import Client
 from verifiers.types import RolloutInput
 
 from automationbench_skills.data.tasks import Sample
+from automationbench_skills.prompts import load_system_prompt, with_system_prompt
 from automationbench_skills.skills_tools import SKILL_TOOLS, set_skills_dir
 from automationbench_skills.vendored.model_setup import (
     build_client,
@@ -155,9 +157,9 @@ def get_client(model: ModelSpec) -> Client:
     return _CLIENT_CACHE[key]
 
 
-def _rollout_input(sample: Sample) -> RolloutInput:
+def _rollout_input(sample: Sample, system_prompt: str | None = None) -> RolloutInput:
     return RolloutInput(
-        prompt=sample.prompt,
+        prompt=with_system_prompt(sample.prompt, system_prompt),
         example_id=sample.index,
         answer=sample.answer,
         info=sample.info,
@@ -188,17 +190,21 @@ async def run_one_async(
     *,
     model: ModelSpec | str = DEFAULT_MODEL,
     skills_dir: Path | str | None = None,
+    prompts_dir: Path | str | None = None,
     toolset: str = "zapier",
     max_steps: int = DEFAULT_MAX_STEPS,
     timeout: float | None = None,
 ) -> RunResult:
     """Run ONE agent rollout on one task and score it with the benchmark rubric.
 
-    Side-effect-free besides reading ``skills_dir``: the task's simulated world
-    is created fresh inside the rollout and returned in ``RunResult.end_state``.
-    ``skills_dir=None`` is the baseline arm — the skill tools are absent.
-    ``timeout`` (seconds) bounds the whole rollout; on expiry the task scores 0
-    with ``error="timeout"`` instead of hanging on a stuck API request.
+    Side-effect-free besides reading ``skills_dir`` and ``prompts_dir``: the
+    task's simulated world is created fresh inside the rollout and returned in
+    ``RunResult.end_state``. ``skills_dir=None`` is the baseline arm — the skill
+    tools are absent. ``prompts_dir`` names the directory whose ``system.md``
+    replaces the benchmark's system prompt; ``None`` (or no such file) leaves
+    the prompt untouched. ``timeout`` (seconds) bounds the whole rollout;
+    on expiry the task scores 0 with ``error="timeout"`` instead of hanging on
+    a stuck API request.
     """
     if isinstance(model, str):
         model = ModelSpec(name=model)
@@ -207,7 +213,7 @@ async def run_one_async(
     client = get_client(model)
     sampling_args = build_sampling_args(model.name, model.resolved_api(), model.reasoning_effort, model.extra_body)
     rollout = env.run_rollout(
-        _rollout_input(sample),
+        _rollout_input(sample, load_system_prompt(prompts_dir)),
         client,
         model.name,
         sampling_args or {},
@@ -233,6 +239,7 @@ def run_one(
     *,
     model: ModelSpec | str = DEFAULT_MODEL,
     skills_dir: Path | str | None = None,
+    prompts_dir: Path | str | None = None,
     toolset: str = "zapier",
     max_steps: int = DEFAULT_MAX_STEPS,
     timeout: float | None = None,
@@ -240,7 +247,13 @@ def run_one(
     """Synchronous wrapper around :func:`run_one_async`."""
     return asyncio.run(
         run_one_async(
-            sample, model=model, skills_dir=skills_dir, toolset=toolset, max_steps=max_steps, timeout=timeout
+            sample,
+            model=model,
+            skills_dir=skills_dir,
+            prompts_dir=prompts_dir,
+            toolset=toolset,
+            max_steps=max_steps,
+            timeout=timeout,
         )
     )
 
@@ -250,19 +263,26 @@ async def run_split_async(
     *,
     model: ModelSpec | str = DEFAULT_MODEL,
     skills_dir: Path | str | None = None,
+    prompts_dir: Path | str | None = None,
     toolset: str = "zapier",
     max_steps: int = DEFAULT_MAX_STEPS,
     max_concurrent: int = 8,
     timeout: float | None = None,
     on_result: Any | None = None,
 ) -> list[RunResult]:
-    """Thin concurrency wrapper over :func:`run_one_async` (one shared skills_dir)."""
+    """Thin concurrency wrapper over :func:`run_one_async` (one shared skills_dir/prompts_dir)."""
     sem = asyncio.Semaphore(max_concurrent)
 
     async def bounded(sample: Sample) -> RunResult:
         async with sem:
             result = await run_one_async(
-                sample, model=model, skills_dir=skills_dir, toolset=toolset, max_steps=max_steps, timeout=timeout
+                sample,
+                model=model,
+                skills_dir=skills_dir,
+                prompts_dir=prompts_dir,
+                toolset=toolset,
+                max_steps=max_steps,
+                timeout=timeout,
             )
         if on_result is not None:
             on_result(result)
@@ -276,6 +296,7 @@ def run_split(
     *,
     model: ModelSpec | str = DEFAULT_MODEL,
     skills_dir: Path | str | None = None,
+    prompts_dir: Path | str | None = None,
     toolset: str = "zapier",
     max_steps: int = DEFAULT_MAX_STEPS,
     max_concurrent: int = 8,
@@ -288,6 +309,7 @@ def run_split(
             samples,
             model=model,
             skills_dir=skills_dir,
+            prompts_dir=prompts_dir,
             toolset=toolset,
             max_steps=max_steps,
             max_concurrent=max_concurrent,

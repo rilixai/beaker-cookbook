@@ -2,7 +2,7 @@
 
 [AutomationBench](https://github.com/zapier/AutomationBench) ([paper](https://arxiv.org/abs/2604.18934)) is Zapier's benchmark for agentic business automation: 600 public tasks across six domains (sales, marketing, operations, support, finance, hr) where an agent works in a simulated workspace of SaaS tools (Gmail, Sheets, Slack, CRMs, ...) and is scored by deterministic assertions on the final world state. A hosted variant, [AutomationBench-AA](https://artificialanalysis.ai/evaluations/automationbench), is run by Artificial Analysis.
 
-This recipe wraps the unmodified benchmark in a per-sample runner (`run_one`) plus a filesystem `skills/` hook: two extra tools (`list_skills`, `read_skill`) that read `SKILL.md` files live from disk on every call. That makes the harness directly drivable by **Beaker** — an optimizer that improves the agent purely by editing the `skills/` folder between rollouts. This recipe is the harness + baseline + skills hook only; it does not implement the optimizer.
+This recipe wraps the unmodified benchmark in a per-sample runner (`run_one`) plus two filesystem hooks: a `skills/` folder exposed through two extra tools (`list_skills`, `read_skill`) that read `SKILL.md` files live from disk on every call, and `prompts/system.md`, the system prompt used in skills mode. That makes the harness directly drivable by **Beaker** — an optimizer that improves the agent purely by editing those files between rollouts. This recipe is the harness + baseline + hooks only; it does not implement the optimizer.
 
 ## Quick start
 
@@ -11,8 +11,8 @@ cd automationbench
 uv sync --group dev
 export OPENAI_API_KEY=sk-...   # or copy .env.example to .env
 
-# Smoke run: 3 test tasks, with the seed skill stubs
-uv run automationbench-skills run --split test --limit 3 --model gpt-5-mini --skills-dir skills
+# Smoke run: 3 test tasks, with the seed skill stubs and seed system prompt
+uv run automationbench-skills run --split test --limit 3 --model gpt-5-mini --skills-dir skills --prompts-dir prompts
 
 # Aggregate a finished (or partial) run directory
 uv run automationbench-skills evaluate --output-dir runs/<run-dir>
@@ -50,8 +50,20 @@ filtering — and the optimizer is expected to fill, add, split, and merge skill
 across both axes. The five seed apps are the highest-frequency apps across the
 tasks' `zapier_tools`.
 
-The benchmark's own domain system prompts are never modified; the only nudge to
-consult skills lives in the tools' own descriptions.
+### System prompt
+
+With `--prompts-dir prompts`, `prompts/system.md` *is* the system message: it
+replaces the dataset row's system prompt, the task (user) message stays as is,
+and the file is read at rollout time like the skills. It is seeded with the
+benchmark's own system prompt verbatim (one generic text, identical across the
+six domains) plus one paragraph telling the agent to first decide which of the
+six domains the task belongs to, then read that domain skill and the app skills
+it will use — the task text never states the domain, and without the nudge the
+agent opens its own domain skill in only about half the cases. The whole file
+is editable, budget line and summary rules included. Without `--prompts-dir`
+(or with an empty file) the prompt is the dataset's, unchanged — always the
+case for the `--no-skills` baseline, so the two arms differ only in the tools
+and the prompt file.
 
 ## Splits
 
@@ -113,13 +125,17 @@ result.end_state  # final simulated WorldState
 ```
 
 An optimizer loop: run train samples, inspect trajectories/scores, edit
-`skills/**/SKILL.md`, rerun — the environment is reused across calls and picks up
-skill edits immediately. Evaluate on `test` only for final reporting.
+`skills/**/SKILL.md` and `prompts/system.md`, rerun — the environment is reused
+across calls and picks up edits immediately. Evaluate on `test` only for final
+reporting.
 
 `.beaker/` (`beaker.yaml`, `beaker_spec.py`, `upload_splits.py`) is a working
 Beaker integration to start from: it runs a case, scores it with the benchmark's
 own rubric, and traces every model call. Adjust it rather than wiring one up
-from scratch.
+from scratch. Its candidate scope is `repository=("skills", "prompts")`: one
+proposal may edit the skill files and the system prompt together (e.g. sharpen
+the routing instruction and fill the skill it routes to), and both are judged
+by the same rollouts.
 
 ### How a case is scored
 
@@ -139,6 +155,12 @@ In Beaker's case view each assertion is one check, named with the records it
 refers to (`salesforce_campaign_member_exists · David Park · Q1 Product Launch
 Webinar`) instead of raw ids; display only. A rollout the model or provider
 never completed is a failed case, not a zero.
+
+Each case also carries informational `skills` checks (not scored): `skill_read ·
+domains/hr` passes if the agent opened its own domain skill (message says on
+which turn, or that it was never read), and one more row per other skill it
+read. They show whether an edited skill actually reached the cases it was meant
+for.
 
 ## Development
 

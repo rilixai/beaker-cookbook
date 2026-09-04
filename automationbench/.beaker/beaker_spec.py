@@ -1,8 +1,10 @@
 """Beaker repository optimization spec for AutomationBench skills.
 
-The candidate is the live ``skills/`` tree. Evaluation policy stays here:
-load a frozen-split task by name, run the harness ``run_one`` path, and score
-the benchmark's deterministic assertion metrics.
+The candidate is the live ``skills/`` tree plus ``prompts/system.md``, the
+skills-mode system prompt (seeded with the benchmark's own text); one proposal
+may edit both. Evaluation policy stays here: load a frozen-split task
+by name, run the harness ``run_one`` path, and score the benchmark's
+deterministic assertion metrics.
 
 Contract: the dataset row's ``expected`` holds the task's assertion list
 (``{"assertions": [...]}``), ``run_case`` returns no answer and reports the
@@ -18,6 +20,10 @@ Park · Q1 Product Launch Webinar`` rather than a dict of ids.
 Model calls are traced by subclassing the verifiers client (see
 ``_TracedChatCompletionsClient``); the verifiers rollout is what talks to the
 model, so there is no framework integration to enable here.
+
+Besides the assertion checks, the scorer emits informational ``skills`` checks
+(``skill_read · domains/hr``) saying which skills the agent actually opened, so
+a candidate's reach is visible without changing the score.
 """
 
 from __future__ import annotations
@@ -56,8 +62,9 @@ from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
 from verifiers.types import ClientConfig, RolloutInput
 
 from automationbench_skills.data.tasks import Sample, load_samples
+from automationbench_skills.prompts import load_system_prompt, with_system_prompt
 from automationbench_skills.runner import DEFAULT_MAX_STEPS, STATE_COLUMNS, ModelSpec, get_env
-from automationbench_skills.skills_tools import set_skills_dir
+from automationbench_skills.skills_tools import SkillUsage, set_skills_dir, skill_usage
 from automationbench_skills.vendored.model_setup import build_sampling_args
 
 
@@ -161,11 +168,12 @@ def _samples_by_name() -> dict[str, Sample]:
     return {sample.task_name: sample for sample in load_samples()}
 
 
-def _skills_dir() -> Path:
-    for candidate in (Path.cwd() / "skills", Path(__file__).resolve().parents[1] / "skills"):
-        if candidate.is_dir():
+def _candidate_root() -> Path:
+    """Directory holding the optimized ``skills/`` and ``prompts/`` trees."""
+    for candidate in (Path.cwd(), Path(__file__).resolve().parents[1]):
+        if (candidate / "skills").is_dir():
             return candidate
-    return Path.cwd() / "skills"
+    return Path.cwd()
 
 
 def _sample_for_case(case: Case) -> Sample:
@@ -225,10 +233,19 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
         return CaseResult.failed(str(exc), retryable=False)
 
     model = _model_for_runtime(runtime)
-    skills_dir = _skills_dir()
+    root = _candidate_root()
+    skills_dir = root / "skills"
+    prompts_dir = root / "prompts"
+    system_prompt = load_system_prompt(prompts_dir)
     with runtime.trace.stage(
         "automationbench.run_one",
-        inputs={"case_id": case.case_id, "task_name": sample.task_name, "skills_dir": str(skills_dir)},
+        inputs={
+            "case_id": case.case_id,
+            "task_name": sample.task_name,
+            "skills_dir": str(skills_dir),
+            "prompts_dir": str(prompts_dir),
+            "system_prompt_chars": len(system_prompt or ""),
+        },
     ) as stage:
         try:
             env = get_env(toolset="zapier", skills=True, max_steps=DEFAULT_MAX_STEPS)
@@ -239,7 +256,7 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
             )
             rollout = env.run_rollout(
                 RolloutInput(
-                    prompt=sample.prompt,
+                    prompt=with_system_prompt(sample.prompt, system_prompt),
                     example_id=sample.index,
                     answer=sample.answer,
                     info=sample.info,
@@ -273,9 +290,10 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
             return CaseResult.failed(str(exc), retryable=True)
 
         error = None if result_error is None else f"{type(result_error).__name__}: {result_error}"
-        # The scorer needs the error and the end state; the model/tool turns are
-        # already in the trace via ``_TracedChatCompletionsClient``.
-        stage.output({"error": error, "messages": len(completion)})
+        usage = skill_usage(completion)
+        # The scorer needs the error, the end state and the skill reads; the
+        # model/tool turns are already in the trace via ``_TracedChatCompletionsClient``.
+        stage.output({"error": error, "messages": len(completion), "skill_reads": sorted(usage.reads)})
         return CaseResult(
             output=None,
             output_kind="none",
@@ -284,6 +302,7 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
                 "domain": sample.domain,
                 "error": error,
                 "end_state": to_json_safe(end_state),
+                "skill_usage": usage.to_json(),
             },
         )
 
@@ -380,6 +399,43 @@ def _check(
     )
 
 
+def _skill_checks(domain: str, usage: SkillUsage | None) -> list[Check]:
+    """Informational ``skills`` checks: did the agent open its domain skill, and what else did it read?
+
+    Not scored (``informational=True``); they let a proposal's reach be read off
+    the case ("HR skill edited; read by 12 of 15 HR cases") instead of inferred
+    from the aggregate.
+    """
+    if usage is None:
+        return []
+    own = f"domains/{domain}"
+    checks = [
+        Check(
+            name=f"skill_read · {own}",
+            verdict="pass" if own in usage.reads else "fail",
+            message=(
+                f"read on turn {usage.reads[own]}"
+                if own in usage.reads
+                else "domain skill not read" + ("" if usage.listed else "; list_skills never called")
+            ),
+            group="skills",
+            informational=True,
+        )
+    ]
+    checks.extend(
+        Check(
+            name=f"skill_read · {skill_id}",
+            verdict="pass",
+            message=f"read on turn {turn}",
+            group="skills",
+            informational=True,
+        )
+        for skill_id, turn in sorted(usage.reads.items(), key=lambda item: item[1])
+        if skill_id != own
+    )
+    return checks
+
+
 class _AssertionScorer:
     """Run the benchmark's assertion rubric on the trusted side.
 
@@ -423,20 +479,22 @@ class _AssertionScorer:
             "task_completed_correctly": 1.0 if partial == 1.0 else 0.0,
             "partial_credit": partial,
         }
+        assertion_checks = [
+            _check(outcome, error=error, entities=entities, held_initially=held)
+            for outcome, held in zip(outcomes, held_initially, strict=True)
+        ]
+        domain = str(context.get("domain") or _sample_for_case(case).domain)
         return CaseScore(
             field_scores=scores,
             objective=objective_score(scores, field_weights=FIELD_WEIGHTS),
             key="default",
-            checks=tuple(
-                _check(outcome, error=error, entities=entities, held_initially=held)
-                for outcome, held in zip(outcomes, held_initially, strict=True)
-            ),
+            checks=(*assertion_checks, *_skill_checks(domain, SkillUsage.from_json(context.get("skill_usage")))),
         )
 
 
 @spec(
     dataset_schema=STANDARD_JSONL_CASE_SCHEMA,
-    repository=("skills",),
+    repository=("skills", "prompts"),
 )
 def build_spec(ctx: OptimizationContext) -> Spec:
     del ctx
