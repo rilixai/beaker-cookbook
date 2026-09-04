@@ -1,8 +1,8 @@
 # AutomationBench + filesystem skills
 
-[AutomationBench](https://github.com/zapier/AutomationBench) ([paper](https://arxiv.org/abs/2604.18934)) is Zapier's benchmark for agentic business automation: 600 public tasks across six domains (sales, marketing, operations, support, finance, hr) where an agent works in a simulated workspace of SaaS tools (Gmail, Sheets, Slack, CRMs, ...) and is scored by deterministic assertions on the final world state. A hosted variant, [AutomationBench-AA](https://artificialanalysis.ai/evaluations/automationbench), is run by Artificial Analysis.
+[AutomationBench](https://github.com/zapier/AutomationBench) ([paper](https://arxiv.org/abs/2604.18934)) is Zapier's benchmark for business automation agents: 600 public tasks in six domains (sales, marketing, operations, support, finance, hr). The agent works in a simulated workspace of SaaS tools (Gmail, Sheets, Slack, CRMs, ...) and is scored by deterministic assertions on the final state of that workspace. Artificial Analysis runs a hosted variant, [AutomationBench-AA](https://artificialanalysis.ai/evaluations/automationbench).
 
-This recipe wraps the unmodified benchmark in a per-sample runner (`run_one`) around an agent whose behavior lives on disk: a system prompt (`prompts/system.md`) and a `skills/` folder exposed through two extra tools (`list_skills`, `read_skill`) that read `SKILL.md` files live on every call. That makes the harness directly drivable by **Beaker** — an optimizer that improves the agent purely by editing those files between rollouts. This recipe is the harness + baseline + agent only; it does not implement the optimizer.
+This recipe runs the unmodified benchmark one task at a time (`run_one`) with an agent whose behavior is on disk: a system prompt in `prompts/system.md`, and a `skills/` folder the agent reads through two extra tools, `list_skills` and `read_skill`. Both are read from disk on every call, so Beaker can improve the agent by editing those files between rollouts. The optimizer itself is not part of this recipe.
 
 ## Quick start
 
@@ -11,35 +11,32 @@ cd automationbench
 uv sync --group dev
 export OPENAI_API_KEY=sk-...   # or copy .env.example to .env
 
-# Smoke run: 3 test tasks, with the seed skills and system prompt
+# Smoke run: 3 test tasks with the seed skills and prompt
 uv run automationbench-skills run --split test --limit 3 --model gpt-5-mini --skills-dir skills --prompts-dir prompts
 
 # Aggregate a finished (or partial) run directory
 uv run automationbench-skills evaluate --output-dir runs/<run-dir>
 ```
 
-`run` writes one JSON per task (both scores + full trajectory + final world state)
-plus `config.json` and `summary.json` into `--output-dir` (default
-`runs/<split>-<timestamp>`). `evaluate` prints pass rate (mean
+`run` writes one JSON per task (scores, trajectory, final world state) plus
+`config.json` and `summary.json` to `--output-dir` (default
+`runs/<split>-<timestamp>`). `evaluate` prints the pass rate (mean
 `task_completed_correctly`) and mean `partial_credit`, per domain and overall.
-`--task-timeout <seconds>` bounds each rollout (a stuck API request otherwise
-hangs the run); timed-out tasks score 0 with `error="timeout ..."`.
+`--task-timeout <seconds>` caps each rollout; a task that times out scores 0
+with `error="timeout ..."`.
 
 ## Baseline vs. skills
 
-- **Baseline**: `--no-skills` (or omit `--skills-dir`) — the stock benchmark
-  agent: the dataset's system prompt, no skill tools.
-- **Skills arm**: `--skills-dir skills --prompts-dir prompts` — the agent runs
-  with `prompts/system.md` as its system prompt (the task message is the
-  dataset's) and gets `list_skills()` / `read_skill(skill_id)` over the skills
-  directory. Both are re-read on every call, so editing them between rollouts
-  changes behavior with no restart. An empty skills directory is valid (tools
-  present, no skills); without `--prompts-dir` the dataset's system prompt is
-  used.
+- **Baseline**: `--no-skills` (or no `--skills-dir`). The benchmark as shipped:
+  its system prompt, no skill tools.
+- **Skills**: `--skills-dir skills --prompts-dir prompts`. The system prompt is
+  `prompts/system.md`, the task message is the dataset's, and the agent has
+  `list_skills()` / `read_skill(skill_id)` over the skills directory. An empty
+  skills directory is fine. Without `--prompts-dir` the dataset's system prompt
+  is used.
 
-Skills are folders on two axes, each holding a `SKILL.md` (YAML frontmatter
-`name`/`description` + markdown body, i.e. an Anthropic Agent Skill). A skill's
-ID is its path under `skills/`:
+A skill is a folder with a `SKILL.md` (YAML frontmatter `name`/`description`,
+markdown body). Its ID is its path under `skills/`:
 
 ```text
 skills/
@@ -47,57 +44,52 @@ skills/
   apps/{gmail,google_sheets,google_drive,slack,salesforce}/SKILL.md
 ```
 
-The shipped stubs are intentionally empty (frontmatter only):
-`list_skills` returns every ID with its description — no domain
-filtering — and the optimizer is expected to fill, add, split, and merge skills
-across both axes. The five seed apps are the highest-frequency apps across the
+The shipped skills are empty (frontmatter only); filling, adding, splitting and
+merging them is the optimizer's job. `list_skills` returns every ID with its
+description, no filtering. The five seed apps are the most frequent ones in the
 tasks' `zapier_tools`.
 
 ## Splits
 
-`splits/train.txt` (450 tasks) and `splits/test.txt` (150 tasks) freeze a
-75/25-per-domain partition of the 600 scored public tasks, stratified across
-task families with a fixed seed — see [`splits/README.md`](src/automationbench_skills/splits/README.md)
-for the exact procedure, regeneration command, and leakage policy. The optional
-200-task `simple` domain is provided as train-only material (`splits/simple.txt`)
-and is never scored.
+`splits/train.txt` (450 tasks) and `splits/test.txt` (150 tasks) are a fixed
+75/25 split per domain, stratified by task family. See
+[`splits/README.md`](src/automationbench_skills/splits/README.md) for how they
+were made and the leakage policy. The 200-task `simple` domain
+(`splits/simple.txt`) is train-only and never scored.
 
 ## Models
 
-`--model` defaults to `gpt-5-mini`. Routing reuses the benchmark's own logic
-(adapted in `vendored/model_setup.py`): `claude-*` → Anthropic native,
-`gemini-*` → Gemini interactions API, everything else → OpenAI
-chat-completions/responses. `--reasoning-effort` maps to each API's native
-reasoning knob. Gateway models work via an OpenAI-compatible endpoint:
+`--model` defaults to `gpt-5-mini`. Routing follows the benchmark
+(`vendored/model_setup.py`): `claude-*` goes to Anthropic, `gemini-*` to the
+Gemini interactions API, everything else to OpenAI chat-completions/responses.
+`--reasoning-effort` maps to each API's reasoning setting. For a gateway:
 
 ```bash
 uv run automationbench-skills run --split test --limit 3 \
   --model my-gateway/gemini-2.5-pro --base-url https://gateway.example/v1 --api-key-var GATEWAY_API_KEY
 ```
 
-Note: routing gateways to Gemini's native interactions API is upstream behavior
-for `gemini-*`-named models; plain OpenAI-compatible gateways should use
-non-Gemini model names or `--api chat_completions`.
+`gemini-*` names are routed to Gemini's native API even through a gateway
+(upstream behavior). For a plain OpenAI-compatible gateway, use another model
+name or pass `--api chat_completions`.
 
 ## Reference numbers
 
-Upstream reports public-set strict pass rates (`task_completed_correctly`) of
-roughly 40–60% for frontier models (see the upstream README's leaderboard).
-Caveat: the public strict pass rate is **not** the AutomationBench-AA number —
-AA's headline metric includes guardrail/hidden-task components and a different
-harness, so scores are not directly comparable.
+Upstream reports strict pass rates (`task_completed_correctly`) of roughly
+40–60% for frontier models on the public set. That is not the AutomationBench-AA
+number, which adds guardrail and hidden-task components and uses a different
+harness.
 
-Reference runs with this harness on the frozen 150-task test split
-(`gpt-5-mini`, `--max-concurrent 16`, single seed):
+With this harness on the 150-task test split (`gpt-5-mini`,
+`--max-concurrent 16`, one seed):
 
 | arm | pass_rate | partial_credit |
 |---|---|---|
-| `--no-skills` baseline | 0.013 | 0.221 |
-| `--skills-dir skills` (empty seed stubs) | 0.053 | 0.294 |
+| `--no-skills` | 0.013 | 0.221 |
+| `--skills-dir skills` (empty seed skills) | 0.053 | 0.294 |
 
-The stubs are frontmatter-only, so the gap is likely dominated by run-to-run
-variance at n=150 rather than the empty skills helping — average several runs
-before reading much into arm differences of this size.
+The seed skills are empty, so the gap is mostly run-to-run variance at n=150.
+Average a few runs before reading anything into differences this size.
 
 ## Beaker integration
 
@@ -105,52 +97,51 @@ before reading much into arm differences of this size.
 from automationbench_skills import load_split, run_one
 
 sample = load_split("train")[0]
-result = run_one(sample, model="gpt-5-mini", skills_dir="skills")
+result = run_one(sample, model="gpt-5-mini", skills_dir="skills", prompts_dir="prompts")
 result.partial_credit  # 0-1 fraction of assertions passed
 result.task_completed_correctly  # strict 0/1
 result.trajectory  # full message/tool-call trace
 result.end_state  # final simulated WorldState
 ```
 
-An optimizer loop: run train samples, inspect trajectories/scores, edit
-`skills/**/SKILL.md` and `prompts/system.md`, rerun — the environment is reused
-across calls and picks up edits immediately. Evaluate on `test` only for final
-reporting.
+The loop: run train tasks, look at trajectories and scores, edit
+`skills/**/SKILL.md` and `prompts/system.md`, run again. Edits are picked up
+immediately. Use `test` only for final numbers.
 
 `.beaker/` (`beaker.yaml`, `beaker_spec.py`, `upload_splits.py`) is a working
-Beaker integration to start from: it runs a case, scores it with the benchmark's
-own rubric, and traces every model call. Adjust it rather than wiring one up
-from scratch. Its candidate is `repository=("skills", "prompts")`: the skill
-files and the system prompt.
+Beaker integration: it runs a case, scores it with the benchmark's rubric and
+traces every model call. Start from it rather than from scratch. The candidate
+is `repository=("skills", "prompts")`, i.e. the skill files and the system
+prompt.
 
 ### How a case is scored
 
-There is no expected answer. A task is a prompt against a simulated world
-(Salesforce, Gmail, Sheets, ... as JSON records); after the agent acts, a list
-of deterministic assertions is checked against that world
-(`salesforce_campaign_member_exists`, `gmail_message_sent_to`, ...). Each one
-holds or does not. Assertions already true before the agent acted are excluded,
-so doing nothing scores 0.
+There is no expected answer. Each task is a prompt against a simulated world
+(Salesforce, Gmail, Sheets, ... as JSON records). After the agent acts, a list
+of assertions is checked against that world
+(`salesforce_campaign_member_exists`, `gmail_message_sent_to`, ...); each holds
+or does not. Assertions already true before the agent acted don't count, so
+doing nothing scores 0.
 
-**Prefer `partial_credit` as the metric to optimize** (share of assertions that
-hold, 0–1): it is the default objective in `.beaker/beaker_spec.py` and gives a
-denser signal per task than `task_completed_correctly` (all hold), the strict
-pass rate, which is still worth reporting.
+**Optimize `partial_credit`**, the share of assertions that hold (0–1). It is
+the objective in `.beaker/beaker_spec.py` and gives a much denser signal than
+`task_completed_correctly` (all assertions hold), which is the strict pass rate:
+report it, don't optimize for it.
 
 In Beaker's case view each assertion is one check, named with the records it
 refers to (`salesforce_campaign_member_exists · David Park · Q1 Product Launch
-Webinar`) instead of raw ids; display only. A rollout the model or provider
-never completed is a failed case, not a zero.
+Webinar`) rather than raw ids. A rollout the model or provider never completed
+is a failed case, not a zero.
 
 ## Development
 
 ```bash
 uv run ruff check && uv run ruff format --check
 uv run python -m mypy
-uv run pytest -q          # hermetic: no network, scripted fake client
+uv run pytest -q          # no network, scripted fake client
 ```
 
 ## Attribution
 
-AutomationBench is MIT-licensed by Zapier, Inc. — see [ATTRIBUTION.md](ATTRIBUTION.md)
+AutomationBench is MIT-licensed by Zapier, Inc. See [ATTRIBUTION.md](ATTRIBUTION.md)
 and [LICENSE](LICENSE).
