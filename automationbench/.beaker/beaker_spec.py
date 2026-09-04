@@ -353,13 +353,12 @@ def _check(
 
     # ``type · param values``; an id is swapped for the record's label when the
     # world state knows it ("David Park" rather than "003xx000004MNO1").
-    rendered = {
-        k: entities.get(str(v), v if isinstance(v, str) else json.dumps(to_json_safe(v), default=str))
+    rendered = [
+        entities.get(str(v), v if isinstance(v, str) else json.dumps(to_json_safe(v), default=str))
         for k, v in params.items()
         if k not in ("scored", "excluded")
-    }
-    name = " · ".join([assertion_type, *(_clip(v) for v in rendered.values())])
-    description = ", ".join(f"{k}={_clip(v)}" for k, v in rendered.items()) or None
+    ]
+    name = " · ".join([assertion_type, *(_clip(v) for v in rendered)])
     if excluded:
         message = (
             "excluded from scoring by the task author"
@@ -375,7 +374,6 @@ def _check(
     return Check(
         name=name,
         verdict="pass" if passed else "fail",
-        description=description,
         message=message,
         group=_service_for(assertion_type),
         informational=excluded,
