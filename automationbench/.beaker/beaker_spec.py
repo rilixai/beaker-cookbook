@@ -1,8 +1,7 @@
 """Beaker repository optimization spec for AutomationBench skills.
 
-The candidate is the live ``skills/`` tree plus ``prompts/system.md``, the
-skills-mode system prompt (seeded with the benchmark's own text); one proposal
-may edit both. Evaluation policy stays here: load a frozen-split task
+The candidate is the live ``skills/`` tree and the agent's system prompt,
+``prompts/system.md``. Evaluation policy stays here: load a frozen-split task
 by name, run the harness ``run_one`` path, and score the benchmark's
 deterministic assertion metrics.
 
@@ -20,10 +19,6 @@ Park · Q1 Product Launch Webinar`` rather than a dict of ids.
 Model calls are traced by subclassing the verifiers client (see
 ``_TracedChatCompletionsClient``); the verifiers rollout is what talks to the
 model, so there is no framework integration to enable here.
-
-Besides the assertion checks, the scorer emits informational ``skills`` checks
-(``skill_read · domains/hr``) saying which skills the agent actually opened, so
-a candidate's reach is visible without changing the score.
 """
 
 from __future__ import annotations
@@ -64,7 +59,7 @@ from verifiers.types import ClientConfig, RolloutInput
 from automationbench_skills.data.tasks import Sample, load_samples
 from automationbench_skills.prompts import load_system_prompt, with_system_prompt
 from automationbench_skills.runner import DEFAULT_MAX_STEPS, STATE_COLUMNS, ModelSpec, get_env
-from automationbench_skills.skills_tools import SkillUsage, set_skills_dir, skill_usage
+from automationbench_skills.skills_tools import set_skills_dir
 from automationbench_skills.vendored.model_setup import build_sampling_args
 
 
@@ -169,7 +164,7 @@ def _samples_by_name() -> dict[str, Sample]:
 
 
 def _candidate_root() -> Path:
-    """Directory holding the optimized ``skills/`` and ``prompts/`` trees."""
+    """Directory holding the ``skills/`` and ``prompts/`` trees."""
     for candidate in (Path.cwd(), Path(__file__).resolve().parents[1]):
         if (candidate / "skills").is_dir():
             return candidate
@@ -290,10 +285,9 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
             return CaseResult.failed(str(exc), retryable=True)
 
         error = None if result_error is None else f"{type(result_error).__name__}: {result_error}"
-        usage = skill_usage(completion)
-        # The scorer needs the error, the end state and the skill reads; the
-        # model/tool turns are already in the trace via ``_TracedChatCompletionsClient``.
-        stage.output({"error": error, "messages": len(completion), "skill_reads": sorted(usage.reads)})
+        # The scorer needs the error and the end state; the model/tool turns are
+        # already in the trace via ``_TracedChatCompletionsClient``.
+        stage.output({"error": error, "messages": len(completion)})
         return CaseResult(
             output=None,
             output_kind="none",
@@ -302,7 +296,6 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
                 "domain": sample.domain,
                 "error": error,
                 "end_state": to_json_safe(end_state),
-                "skill_usage": usage.to_json(),
             },
         )
 
@@ -399,43 +392,6 @@ def _check(
     )
 
 
-def _skill_checks(domain: str, usage: SkillUsage | None) -> list[Check]:
-    """Informational ``skills`` checks: did the agent open its domain skill, and what else did it read?
-
-    Not scored (``informational=True``); they let a proposal's reach be read off
-    the case ("HR skill edited; read by 12 of 15 HR cases") instead of inferred
-    from the aggregate.
-    """
-    if usage is None:
-        return []
-    own = f"domains/{domain}"
-    checks = [
-        Check(
-            name=f"skill_read · {own}",
-            verdict="pass" if own in usage.reads else "fail",
-            message=(
-                f"read on turn {usage.reads[own]}"
-                if own in usage.reads
-                else "domain skill not read" + ("" if usage.listed else "; list_skills never called")
-            ),
-            group="skills",
-            informational=True,
-        )
-    ]
-    checks.extend(
-        Check(
-            name=f"skill_read · {skill_id}",
-            verdict="pass",
-            message=f"read on turn {turn}",
-            group="skills",
-            informational=True,
-        )
-        for skill_id, turn in sorted(usage.reads.items(), key=lambda item: item[1])
-        if skill_id != own
-    )
-    return checks
-
-
 class _AssertionScorer:
     """Run the benchmark's assertion rubric on the trusted side.
 
@@ -479,16 +435,14 @@ class _AssertionScorer:
             "task_completed_correctly": 1.0 if partial == 1.0 else 0.0,
             "partial_credit": partial,
         }
-        assertion_checks = [
-            _check(outcome, error=error, entities=entities, held_initially=held)
-            for outcome, held in zip(outcomes, held_initially, strict=True)
-        ]
-        domain = str(context.get("domain") or _sample_for_case(case).domain)
         return CaseScore(
             field_scores=scores,
             objective=objective_score(scores, field_weights=FIELD_WEIGHTS),
             key="default",
-            checks=(*assertion_checks, *_skill_checks(domain, SkillUsage.from_json(context.get("skill_usage")))),
+            checks=tuple(
+                _check(outcome, error=error, entities=entities, held_initially=held)
+                for outcome, held in zip(outcomes, held_initially, strict=True)
+            ),
         )
 
 

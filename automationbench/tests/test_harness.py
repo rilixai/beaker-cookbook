@@ -14,7 +14,7 @@ from automationbench_skills.data import PUBLIC_DOMAINS, load_samples, load_split
 from automationbench_skills.evaluation.summary import format_summary, summarize
 from automationbench_skills.prompts import load_system_prompt, with_system_prompt
 from automationbench_skills.runner import STATE_COLUMNS, _rollout_input, _to_result, get_env
-from automationbench_skills.skills_tools import SkillUsage, list_skills, read_skill, set_skills_dir, skill_usage
+from automationbench_skills.skills_tools import list_skills, read_skill, set_skills_dir
 
 
 RECIPE_ROOT = Path(__file__).parent.parent
@@ -101,64 +101,6 @@ class TestSkillsTools:
         assert "unknown skill" not in read_skill("apps/gmail").lower()
 
 
-class TestSkillUsage:
-    def test_reads_from_dict_and_openai_shaped_tool_calls(self) -> None:
-        completion = [
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": ['{"id": "c0", "name": "list_skills", "arguments": "{}"}'],
-            },
-            {"role": "tool", "tool_call_id": "c0", "content": "..."},
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {"id": "c1", "function": {"name": "read_skill", "arguments": '{"skill_id": "domains/hr"}'}},
-                    {"id": "c2", "function": {"name": "read_skill", "arguments": '{"skill_id": "/apps/gmail/"}'}},
-                    {"id": "c3", "function": {"name": "search_tools", "arguments": '{"query": "gmail"}'}},
-                ],
-            },
-            {"role": "tool", "tool_call_id": "c1", "content": "# HR playbook"},
-            {"role": "tool", "tool_call_id": "c2", "content": ""},
-            {"role": "tool", "tool_call_id": "c3", "content": "[]"},
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [{"id": "c4", "name": "read_skill", "arguments": {"skill_id": "domains/hr"}}],
-            },
-            {"role": "tool", "tool_call_id": "c4", "content": "# HR playbook"},
-            {"role": "assistant", "content": "done"},
-        ]
-        usage = skill_usage(completion)
-        assert usage == SkillUsage(listed=True, reads={"domains/hr": 2, "apps/gmail": 2})
-        assert SkillUsage.from_json(usage.to_json()) == usage
-        assert skill_usage([]) == SkillUsage(listed=False, reads={})
-        assert SkillUsage.from_json(None) is None
-
-    def test_failed_or_unanswered_reads_do_not_count(self, tmp_path: Path) -> None:
-        set_skills_dir(tmp_path)
-        unknown = read_skill("domains/hrr")
-        assert unknown.startswith("Unknown skill")
-        (tmp_path / "apps" / "locked").mkdir(parents=True)
-        (tmp_path / "apps" / "locked" / "SKILL.md").mkdir()  # a directory: read_text raises OSError
-        unreadable = read_skill("apps/locked")
-        assert unreadable.startswith("Could not read skill")
-
-        def call(call_id: str, skill_id: str) -> dict[str, Any]:
-            return {"id": call_id, "function": {"name": "read_skill", "arguments": json.dumps({"skill_id": skill_id})}}
-
-        completion = [
-            {"role": "assistant", "content": "", "tool_calls": [call("c1", "domains/hrr"), call("c2", "apps/locked")]},
-            {"role": "tool", "tool_call_id": "c1", "content": unknown},
-            {"role": "tool", "tool_call_id": "c2", "content": unreadable},
-            {"role": "assistant", "content": "", "tool_calls": [call("c3", "domains/hr")]},
-            {"role": "tool", "tool_call_id": "c3", "content": ""},
-            {"role": "assistant", "content": "", "tool_calls": [call("c4", "apps/gmail")]},
-        ]
-        assert skill_usage(completion) == SkillUsage(listed=False, reads={"domains/hr": 2})
-
-
 class TestPrompts:
     def test_file_replaces_the_system_message_and_keeps_the_task(self) -> None:
         prompt = [{"role": "system", "content": "BENCHMARK PROMPT"}, {"role": "user", "content": "do the task"}]
@@ -220,7 +162,6 @@ class TestRunner:
         dump = json.dumps([m if isinstance(m, dict) else m.model_dump(mode="json") for m in output["completion"]])
         assert "How to do the thing" in dump
         assert "SECRET-PROCEDURE" in dump
-        assert skill_usage(output["completion"]) == SkillUsage(listed=True, reads={"apps/howto": 2})
 
     async def test_system_prompt_reaches_the_model(self) -> None:
         sample = _sample()

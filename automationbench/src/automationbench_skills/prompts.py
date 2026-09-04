@@ -1,13 +1,8 @@
-"""The second Beaker lever: the skills-mode system prompt, read from ``prompts/system.md``.
+"""The agent's system prompt, ``prompts/system.md``.
 
-The file holds the whole system message. It is seeded with the benchmark's own
-``SYSTEM_PROMPT`` (one text, identical across the six domains) followed by a
-skill-routing paragraph, and the optimizer may rewrite any of it. When a
-prompts directory is given, its ``system.md`` replaces the dataset row's system
-message; the user (task) message is untouched. The file is read at rollout time
-so an edit (alongside ``skills/``) is observed without rebuilding the
-environment. Missing directory or blank file: the prompt is the benchmark's,
-unchanged — that is what the ``--no-skills`` baseline runs with.
+The file is the whole system message; the task (user) message comes from the
+dataset row. It is read on every call, like the skills. With no prompts
+directory, or a blank file, the row's own system message is used.
 """
 
 from __future__ import annotations
@@ -30,12 +25,10 @@ def load_system_prompt(prompts_dir: Path | str | None) -> str | None:
 
 
 def with_system_prompt(prompt: Any, system_prompt: str | None) -> Any:
-    """Replace the system message of a chat prompt with ``system_prompt``.
+    """Return ``prompt`` (a chat message list) with ``system_prompt`` as its system message.
 
-    ``prompt`` is the dataset row's message list (``[{"role": "system", ...},
-    {"role": "user", ...}]``). Returns a new list; the input is not mutated.
-    A prompt without a leading system message gets one. Plain-string prompts
-    are returned unchanged.
+    Does not mutate the input. A prompt without a leading system message gets
+    one; plain-string prompts are returned unchanged.
     """
     if not system_prompt or not isinstance(prompt, list):
         return prompt

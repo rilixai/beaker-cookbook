@@ -24,7 +24,7 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
         "--prompts-dir",
         type=Path,
         default=None,
-        help="Directory whose system.md replaces the benchmark system prompt (read live)",
+        help="Directory holding the agent's system.md system prompt (read live)",
     )
     p.add_argument("--model", default=DEFAULT_MODEL)
     p.add_argument("--reasoning-effort", default=None)
@@ -55,7 +55,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         return 2
     prompts_dir: Path | None = args.prompts_dir
     if prompts_dir is not None and skills_dir is None:
-        print("error: --prompts-dir replaces the benchmark prompt; the no-skills baseline keeps it", file=sys.stderr)
+        print("error: --prompts-dir requires --skills-dir (the baseline runs the benchmark as is)", file=sys.stderr)
         return 2
     if prompts_dir is not None and not prompts_dir.is_dir():
         print(f"error: --prompts-dir {prompts_dir} is not a directory", file=sys.stderr)
