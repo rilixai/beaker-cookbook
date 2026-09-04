@@ -368,25 +368,26 @@ def _check(outcome: Mapping[str, Any], *, error: str | None, entities: Mapping[s
     passed = bool(outcome.get("passed"))
     excluded = bool(outcome.get("excluded"))
 
+    # Name: assertion type plus the records it targets, ids resolved to names
+    # so sibling rows differ by "David Park" rather than "003xx000004MNO1".
+    # Description: the handler's one-line docstring plus any literal params
+    # (``to``, ``body_contains``, ...) that are not record ids.
     targets: list[str] = []
-    details: list[str] = []
+    literals: list[str] = []
     for key, value in params.items():
         if key in _ASSERTION_PARAM_KEYS:
             continue
         label = entities.get(str(value)) if isinstance(value, str | int) else None
         if label is not None:
             targets.append(label)
-            details.append(f"{key}: {label} ({value})")
         else:
             rendered = _clip(value if isinstance(value, str) else json.dumps(to_json_safe(value), default=str))
-            details.append(f"{key}: {rendered}")
-    if not targets:
-        # No id-bearing params (e.g. ``to``, ``body_contains``): the first
-        # scalar param still distinguishes this row from its siblings.
-        targets = [_clip(str(v)) for k, v in params.items() if k not in _ASSERTION_PARAM_KEYS][:1]
+            literals.append(f"{key}={rendered}")
+    if not targets and literals:
+        targets = [literals[0].split("=", 1)[1]]
     name = " · ".join([assertion_type, *targets])
     doc = _assertion_doc(assertion_type)
-    description = "\n".join(line for line in (doc, *details) if line) or None
+    description = " ".join(part for part in (doc, ", ".join(literals) or None) if part) or None
     if excluded:
         message = (
             "excluded from scoring by the task author"
