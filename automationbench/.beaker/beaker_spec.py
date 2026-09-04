@@ -23,7 +23,6 @@ model, so there is no framework integration to enable here.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import os
 from collections.abc import Iterable, Mapping
@@ -35,7 +34,6 @@ from typing import Any
 import verifiers as vf
 from automationbench.clients import RetryingOpenAIChatCompletionsClient
 from automationbench.rubric import partial_credit
-from automationbench.rubric.registry import AssertionRegistry
 from automationbench.schema.world import WorldState
 from beaker import (
     STANDARD_JSONL_CASE_SCHEMA,
@@ -305,59 +303,25 @@ def _assertions_for(case: Case) -> list[dict[str, Any]]:
     return [dict(a) for a in expected.get("assertions") or []]
 
 
-# Every simulated record carries ``id``; the human-readable field differs per
-# app (Salesforce ``account_name``, Zoom ``topic``, Gmail ``subject``, ...).
-_LABEL_FIELDS = (
-    "name",
-    "title",
-    "subject",
-    "Subject",
-    "summary",
-    "topic",
-    "campaign_name",
-    "account_name",
-    "dealname",
-    "email_subject",
-    "username",
-    "headline",
-    "email",
-    "text",
-)
+# Simulated records carry ``id``; the readable field varies by app.
+_LABEL_FIELDS = ("name", "title", "subject", "campaign_name", "account_name", "summary", "topic", "text", "email")
 _LABEL_MAX_CHARS = 60
-_ASSERTION_PARAM_KEYS = frozenset({"scored", "excluded"})
-
-
-def _record_label(record: Mapping[str, Any]) -> str | None:
-    first = record.get("first_name") or record.get("firstname")
-    last = record.get("last_name") or record.get("lastname")
-    if first or last:
-        return " ".join(str(part) for part in (first, last) if part)
-    for name in _LABEL_FIELDS:
-        value = record.get(name)
-        if isinstance(value, str) and value.strip():
-            return _clip(value.strip())
-    return None
-
-
-def _clip(text: str) -> str:
-    return text if len(text) <= _LABEL_MAX_CHARS else text[: _LABEL_MAX_CHARS - 1] + "…"
 
 
 def _entity_index(*states: Any) -> dict[str, str]:
-    """Map every record id in the given world states to a readable label.
+    """``record id -> readable label`` for every record in the given world states.
 
-    Earlier states win, so a record renamed by the agent keeps the name the
-    task author used; records the agent created only exist in the end state.
+    Earlier states win, so a record renamed by the agent keeps the task author's name.
     """
     index: dict[str, str] = {}
 
     def walk(node: Any) -> None:
         if isinstance(node, Mapping):
-            record_id = node.get("id")
-            if isinstance(record_id, str | int) and str(record_id) not in index:
-                label = _record_label(node)
-                if label:
-                    index[str(record_id)] = label
+            label = " ".join(str(node[k]) for k in ("first_name", "last_name") if node.get(k)) or next(
+                (node[k].strip() for k in _LABEL_FIELDS if isinstance(node.get(k), str) and node[k].strip()), ""
+            )
+            if label and isinstance(node.get("id"), str | int):
+                index.setdefault(str(node["id"]), label)
             for value in node.values():
                 walk(value)
         elif isinstance(node, list):
@@ -369,10 +333,8 @@ def _entity_index(*states: Any) -> dict[str, str]:
     return index
 
 
-def _assertion_doc(assertion_type: str) -> str | None:
-    handler = AssertionRegistry._handlers.get(assertion_type)
-    doc = inspect.getdoc(handler) if handler is not None else None
-    return doc.strip().splitlines()[0].strip() if doc else None
+def _clip(text: str) -> str:
+    return text if len(text) <= _LABEL_MAX_CHARS else text[: _LABEL_MAX_CHARS - 1] + "…"
 
 
 def _check(outcome: Mapping[str, Any], *, error: str | None, entities: Mapping[str, str]) -> Check:
@@ -381,26 +343,15 @@ def _check(outcome: Mapping[str, Any], *, error: str | None, entities: Mapping[s
     passed = bool(outcome.get("passed"))
     excluded = bool(outcome.get("excluded"))
 
-    # Name: assertion type plus the records it targets, ids resolved to names
-    # so sibling rows differ by "David Park" rather than "003xx000004MNO1".
-    # Description: the handler's one-line docstring plus any literal params
-    # (``to``, ``body_contains``, ...) that are not record ids.
-    targets: list[str] = []
-    literals: list[str] = []
-    for key, value in params.items():
-        if key in _ASSERTION_PARAM_KEYS:
-            continue
-        label = entities.get(str(value)) if isinstance(value, str | int) else None
-        if label is not None:
-            targets.append(label)
-        else:
-            rendered = _clip(value if isinstance(value, str) else json.dumps(to_json_safe(value), default=str))
-            literals.append(f"{key}={rendered}")
-    if not targets and literals:
-        targets = [literals[0].split("=", 1)[1]]
-    name = " · ".join([assertion_type, *targets])
-    doc = _assertion_doc(assertion_type)
-    description = " ".join(part for part in (doc, ", ".join(literals) or None) if part) or None
+    # ``type · param values``; an id is swapped for the record's label when the
+    # world state knows it ("David Park" rather than "003xx000004MNO1").
+    rendered = {
+        k: entities.get(str(v), v if isinstance(v, str) else json.dumps(to_json_safe(v), default=str))
+        for k, v in params.items()
+        if k not in ("scored", "excluded")
+    }
+    name = " · ".join([assertion_type, *(_clip(v) for v in rendered.values())])
+    description = ", ".join(f"{k}={_clip(v)}" for k, v in rendered.items()) or None
     if excluded:
         message = (
             "excluded from scoring by the task author"
