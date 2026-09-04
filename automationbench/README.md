@@ -116,8 +116,10 @@ An optimizer loop: run train samples, inspect trajectories/scores, edit
 `skills/**/SKILL.md`, rerun — the environment is reused across calls and picks up
 skill edits immediately. Evaluate on `test` only for final reporting.
 
-The Beaker integration is pre-configured in `.beaker/` (`beaker.yaml`,
-`beaker_spec.py`, `upload_splits.py`); nothing to wire up.
+`.beaker/` (`beaker.yaml`, `beaker_spec.py`, `upload_splits.py`) is a working
+Beaker integration to start from: it runs a case, scores it with the benchmark's
+own rubric, and traces every model call. Adjust it rather than wiring one up
+from scratch.
 
 ### How a case is scored
 
