@@ -22,8 +22,8 @@ uv run automationbench-skills evaluate --output-dir runs/<run-dir>
 `config.json` and `summary.json` to `--output-dir` (default
 `runs/<split>-<timestamp>`). `evaluate` prints the pass rate (mean
 `task_completed_correctly`) and mean `partial_credit`, per domain and overall.
-`--task-timeout <seconds>` caps each rollout; a task that times out scores 0
-with `error="timeout ..."`.
+`--task-timeout <seconds>` caps each rollout; a task that runs out of time is
+still scored on the world it has changed so far.
 
 ## Baseline vs. skills
 

@@ -35,7 +35,10 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
     p.add_argument("--max-concurrent", type=int, default=8)
     p.add_argument(
-        "--task-timeout", type=float, default=None, help="Per-task rollout timeout in seconds (scores 0 on expiry)"
+        "--task-timeout",
+        type=float,
+        default=None,
+        help="Per-task rollout timeout in seconds (the partial world is still scored)",
     )
     p.add_argument("--limit", type=int, default=None, help="Run only the first N tasks of the split")
     p.add_argument("--output-dir", type=Path, default=None, help="Default: runs/<split>-<timestamp>")

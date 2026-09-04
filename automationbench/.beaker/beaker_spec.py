@@ -58,7 +58,13 @@ from verifiers.types import ClientConfig, RolloutInput
 
 from automationbench_skills.data.tasks import Sample, load_samples
 from automationbench_skills.prompts import load_system_prompt, with_system_prompt
-from automationbench_skills.runner import DEFAULT_MAX_STEPS, STATE_COLUMNS, ModelSpec, get_env
+from automationbench_skills.runner import (
+    DEFAULT_MAX_STEPS,
+    STATE_COLUMNS,
+    TIMEOUT_GRACE_SECONDS,
+    ModelSpec,
+    get_env,
+)
 from automationbench_skills.skills_tools import set_skills_dir
 from automationbench_skills.vendored.model_setup import build_sampling_args
 
@@ -243,7 +249,12 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
         },
     ) as stage:
         try:
-            env = get_env(toolset="zapier", skills=True, max_steps=DEFAULT_MAX_STEPS)
+            env = get_env(
+                toolset="zapier",
+                skills=True,
+                max_steps=DEFAULT_MAX_STEPS,
+                timeout=DEFAULT_TIMEOUT_SECONDS,
+            )
             set_skills_dir(skills_dir)
             client = _traced_client(model)
             sampling_args = build_sampling_args(
@@ -261,7 +272,10 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
                 sampling_args or {},
                 state_columns=STATE_COLUMNS,
             )
-            output = await asyncio.wait_for(rollout, DEFAULT_TIMEOUT_SECONDS)
+            # The env stops its own loop at ``DEFAULT_TIMEOUT_SECONDS`` and
+            # scores the world as the agent left it; this guard only catches a
+            # rollout stuck outside that loop.
+            output = await asyncio.wait_for(rollout, DEFAULT_TIMEOUT_SECONDS + TIMEOUT_GRACE_SECONDS)
             completion = output.get("completion") or []
             result_error = _rollout_error(output.get("error"))
             end_state = output.get("_end_state")
@@ -274,7 +288,7 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
                 stage.output({"error": f"{type(result_error).__name__}: {result_error}"})
                 return CaseResult.failed(f"{type(result_error).__name__}: {result_error}", retryable=True)
         except TimeoutError:
-            timeout = f"timeout after {DEFAULT_TIMEOUT_SECONDS}s"
+            timeout = f"timeout after {DEFAULT_TIMEOUT_SECONDS + TIMEOUT_GRACE_SECONDS}s"
             stage.output({"error": timeout})
             return CaseResult(
                 output=None,
