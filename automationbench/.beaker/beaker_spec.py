@@ -34,6 +34,7 @@ from typing import Any
 import verifiers as vf
 from automationbench.clients import RetryingOpenAIChatCompletionsClient
 from automationbench.rubric import partial_credit
+from automationbench.rubric.registry import AssertionRegistry
 from automationbench.schema.world import WorldState
 from beaker import (
     STANDARD_JSONL_CASE_SCHEMA,
@@ -250,7 +251,6 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
             )
             output = await asyncio.wait_for(rollout, DEFAULT_TIMEOUT_SECONDS)
             completion = output.get("completion") or []
-            trajectory = [m if isinstance(m, dict) else m.model_dump(mode="json") for m in completion]
             result_error = _rollout_error(output.get("error"))
             end_state = output.get("_end_state")
             # verifiers swallows rollout exceptions into ``state["error"]`` and
@@ -273,7 +273,9 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
             return CaseResult.failed(str(exc), retryable=True)
 
         error = None if result_error is None else f"{type(result_error).__name__}: {result_error}"
-        stage.output({"error": error, "messages": len(trajectory)})
+        # The scorer needs the error and the end state; the model/tool turns are
+        # already in the trace via ``_TracedChatCompletionsClient``.
+        stage.output({"error": error, "messages": len(completion)})
         return CaseResult(
             output=None,
             output_kind="none",
@@ -281,7 +283,6 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
                 "task_name": sample.task_name,
                 "domain": sample.domain,
                 "error": error,
-                "trajectory": to_json_safe(trajectory),
                 "end_state": to_json_safe(end_state),
             },
         )
@@ -291,11 +292,16 @@ _SERVICE_FIELDS = sorted((str(f) for f in WorldState.model_fields if f != "meta"
 
 
 def _service_for(assertion_type: str) -> str | None:
-    """WorldState service an assertion type targets (``gmail_message_sent_to`` -> ``gmail``)."""
+    """WorldState service an assertion type targets (``gmail_message_sent_to`` -> ``gmail``).
+
+    Falls back to the type's first token when it names an app split over several
+    services (``facebook_page_post_exists`` -> ``facebook``).
+    """
     for service in _SERVICE_FIELDS:
         if assertion_type == service or assertion_type.startswith(service + "_"):
             return service
-    return None
+    head = assertion_type.split("_", 1)[0]
+    return head if any(service.startswith(head + "_") for service in _SERVICE_FIELDS) else None
 
 
 def _assertions_for(case: Case) -> list[dict[str, Any]]:
@@ -337,7 +343,9 @@ def _clip(text: str) -> str:
     return text if len(text) <= _LABEL_MAX_CHARS else text[: _LABEL_MAX_CHARS - 1] + "…"
 
 
-def _check(outcome: Mapping[str, Any], *, error: str | None, entities: Mapping[str, str]) -> Check:
+def _check(
+    outcome: Mapping[str, Any], *, error: str | None, entities: Mapping[str, str], held_initially: bool = False
+) -> Check:
     assertion_type = str(outcome["type"])
     params = dict(outcome.get("params") or {})
     passed = bool(outcome.get("passed"))
@@ -361,7 +369,9 @@ def _check(outcome: Mapping[str, Any], *, error: str | None, entities: Mapping[s
     elif passed:
         message = None
     else:
-        message = "not satisfied by the end state" + (f" (rollout error: {error})" if error else "")
+        message = (
+            "satisfied in the initial state; broken by the run" if held_initially else "not satisfied by the end state"
+        ) + (f" (rollout error: {error})" if error else "")
     return Check(
         name=name,
         verdict="pass" if passed else "fail",
@@ -387,6 +397,10 @@ class _AssertionScorer:
         end_state = context.get("end_state")
         initial_state = _sample_for_case(case).info.get("initial_state") or {}
         entities = _entity_index(initial_state, end_state if isinstance(end_state, Mapping) else {})
+        initial_world = WorldState(**initial_state) if initial_state else None
+        held_initially = [
+            initial_world is not None and bool(AssertionRegistry.check(initial_world, a)) for a in assertions
+        ]
         if isinstance(end_state, Mapping):
             state: dict[str, Any] = {
                 "info": {"assertions": assertions},
@@ -415,7 +429,10 @@ class _AssertionScorer:
             field_scores=scores,
             objective=objective_score(scores, field_weights=FIELD_WEIGHTS),
             key="default",
-            checks=tuple(_check(outcome, error=error, entities=entities) for outcome in outcomes),
+            checks=tuple(
+                _check(outcome, error=error, entities=entities, held_initially=held)
+                for outcome, held in zip(outcomes, held_initially, strict=True)
+            ),
         )
 
 
