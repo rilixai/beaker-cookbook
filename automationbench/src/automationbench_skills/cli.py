@@ -54,6 +54,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(f"error: --skills-dir {skills_dir} is not a directory", file=sys.stderr)
         return 2
     prompts_dir: Path | None = args.prompts_dir
+    if prompts_dir is not None and skills_dir is None:
+        print("error: --prompts-dir replaces the benchmark prompt; the no-skills baseline keeps it", file=sys.stderr)
+        return 2
     if prompts_dir is not None and not prompts_dir.is_dir():
         print(f"error: --prompts-dir {prompts_dir} is not a directory", file=sys.stderr)
         return 2

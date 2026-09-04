@@ -116,12 +116,21 @@ def read_skill(skill_id: str) -> str:
     f = files.get(skill_id) or files.get(skill_id.strip("/"))
     if f is None:
         available = ", ".join(sorted(files)) or "(none)"
-        return f"Unknown skill {skill_id!r}. Available skills: {available}"
+        return f"{_UNKNOWN_SKILL}{skill_id!r}. Available skills: {available}"
     try:
         _, body = _split_frontmatter(f.read_text())
     except OSError as e:
-        return f"Could not read skill {skill_id!r}: {e}"
+        return f"{_UNREADABLE_SKILL}{skill_id!r}: {e}"
     return body
+
+
+_UNKNOWN_SKILL = "Unknown skill "
+_UNREADABLE_SKILL = "Could not read skill "
+
+
+def is_read_error(result: Any) -> bool:
+    """Whether a ``read_skill`` tool result is one of its error replies rather than a skill body."""
+    return isinstance(result, str) and result.startswith((_UNKNOWN_SKILL, _UNREADABLE_SKILL))
 
 
 SKILL_TOOLS = [list_skills, read_skill]
@@ -131,7 +140,9 @@ SKILL_TOOLS = [list_skills, read_skill]
 class SkillUsage:
     """Which skill tools a finished rollout called, from its completion messages.
 
-    ``reads`` maps skill id -> 1-based assistant turn of its first ``read_skill``.
+    ``reads`` maps skill id -> 1-based assistant turn of its first successful
+    ``read_skill`` (the tool result came back and was a skill body, not an
+    unknown-skill or read error).
     """
 
     listed: bool
@@ -160,34 +171,47 @@ def _loads(value: Any) -> Any:
         return None
 
 
-def _tool_call_fields(call: Any) -> tuple[str, Any]:
-    """``(name, arguments)`` from a completion tool call: OpenAI-style
+def _tool_call_fields(call: Any) -> tuple[str, str, Any]:
+    """``(id, name, arguments)`` from a completion tool call: OpenAI-style
     ``{"function": {...}}``, flat ``{"name", "arguments"}``, or the JSON string
     of either (verifiers stores tool calls both ways)."""
     call = _loads(call)
     if not isinstance(call, Mapping):
-        return "", None
+        return "", "", None
     function = call.get("function")
     source = function if isinstance(function, Mapping) else call
-    return str(source.get("name") or ""), _loads(source.get("arguments"))
+    return str(call.get("id") or ""), str(source.get("name") or ""), _loads(source.get("arguments"))
 
 
 def skill_usage(completion: Iterable[Any]) -> SkillUsage:
-    """Skill tool calls in a rollout's completion (dicts or verifiers message models)."""
+    """Skill tool calls in a rollout's completion (dicts or verifiers message models).
+
+    A ``read_skill`` call counts as a read only once its tool result message
+    arrives and is a skill body (see :func:`is_read_error`); a call cut off
+    before its result, or answered with an error, is not a read.
+    """
     listed = False
     reads: dict[str, int] = {}
+    pending: dict[str, tuple[str, int]] = {}  # tool_call_id -> (skill id, turn)
     turn = 0
     for message in completion:
         data = message if isinstance(message, Mapping) else message.model_dump(mode="json")
-        if data.get("role") != "assistant":
+        role = data.get("role")
+        if role == "tool":
+            hit = pending.pop(str(data.get("tool_call_id") or ""), None)
+            if hit is not None and not is_read_error(data.get("content")):
+                skill_id, read_turn = hit
+                reads.setdefault(skill_id, read_turn)
+            continue
+        if role != "assistant":
             continue
         turn += 1
         for call in data.get("tool_calls") or []:
-            name, arguments = _tool_call_fields(call)
+            call_id, name, arguments = _tool_call_fields(call)
             if name == "list_skills":
                 listed = True
-            elif name == "read_skill" and isinstance(arguments, Mapping):
-                skill_id = arguments.get("skill_id")
-                if isinstance(skill_id, str) and skill_id.strip():
-                    reads.setdefault(skill_id.strip().strip("/"), turn)
+            elif name == "read_skill" and call_id and isinstance(arguments, Mapping):
+                requested = arguments.get("skill_id")
+                if isinstance(requested, str) and requested.strip():
+                    pending[call_id] = (requested.strip().strip("/"), turn)
     return SkillUsage(listed=listed, reads=reads)

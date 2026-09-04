@@ -119,11 +119,15 @@ class TestSkillUsage:
                     {"id": "c3", "function": {"name": "search_tools", "arguments": '{"query": "gmail"}'}},
                 ],
             },
+            {"role": "tool", "tool_call_id": "c1", "content": "# HR playbook"},
+            {"role": "tool", "tool_call_id": "c2", "content": ""},
+            {"role": "tool", "tool_call_id": "c3", "content": "[]"},
             {
                 "role": "assistant",
                 "content": "",
-                "tool_calls": [{"name": "read_skill", "arguments": {"skill_id": "domains/hr"}}],
+                "tool_calls": [{"id": "c4", "name": "read_skill", "arguments": {"skill_id": "domains/hr"}}],
             },
+            {"role": "tool", "tool_call_id": "c4", "content": "# HR playbook"},
             {"role": "assistant", "content": "done"},
         ]
         usage = skill_usage(completion)
@@ -131,6 +135,28 @@ class TestSkillUsage:
         assert SkillUsage.from_json(usage.to_json()) == usage
         assert skill_usage([]) == SkillUsage(listed=False, reads={})
         assert SkillUsage.from_json(None) is None
+
+    def test_failed_or_unanswered_reads_do_not_count(self, tmp_path: Path) -> None:
+        set_skills_dir(tmp_path)
+        unknown = read_skill("domains/hrr")
+        assert unknown.startswith("Unknown skill")
+        (tmp_path / "apps" / "locked").mkdir(parents=True)
+        (tmp_path / "apps" / "locked" / "SKILL.md").mkdir()  # a directory: read_text raises OSError
+        unreadable = read_skill("apps/locked")
+        assert unreadable.startswith("Could not read skill")
+
+        def call(call_id: str, skill_id: str) -> dict[str, Any]:
+            return {"id": call_id, "function": {"name": "read_skill", "arguments": json.dumps({"skill_id": skill_id})}}
+
+        completion = [
+            {"role": "assistant", "content": "", "tool_calls": [call("c1", "domains/hrr"), call("c2", "apps/locked")]},
+            {"role": "tool", "tool_call_id": "c1", "content": unknown},
+            {"role": "tool", "tool_call_id": "c2", "content": unreadable},
+            {"role": "assistant", "content": "", "tool_calls": [call("c3", "domains/hr")]},
+            {"role": "tool", "tool_call_id": "c3", "content": ""},
+            {"role": "assistant", "content": "", "tool_calls": [call("c4", "apps/gmail")]},
+        ]
+        assert skill_usage(completion) == SkillUsage(listed=False, reads={"domains/hr": 2})
 
 
 class TestPrompts:
