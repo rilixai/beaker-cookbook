@@ -12,18 +12,24 @@ from fake_client import ScriptedClient
 from automationbench_skills import runner as runner_mod
 from automationbench_skills.data import PUBLIC_DOMAINS, load_samples, load_split, task_family
 from automationbench_skills.evaluation.summary import format_summary, summarize
+from automationbench_skills.prompts import load_system_prompt, with_system_prompt
 from automationbench_skills.runner import STATE_COLUMNS, _rollout_input, _to_result, get_env
 from automationbench_skills.skills_tools import list_skills, read_skill, set_skills_dir
+
+
+RECIPE_ROOT = Path(__file__).parent.parent
 
 
 def _sample() -> Any:
     return load_split("test")[0]
 
 
-async def _rollout(client: ScriptedClient, *, skills: bool, sample: Any = None) -> dict[str, Any]:
+async def _rollout(
+    client: ScriptedClient, *, skills: bool, sample: Any = None, system_prompt: str | None = None
+) -> dict[str, Any]:
     env = get_env(skills=skills)
     return await env.run_rollout(
-        _rollout_input(sample or _sample()),
+        _rollout_input(sample or _sample(), system_prompt),
         client,
         "scripted-model",
         {},
@@ -85,7 +91,7 @@ class TestSkillsTools:
         assert "unknown skill" in message.lower() and "apps/gmail" in message
 
     def test_shipped_seed_stubs(self) -> None:
-        shipped = Path(__file__).parent.parent / "skills"
+        shipped = RECIPE_ROOT / "skills"
         set_skills_dir(shipped)
         listing = list_skills()
         for domain in PUBLIC_DOMAINS:
@@ -93,6 +99,44 @@ class TestSkillsTools:
         for app in ["gmail", "google_sheets", "google_drive", "slack", "salesforce"]:
             assert f"apps/{app}: " in listing
         assert "unknown skill" not in read_skill("apps/gmail").lower()
+
+
+class TestPrompts:
+    def test_file_replaces_the_system_message_and_keeps_the_task(self) -> None:
+        prompt = [{"role": "system", "content": "BENCHMARK PROMPT"}, {"role": "user", "content": "do the task"}]
+        out = with_system_prompt(prompt, "OURS")
+        assert out == [{"role": "system", "content": "OURS"}, prompt[1]]
+        assert prompt[0]["content"] == "BENCHMARK PROMPT"
+        assert with_system_prompt(prompt, None) is prompt
+        assert with_system_prompt(prompt, "") is prompt
+        assert with_system_prompt("plain", "OURS") == "plain"
+        assert with_system_prompt([prompt[1]], "OURS") == [{"role": "system", "content": "OURS"}, prompt[1]]
+
+    def test_load_reads_live_and_tolerates_absence(self, tmp_path: Path) -> None:
+        assert load_system_prompt(None) is None
+        assert load_system_prompt(tmp_path) is None
+        (tmp_path / "system.md").write_text("  \n")
+        assert load_system_prompt(tmp_path) is None
+        (tmp_path / "system.md").write_text("first\n")
+        assert load_system_prompt(tmp_path) == "first"
+        (tmp_path / "system.md").write_text("second\n")
+        assert load_system_prompt(tmp_path) == "second"
+        assert load_system_prompt(tmp_path, skills=False) is None
+        (tmp_path / "system_no_skills.md").write_text("plain\n")
+        assert load_system_prompt(tmp_path, skills=False) == "plain"
+        assert load_system_prompt(tmp_path) == "second"
+
+    def test_shipped_seeds_start_with_the_benchmark_prompt_verbatim(self) -> None:
+        upstream = {s.prompt[0]["content"] for s in load_split("train") + load_split("test")}
+        assert len(upstream) == 1
+        benchmark = upstream.pop().strip()
+        assert load_system_prompt(RECIPE_ROOT / "prompts", skills=False) == benchmark
+        text = load_system_prompt(RECIPE_ROOT / "prompts")
+        assert text is not None
+        assert text.startswith(benchmark)
+        for domain in PUBLIC_DOMAINS:
+            assert domain in text
+        assert "list_skills" in text and "read_skill" in text
 
 
 class TestRunner:
@@ -125,6 +169,19 @@ class TestRunner:
         assert "How to do the thing" in dump
         assert "SECRET-PROCEDURE" in dump
 
+    async def test_system_prompt_reaches_the_model(self) -> None:
+        sample = _sample()
+        baseline = ScriptedClient()
+        await _rollout(baseline, skills=True, sample=sample)
+        ours = ScriptedClient()
+        await _rollout(ours, skills=True, sample=sample, system_prompt="READ YOUR SKILLS FIRST")
+        base_system = baseline.calls[0]["prompt"][0]
+        system = ours.calls[0]["prompt"][0]
+        assert base_system.role == system.role == "system"
+        assert base_system.content == sample.prompt[0]["content"]
+        assert system.content == "READ YOUR SKILLS FIRST"
+        assert ours.calls[0]["prompt"][1:] == baseline.calls[0]["prompt"][1:]
+
     async def test_state_resets_between_rollouts(self) -> None:
         sample = _sample()
         out1 = await _rollout(ScriptedClient(), skills=False, sample=sample)
@@ -137,17 +194,28 @@ class TestRunner:
         assert r1.end_state is not None and r2.end_state is not None
         assert set(r1.end_state) == set(r2.end_state)
 
-    async def test_task_timeout_returns_error_result(self, monkeypatch: Any) -> None:
+    async def test_task_timeout_scores_the_work_done_so_far(self, monkeypatch: Any) -> None:
         import asyncio
 
         class StallingClient(ScriptedClient):
-            async def get_native_response(self, *args: Any, **kwargs: Any) -> Any:
-                await asyncio.sleep(30)
+            """Acts once, then hangs like a stuck API request."""
 
-        monkeypatch.setattr(runner_mod, "get_client", lambda model: StallingClient())
-        result = await runner_mod.run_one_async(_sample(), skills_dir=None, timeout=0.2)
-        assert result.error is not None and "timeout" in str(result.error)
-        assert result.partial_credit == 0.0 and result.task_completed_correctly == 0.0
+            async def get_native_response(self, *args: Any, **kwargs: Any) -> Any:
+                response = await super().get_native_response(*args, **kwargs)
+                if len(self.calls) > 1:
+                    await asyncio.sleep(30)
+                return response
+
+        client = StallingClient(turns=[{"tool_calls": [{"name": "search_tools", "arguments": {"query": "email"}}]}])
+        monkeypatch.setattr(runner_mod, "get_client", lambda model: client)
+        result = await runner_mod.run_one_async(_sample(), skills_dir=None, timeout=0.5)
+        # The env stops its loop and the rubric still grades the world, so the
+        # rollout keeps its trajectory and whatever credit it earned.
+        assert len(client.calls) == 2  # the second call is the one that hangs
+        assert result.error is None
+        assert result.end_state is not None
+        assert [m["role"] for m in result.trajectory] == ["assistant"]
+        assert 0.0 <= result.partial_credit <= 1.0
 
     def test_client_cache_is_per_event_loop(self, monkeypatch: Any) -> None:
         import asyncio

@@ -13,15 +13,28 @@ from typing import Any
 from dotenv import load_dotenv
 
 from automationbench_skills.evaluation.summary import format_summary, summarize
-from automationbench_skills.runner import DEFAULT_MAX_STEPS, DEFAULT_MODEL, ModelSpec, RunResult, run_split
+from automationbench_skills.runner import (
+    DEFAULT_MAX_STEPS,
+    DEFAULT_MODEL,
+    DEFAULT_REASONING_EFFORT,
+    ModelSpec,
+    RunResult,
+    run_split,
+)
 
 
 def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--split", choices=["train", "test"], default="test")
     p.add_argument("--skills-dir", type=Path, default=None, help="Skills directory of SKILL.md folders (read live)")
     p.add_argument("--no-skills", action="store_true", help="Baseline arm: no skill tools registered")
+    p.add_argument(
+        "--prompts-dir",
+        type=Path,
+        default=None,
+        help="Directory holding the agent's system prompt: system.md, or system_no_skills.md with --no-skills (read live)",
+    )
     p.add_argument("--model", default=DEFAULT_MODEL)
-    p.add_argument("--reasoning-effort", default=None)
+    p.add_argument("--reasoning-effort", default=DEFAULT_REASONING_EFFORT)
     p.add_argument("--base-url", default=None, help="OpenAI-compatible gateway base URL")
     p.add_argument("--api-key-var", default="OPENAI_API_KEY")
     p.add_argument("--api", default="auto", help="auto|chat_completions|responses|anthropic|gemini_interactions")
@@ -29,7 +42,10 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
     p.add_argument("--max-concurrent", type=int, default=8)
     p.add_argument(
-        "--task-timeout", type=float, default=None, help="Per-task rollout timeout in seconds (scores 0 on expiry)"
+        "--task-timeout",
+        type=float,
+        default=None,
+        help="Per-task rollout timeout in seconds (the partial world is still scored)",
     )
     p.add_argument("--limit", type=int, default=None, help="Run only the first N tasks of the split")
     p.add_argument("--output-dir", type=Path, default=None, help="Default: runs/<split>-<timestamp>")
@@ -46,6 +62,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print("note: no --skills-dir given; running baseline (same as --no-skills)")
     if skills_dir is not None and not skills_dir.is_dir():
         print(f"error: --skills-dir {skills_dir} is not a directory", file=sys.stderr)
+        return 2
+    prompts_dir: Path | None = args.prompts_dir
+    if prompts_dir is not None and not prompts_dir.is_dir():
+        print(f"error: --prompts-dir {prompts_dir} is not a directory", file=sys.stderr)
         return 2
 
     samples = load_split(args.split)
@@ -73,6 +93,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 "toolset": args.toolset,
                 "max_steps": args.max_steps,
                 "skills_dir": str(skills_dir) if skills_dir else None,
+                "prompts_dir": str(prompts_dir) if prompts_dir else None,
                 "tasks": [s.task_name for s in samples],
             },
             indent=2,
@@ -92,6 +113,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         samples,
         model=model,
         skills_dir=skills_dir,
+        prompts_dir=prompts_dir,
         toolset=args.toolset,
         max_steps=args.max_steps,
         max_concurrent=args.max_concurrent,
