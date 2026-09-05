@@ -12,7 +12,7 @@ uv sync --group dev
 export OPENAI_API_KEY=sk-...   # or copy .env.example to .env
 
 # Smoke run: 3 test tasks with the seed skills and prompt
-uv run automationbench-skills run --split test --limit 3 --model gpt-5-mini --skills-dir skills --prompts-dir prompts
+uv run automationbench-skills run --split test --limit 3 --skills-dir skills --prompts-dir prompts
 
 # Aggregate a finished (or partial) run directory
 uv run automationbench-skills evaluate --output-dir runs/<run-dir>
@@ -22,8 +22,8 @@ uv run automationbench-skills evaluate --output-dir runs/<run-dir>
 `config.json` and `summary.json` to `--output-dir` (default
 `runs/<split>-<timestamp>`). `evaluate` prints the pass rate (mean
 `task_completed_correctly`) and mean `partial_credit`, per domain and overall.
-`--task-timeout <seconds>` caps each rollout; a task that times out scores 0
-with `error="timeout ..."`.
+`--task-timeout <seconds>` caps each rollout; a task that runs out of time is
+still scored on the world it has changed so far.
 
 ## Baseline vs. skills
 
@@ -62,10 +62,11 @@ were made and the leakage policy. The 200-task `simple` domain
 
 ## Models
 
-`--model` defaults to `gpt-5-mini`. Routing follows the benchmark
-(`vendored/model_setup.py`): `claude-*` goes to Anthropic, `gemini-*` to the
-Gemini interactions API, everything else to OpenAI chat-completions/responses.
-`--reasoning-effort` maps to each API's reasoning setting. For a gateway:
+`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort xhigh`. Routing
+follows the benchmark (`vendored/model_setup.py`): `claude-*` goes to
+Anthropic, `gemini-*` to the Gemini interactions API, everything else to OpenAI
+chat-completions/responses. `--reasoning-effort` maps to each API's reasoning
+setting. For a gateway:
 
 ```bash
 uv run automationbench-skills run --split test --limit 3 \
@@ -100,7 +101,7 @@ Average a few runs before reading anything into differences this size.
 from automationbench_skills import load_split, run_one
 
 sample = load_split("train")[0]
-result = run_one(sample, model="gpt-5-mini", skills_dir="skills", prompts_dir="prompts")
+result = run_one(sample, skills_dir="skills", prompts_dir="prompts")
 result.partial_credit  # 0-1 fraction of assertions passed
 result.task_completed_correctly  # strict 0/1
 result.trajectory  # full message/tool-call trace

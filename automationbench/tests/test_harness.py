@@ -194,17 +194,28 @@ class TestRunner:
         assert r1.end_state is not None and r2.end_state is not None
         assert set(r1.end_state) == set(r2.end_state)
 
-    async def test_task_timeout_returns_error_result(self, monkeypatch: Any) -> None:
+    async def test_task_timeout_scores_the_work_done_so_far(self, monkeypatch: Any) -> None:
         import asyncio
 
         class StallingClient(ScriptedClient):
-            async def get_native_response(self, *args: Any, **kwargs: Any) -> Any:
-                await asyncio.sleep(30)
+            """Acts once, then hangs like a stuck API request."""
 
-        monkeypatch.setattr(runner_mod, "get_client", lambda model: StallingClient())
-        result = await runner_mod.run_one_async(_sample(), skills_dir=None, timeout=0.2)
-        assert result.error is not None and "timeout" in str(result.error)
-        assert result.partial_credit == 0.0 and result.task_completed_correctly == 0.0
+            async def get_native_response(self, *args: Any, **kwargs: Any) -> Any:
+                response = await super().get_native_response(*args, **kwargs)
+                if len(self.calls) > 1:
+                    await asyncio.sleep(30)
+                return response
+
+        client = StallingClient(turns=[{"tool_calls": [{"name": "search_tools", "arguments": {"query": "email"}}]}])
+        monkeypatch.setattr(runner_mod, "get_client", lambda model: client)
+        result = await runner_mod.run_one_async(_sample(), skills_dir=None, timeout=0.5)
+        # The env stops its loop and the rubric still grades the world, so the
+        # rollout keeps its trajectory and whatever credit it earned.
+        assert len(client.calls) == 2  # the second call is the one that hangs
+        assert result.error is None
+        assert result.end_state is not None
+        assert [m["role"] for m in result.trajectory] == ["assistant"]
+        assert 0.0 <= result.partial_credit <= 1.0
 
     def test_client_cache_is_per_event_loop(self, monkeypatch: Any) -> None:
         import asyncio

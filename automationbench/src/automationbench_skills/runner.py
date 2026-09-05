@@ -35,8 +35,12 @@ from automationbench_skills.vendored.model_setup import (
 )
 
 
-DEFAULT_MODEL = "gpt-5-mini"
+DEFAULT_MODEL = "gpt-5.6-luna"
+DEFAULT_REASONING_EFFORT = "xhigh"
 DEFAULT_MAX_STEPS = 50  # upstream eval.py's --max-turns default
+# Scoring and cleanup run after the env's own timeout stops the loop; the outer
+# guard only catches a rollout stuck outside that loop.
+TIMEOUT_GRACE_SECONDS = 60.0
 # State fields upstream's eval exports alongside each rollout.
 STATE_COLUMNS = ["_usage", "_debug", "_assertion_results", "_end_state", "_perf"]
 
@@ -51,7 +55,7 @@ class ModelSpec:
     base_url: str | None = None
     api_key_var: str = "OPENAI_API_KEY"
     api: str = "auto"  # or: anthropic | chat_completions | responses | gemini_interactions
-    reasoning_effort: str | None = None
+    reasoning_effort: str | None = DEFAULT_REASONING_EFFORT
     extra_body: str | None = None  # raw JSON merged into every request body
 
     def resolved_api(self) -> str:
@@ -85,11 +89,16 @@ class RunResult:
         }
 
 
-_ENV_CACHE: dict[tuple[str, bool, int], Any] = {}
+_ENV_CACHE: dict[tuple[str, bool, int, float | None], Any] = {}
 _CLIENT_CACHE: dict[tuple[ModelSpec, Any], Client] = {}
 
 
-def get_env(toolset: str = "zapier", skills: bool = True, max_steps: int = DEFAULT_MAX_STEPS) -> Any:
+def get_env(
+    toolset: str = "zapier",
+    skills: bool = True,
+    max_steps: int = DEFAULT_MAX_STEPS,
+    timeout: float | None = None,
+) -> Any:
     """Build (once) and return the shared AutomationBenchEnv.
 
     The skill tools are registered via the env's ``tools=`` parameter; under
@@ -97,13 +106,17 @@ def get_env(toolset: str = "zapier", skills: bool = True, max_steps: int = DEFAU
     ``setup_state``'s per-task filtering. ``limited_zapier`` filters to each
     task's declared tool list and would drop them — so this recipe pins
     ``zapier``/``api`` and refuses ``limited_zapier`` when skills are on.
+
+    ``timeout`` (seconds) bounds the rollout loop inside the env: the loop
+    stops on expiry and the rubric still scores the world the agent has
+    mutated so far.
     """
     if toolset == "limited_zapier" and skills:
         raise ValueError(
             "toolset='limited_zapier' filters tools to each task's declared list at "
             "setup_state, which drops the skill tools. Use toolset='zapier' (default)."
         )
-    key = (toolset, skills, max_steps)
+    key = (toolset, skills, max_steps, timeout)
     if key not in _ENV_CACHE:
         import json
 
@@ -134,6 +147,7 @@ def get_env(toolset: str = "zapier", skills: bool = True, max_steps: int = DEFAU
             tools=list(SKILL_TOOLS) if skills else None,
             max_turns=max_steps,
             toolset=toolset,
+            timeout_seconds=timeout,
         )
     return _ENV_CACHE[key]
 
@@ -203,12 +217,13 @@ async def run_one_async(
     tools are absent. The agent's system prompt is ``prompts_dir/system.md``
     (``system_no_skills.md`` in the baseline arm); with ``None`` (or no such
     file) the dataset row's system message is used.
-    ``timeout`` (seconds) bounds the whole rollout; on expiry the task scores 0
-    with ``error="timeout"`` instead of hanging on a stuck API request.
+    ``timeout`` (seconds) bounds the rollout: on expiry the loop stops and the
+    partially mutated world is still scored, so completed steps keep their
+    partial credit.
     """
     if isinstance(model, str):
         model = ModelSpec(name=model)
-    env = get_env(toolset=toolset, skills=skills_dir is not None, max_steps=max_steps)
+    env = get_env(toolset=toolset, skills=skills_dir is not None, max_steps=max_steps, timeout=timeout)
     set_skills_dir(skills_dir)
     client = get_client(model)
     sampling_args = build_sampling_args(model.name, model.resolved_api(), model.reasoning_effort, model.extra_body)
@@ -220,7 +235,7 @@ async def run_one_async(
         state_columns=STATE_COLUMNS,
     )
     try:
-        output = await (asyncio.wait_for(rollout, timeout) if timeout is not None else rollout)
+        output = await (asyncio.wait_for(rollout, timeout + TIMEOUT_GRACE_SECONDS) if timeout else rollout)
     except TimeoutError:
         return RunResult(
             task_name=sample.task_name,
