@@ -247,6 +247,39 @@ class TestRunner:
         with pytest.raises(ValueError):
             get_env(toolset="limited_zapier", skills=True)
 
+    async def test_tool_executions_become_tool_spans(self, tmp_path: Path) -> None:
+        from beaker.tracing import local_capture
+        from beaker.tracing.integrations import verifiers as beaker_verifiers
+        from beaker.tracing.projection import parse_jsonl, project
+
+        env = get_env(skills=True)
+        assert beaker_verifiers.is_instrumented(env)
+        client = ScriptedClient(
+            turns=[
+                {"tool_calls": [{"name": "list_skills"}]},
+                {"tool_calls": [{"name": "search_tools", "arguments": {"query": "send email", "top_k": 1}}]},
+                {"content": "done"},
+            ]
+        )
+        with local_capture(tmp_path, case_id="case", candidate_id="cand", strict_evidence=False) as capture:
+            await _rollout(client, skills=True)
+        assert capture.receipt is not None
+        projection = capture.receipt.to_dict()["projection"]
+        assert projection["tool_counts"] == {"list_skills": 1, "search_tools": 1}
+        by_name = {call["tool_name"]: call for call in projection["tool_calls"]}
+        assert by_name["search_tools"]["args"] == {"query": "send email", "top_k": 1}
+        assert by_name["search_tools"]["tool_call_id"]
+        assert "world" not in by_name["search_tools"]["args"]
+        assert by_name["list_skills"]["return_content"]
+        # a second rollout on the same cached env is traced independently
+        with local_capture(tmp_path / "second", case_id="case", candidate_id="cand", strict_evidence=False) as again:
+            await _rollout(ScriptedClient(), skills=True)
+        assert again.receipt is not None
+        assert again.receipt.to_dict()["projection"]["tool_counts"] == {}
+        captures = list((tmp_path / "captures").glob("*.otlp.jsonl"))
+        assert len(captures) == 1
+        assert project(parse_jsonl(captures[0].read_bytes()), artifacts=()).tool_counts == projection["tool_counts"]
+
     async def test_run_split_concurrency(self, monkeypatch: Any) -> None:
         samples = load_split("test")[:3]
         client = ScriptedClient()

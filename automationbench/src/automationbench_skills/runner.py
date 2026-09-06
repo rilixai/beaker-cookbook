@@ -122,6 +122,7 @@ def get_env(
 
         from automationbench.rubric import create_rubric
         from automationbench.runner import AutomationBenchEnv
+        from beaker.tracing.integrations import verifiers as beaker_verifiers
         from datasets import Dataset
 
         from automationbench_skills.data.tasks import load_samples
@@ -141,7 +142,7 @@ def get_env(
                 }
             ]
         )
-        _ENV_CACHE[key] = AutomationBenchEnv(
+        env = AutomationBenchEnv(
             dataset=dataset,
             rubric=create_rubric(),
             tools=list(SKILL_TOOLS) if skills else None,
@@ -149,6 +150,9 @@ def get_env(
             toolset=toolset,
             timeout_seconds=timeout,
         )
+        # One ``tool_call`` span per tool execution, under whichever Beaker
+        # capture is active at call time; the hidden ``world`` arg stays out.
+        _ENV_CACHE[key] = beaker_verifiers.instrument(env)
     return _ENV_CACHE[key]
 
 
