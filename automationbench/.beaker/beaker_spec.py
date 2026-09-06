@@ -61,6 +61,7 @@ from automationbench_skills.prompts import load_system_prompt, with_system_promp
 from automationbench_skills.runner import (
     DEFAULT_MAX_STEPS,
     DEFAULT_REASONING_EFFORT,
+    DEFAULT_SEARCH_TOP_K,
     STATE_COLUMNS,
     TIMEOUT_GRACE_SECONDS,
     ModelSpec,
@@ -258,6 +259,7 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
                 skills=True,
                 max_steps=DEFAULT_MAX_STEPS,
                 timeout=DEFAULT_TIMEOUT_SECONDS,
+                search_top_k=DEFAULT_SEARCH_TOP_K,
             )
             set_skills_dir(skills_dir)
             client = _traced_client(model)

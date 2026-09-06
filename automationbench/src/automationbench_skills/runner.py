@@ -8,15 +8,16 @@ trajectory+score, edit files in ``skills_dir`` and ``prompts_dir``, repeat,
 then run held-out test.
 
 The ``AutomationBenchEnv`` is built once per (toolset, skills on/off,
-max_turns) and reused across calls — its ``setup_state`` resets the per-task
-world every rollout. Only the sample, the ``skills_dir`` contents and the
-prompt file in ``prompts_dir`` vary per call; both are read live, so editing
-them between calls changes agent behavior with no env rebuild.
+max_turns, timeout, search cap) and reused across calls — its ``setup_state``
+resets the per-task world every rollout. Only the sample, the ``skills_dir``
+contents and the prompt file in ``prompts_dir`` vary per call; both are read
+live, so editing them between calls changes agent behavior with no env rebuild.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ from verifiers.types import RolloutInput
 
 from automationbench_skills.data.tasks import Sample
 from automationbench_skills.prompts import load_system_prompt, with_system_prompt
+from automationbench_skills.search_tools import DEFAULT_SEARCH_TOP_K, make_compact_search_tools
 from automationbench_skills.skills_tools import SKILL_TOOLS, set_skills_dir
 from automationbench_skills.vendored.model_setup import (
     build_client,
@@ -89,8 +91,20 @@ class RunResult:
         }
 
 
-_ENV_CACHE: dict[tuple[str, bool, int, float | None], Any] = {}
+_ENV_CACHE: dict[tuple[str, bool, int, float | None, int | None], Any] = {}
 _CLIENT_CACHE: dict[tuple[ModelSpec, Any], Client] = {}
+
+
+def _replace_tool(env: Any, tool: Callable[..., Any]) -> None:
+    """Swap the env's registered tool of the same name for ``tool``.
+
+    ``AutomationBenchEnv`` snapshots its tool defs into ``_all_tool_defs`` at
+    the end of ``__init__`` and serves ``state["tool_defs"]`` from that
+    snapshot, so it is refreshed after the swap.
+    """
+    env.remove_tool(env.tool_map[tool.__name__])
+    env.add_tool(tool)
+    env._all_tool_defs = list(env.tool_defs)
 
 
 def get_env(
@@ -98,6 +112,7 @@ def get_env(
     skills: bool = True,
     max_steps: int = DEFAULT_MAX_STEPS,
     timeout: float | None = None,
+    search_top_k: int | None = DEFAULT_SEARCH_TOP_K,
 ) -> Any:
     """Build (once) and return the shared AutomationBenchEnv.
 
@@ -110,13 +125,19 @@ def get_env(
     ``timeout`` (seconds) bounds the rollout loop inside the env: the loop
     stops on expiry and the rubric still scores the world the agent has
     mutated so far.
+
+    ``search_top_k`` selects the ``zapier`` toolset's ``search_tools``: an
+    integer installs the compact variant (signature + docstring per hit, no
+    JSON schema, at most that many hits per call, see ``search_tools.py``);
+    ``None`` keeps upstream's full-schema JSON search with an unbounded
+    ``top_k``.
     """
     if toolset == "limited_zapier" and skills:
         raise ValueError(
             "toolset='limited_zapier' filters tools to each task's declared list at "
             "setup_state, which drops the skill tools. Use toolset='zapier' (default)."
         )
-    key = (toolset, skills, max_steps, timeout)
+    key = (toolset, skills, max_steps, timeout, search_top_k)
     if key not in _ENV_CACHE:
         import json
 
@@ -141,7 +162,7 @@ def get_env(
                 }
             ]
         )
-        _ENV_CACHE[key] = AutomationBenchEnv(
+        env = AutomationBenchEnv(
             dataset=dataset,
             rubric=create_rubric(),
             tools=list(SKILL_TOOLS) if skills else None,
@@ -149,6 +170,9 @@ def get_env(
             toolset=toolset,
             timeout_seconds=timeout,
         )
+        if env.use_meta_tools and search_top_k is not None:
+            _replace_tool(env, make_compact_search_tools(search_top_k))
+        _ENV_CACHE[key] = env
     return _ENV_CACHE[key]
 
 
@@ -208,6 +232,7 @@ async def run_one_async(
     toolset: str = "zapier",
     max_steps: int = DEFAULT_MAX_STEPS,
     timeout: float | None = None,
+    search_top_k: int | None = DEFAULT_SEARCH_TOP_K,
 ) -> RunResult:
     """Run ONE agent rollout on one task and score it with the benchmark rubric.
 
@@ -223,7 +248,13 @@ async def run_one_async(
     """
     if isinstance(model, str):
         model = ModelSpec(name=model)
-    env = get_env(toolset=toolset, skills=skills_dir is not None, max_steps=max_steps, timeout=timeout)
+    env = get_env(
+        toolset=toolset,
+        skills=skills_dir is not None,
+        max_steps=max_steps,
+        timeout=timeout,
+        search_top_k=search_top_k,
+    )
     set_skills_dir(skills_dir)
     client = get_client(model)
     sampling_args = build_sampling_args(model.name, model.resolved_api(), model.reasoning_effort, model.extra_body)
@@ -258,6 +289,7 @@ def run_one(
     toolset: str = "zapier",
     max_steps: int = DEFAULT_MAX_STEPS,
     timeout: float | None = None,
+    search_top_k: int | None = DEFAULT_SEARCH_TOP_K,
 ) -> RunResult:
     """Synchronous wrapper around :func:`run_one_async`."""
     return asyncio.run(
@@ -269,6 +301,7 @@ def run_one(
             toolset=toolset,
             max_steps=max_steps,
             timeout=timeout,
+            search_top_k=search_top_k,
         )
     )
 
@@ -283,6 +316,7 @@ async def run_split_async(
     max_steps: int = DEFAULT_MAX_STEPS,
     max_concurrent: int = 8,
     timeout: float | None = None,
+    search_top_k: int | None = DEFAULT_SEARCH_TOP_K,
     on_result: Any | None = None,
 ) -> list[RunResult]:
     """Thin concurrency wrapper over :func:`run_one_async` (one shared skills_dir/prompts_dir)."""
@@ -298,6 +332,7 @@ async def run_split_async(
                 toolset=toolset,
                 max_steps=max_steps,
                 timeout=timeout,
+                search_top_k=search_top_k,
             )
         if on_result is not None:
             on_result(result)
@@ -316,6 +351,7 @@ def run_split(
     max_steps: int = DEFAULT_MAX_STEPS,
     max_concurrent: int = 8,
     timeout: float | None = None,
+    search_top_k: int | None = DEFAULT_SEARCH_TOP_K,
     on_result: Any | None = None,
 ) -> list[RunResult]:
     """Synchronous wrapper around :func:`run_split_async`."""
@@ -329,6 +365,7 @@ def run_split(
             max_steps=max_steps,
             max_concurrent=max_concurrent,
             timeout=timeout,
+            search_top_k=search_top_k,
             on_result=on_result,
         )
     )

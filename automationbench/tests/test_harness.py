@@ -4,6 +4,7 @@ scripted (network-free) model client."""
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from automationbench_skills.data import PUBLIC_DOMAINS, load_samples, load_split
 from automationbench_skills.evaluation.summary import format_summary, summarize
 from automationbench_skills.prompts import load_system_prompt, with_system_prompt
 from automationbench_skills.runner import STATE_COLUMNS, _rollout_input, _to_result, get_env
+from automationbench_skills.search_tools import format_hit, format_signature, make_compact_search_tools
 from automationbench_skills.skills_tools import list_skills, read_skill, set_skills_dir
 
 
@@ -241,6 +243,24 @@ class TestRunner:
         assert get_env(skills=False) is get_env(skills=False)
         assert get_env(skills=True) is not get_env(skills=False)
 
+    def test_search_cap_is_part_of_the_env_cache_key(self) -> None:
+        assert get_env(skills=False) is get_env(skills=False, search_top_k=10)
+        assert get_env(skills=False) is not get_env(skills=False, search_top_k=None)
+
+    async def test_compact_search_is_what_the_model_calls(self) -> None:
+        client = ScriptedClient(
+            turns=[{"tool_calls": [{"name": "search_tools", "arguments": {"query": "xero invoice", "top_k": 500}}]}]
+        )
+        output = await _rollout(client, skills=False)
+        search_def = next(t for t in client.calls[0]["tools"] if t["name"] == "search_tools")
+        assert "at most 10 tools" in search_def["description"]
+        assert search_def["parameters"]["properties"]["top_k"]["default"] == 10
+        tool_message = next(m for m in output["completion"] if m["role"] == "tool")
+        content = tool_message["content"]
+        assert content.startswith("xero_find_invoice(")
+        assert len([line for line in content.splitlines() if line and not line.startswith(" ")]) == 10
+        assert "{" not in content  # no JSON schema
+
     def test_limited_zapier_with_skills_rejected(self) -> None:
         import pytest
 
@@ -255,6 +275,45 @@ class TestRunner:
         assert [r.task_name for r in results] == [s.task_name for s in samples]
         assert all(r.task_completed_correctly in (0.0, 1.0) for r in results)
         del client
+
+
+class TestCompactSearch:
+    def test_signature_skips_world_and_marks_required(self) -> None:
+        def tool(world: Any, account: str, amount: int | None = None, note: str = "") -> str:
+            return ""
+
+        assert format_signature("pay", tool) == "pay(account*: str, amount: int=None, note: str='')"
+
+    def test_hit_keeps_the_whole_docstring_indented(self) -> None:
+        def tool(world: Any, q: str | None = None) -> str:
+            return ""
+
+        block = format_hit("find", tool, "Find things.\n\nArgs:\n    q: Query.\n\nReturns:\n    JSON.")
+        assert (
+            block == "find(q: str=None) — Find things.\n\n    Args:\n        q: Query.\n\n    Returns:\n        JSON."
+        )
+        assert format_hit("bare", tool, "") == "bare(q: str=None)"
+
+    def test_registry_search_is_capped_and_compact(self) -> None:
+        from automationbench.tools.zapier.meta import search_tools as upstream
+
+        search = make_compact_search_tools(max_top_k=4)
+        assert "(default: 4, max 4)" in (search.__doc__ or "")
+        out = search("xero invoice", top_k=500)
+        names = [line.split("(", 1)[0] for line in out.splitlines() if line and not line.startswith(" ")]
+        assert names == [hit["name"] for hit in json.loads(upstream("xero invoice", top_k=4))]
+        assert "invoice_number: Invoice number to search." in out  # docstring semantics kept
+        assert len(out) < len(upstream("xero invoice", top_k=4)) / 3
+        assert search("qqqzzz") == "No matching tools."
+
+    def test_every_registered_tool_renders(self) -> None:
+        from automationbench.tools import ALL_TOOLS
+
+        for fn in ALL_TOOLS:
+            sig = format_signature(fn.__name__, fn)
+            assert sig.startswith(f"{fn.__name__}(") and sig.endswith(")")
+            assert "world" not in sig and "Optional[" not in sig
+            assert not re.search(r"\| None[=,)]", sig)  # the None arm is the default, not the type
 
 
 class TestSummary:

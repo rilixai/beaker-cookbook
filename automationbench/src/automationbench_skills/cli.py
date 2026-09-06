@@ -17,6 +17,7 @@ from automationbench_skills.runner import (
     DEFAULT_MAX_STEPS,
     DEFAULT_MODEL,
     DEFAULT_REASONING_EFFORT,
+    DEFAULT_SEARCH_TOP_K,
     ModelSpec,
     RunResult,
     run_split,
@@ -47,6 +48,12 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
         default=None,
         help="Per-task rollout timeout in seconds (the partial world is still scored)",
     )
+    p.add_argument(
+        "--search-top-k",
+        type=int,
+        default=DEFAULT_SEARCH_TOP_K,
+        help="Cap on search_tools hits per call, compact output (default: %(default)s); 0 = upstream's full-schema JSON",
+    )
     p.add_argument("--limit", type=int, default=None, help="Run only the first N tasks of the split")
     p.add_argument("--output-dir", type=Path, default=None, help="Default: runs/<split>-<timestamp>")
 
@@ -67,6 +74,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if prompts_dir is not None and not prompts_dir.is_dir():
         print(f"error: --prompts-dir {prompts_dir} is not a directory", file=sys.stderr)
         return 2
+
+    search_top_k: int | None = args.search_top_k or None
 
     samples = load_split(args.split)
     if args.limit is not None:
@@ -92,6 +101,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 "reasoning_effort": model.reasoning_effort,
                 "toolset": args.toolset,
                 "max_steps": args.max_steps,
+                "search_top_k": search_top_k,
                 "skills_dir": str(skills_dir) if skills_dir else None,
                 "prompts_dir": str(prompts_dir) if prompts_dir else None,
                 "tasks": [s.task_name for s in samples],
@@ -118,6 +128,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         max_steps=args.max_steps,
         max_concurrent=args.max_concurrent,
         timeout=args.task_timeout,
+        search_top_k=search_top_k,
         on_result=on_result,
     )
     summary = summarize([r.to_json() for r in results])
