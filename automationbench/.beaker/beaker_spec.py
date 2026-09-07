@@ -470,7 +470,7 @@ class _AssertionScorer:
     # (tool exposure, search_tools output, retries): the candidate's src/ is
     # loaded fresh per evaluation, scoring stays trusted. Regenerate the
     # playbook after changing this.
-    repository=("skills", "prompts"),
+    repository=("skills", "prompts", "src"),
 )
 def build_spec(ctx: OptimizationContext) -> Spec:
     del ctx
