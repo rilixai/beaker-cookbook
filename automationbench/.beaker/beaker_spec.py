@@ -466,6 +466,10 @@ class _AssertionScorer:
 
 @spec(
     dataset_schema=STANDARD_JSONL_CASE_SCHEMA,
+    # Optimizer-editable paths. Add "src" to let it change the harness too
+    # (tool exposure, search_tools output, retries): the candidate's src/ is
+    # loaded fresh per evaluation, scoring stays trusted. Regenerate the
+    # playbook after changing this.
     repository=("skills", "prompts"),
 )
 def build_spec(ctx: OptimizationContext) -> Spec:
