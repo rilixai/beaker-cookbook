@@ -25,12 +25,6 @@ uv run automationbench-skills evaluate --output-dir runs/<run-dir>
 `--task-timeout <seconds>` caps each rollout; a task that runs out of time is
 still scored on the world it has changed so far.
 
-Under the `zapier` toolset the agent discovers tools with `search_tools`. This
-recipe swaps in a compact version: each hit is a signature line plus the tool's
-docstring instead of its JSON schema, and results are capped at
-`--search-top-k` (default 10) per call. `--search-top-k 0` restores upstream's
-full-schema search with no cap.
-
 ## Baseline vs. skills
 
 - **Baseline**: `--no-skills` (or no `--skills-dir`). No skill tools; the
