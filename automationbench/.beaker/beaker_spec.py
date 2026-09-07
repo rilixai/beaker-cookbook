@@ -466,23 +466,10 @@ class _AssertionScorer:
 
 @spec(
     dataset_schema=STANDARD_JSONL_CASE_SCHEMA,
-    # Editable surface. Today the optimizer may only write skill bodies and the
-    # system prompt; the agent harness itself (tool exposure, ``search_tools``
-    # output format, env construction, retries) is fixed.
-    #
-    # To let it optimize the harness too, add ``"src"``:
-    #
-    #     repository=("skills", "prompts", "src"),
-    #
-    # Beaker evaluates each proposal in a fresh subprocess with the candidate's
-    # ``src/`` first on ``sys.path`` (already-imported ``automationbench_skills``
-    # modules are evicted), so edits to ``src/automationbench_skills/*.py``
-    # take effect on the next evaluation. Scoring stays in the trusted
-    # controller. This file, ``pyproject.toml`` and ``uv.lock`` stay immutable,
-    # so anything the optimizer should be able to move has to live in ``src``:
-    # e.g. ``get_env(...)`` in ``_run_case`` takes ``DEFAULT_MAX_STEPS`` from
-    # ``runner.py`` (movable) but ``DEFAULT_TIMEOUT_SECONDS`` from this file
-    # (not). Regenerate the playbook afterwards: it lists the editable targets.
+    # Optimizer-editable paths. Add "src" to let it change the harness too
+    # (tool exposure, search_tools output, retries): the candidate's src/ is
+    # loaded fresh per evaluation, scoring stays trusted. Regenerate the
+    # playbook after changing this.
     repository=("skills", "prompts"),
 )
 def build_spec(ctx: OptimizationContext) -> Spec:
