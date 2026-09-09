@@ -2,7 +2,7 @@
 
 This branch starts from `beaker/20260901-2200-automationbench-skills`
 (`b64e1fc31a2d06a0ee26c9a395ca8535ac3ca11d`) and pins the local Beaker SDK
-to Beaker AI PR #743 at `8891b5c536ad78548117f8188b54030a546ac04d`.
+to Beaker AI PR #743 at `4efad262d73ccc55c8cba067be21a47270e0043f`.
 
 For hosted testing, select `automationbench-harness-pr743` when launching
 AutomationBench Skills through the PR #743 preview. The new cookbook commit
@@ -14,7 +14,7 @@ Launching this branch through another deployment does not test PR #743.
 
 Before comparing optimization results, verify that the new run records:
 
-- Proposal process version 7 in `controller-artifacts/skill.json`.
+- Proposal process version 8 in `controller-artifacts/skill.json`.
 - Support for `history compare --review`.
 - Default stopping patience 5, unless explicitly overridden.
 
