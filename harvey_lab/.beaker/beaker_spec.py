@@ -1,14 +1,19 @@
 """Beaker repository optimization spec for the Harvey LAB legal agent.
 
-The candidate is the live agent package (``src/harvey_lab/agent``): prompts,
-tool wiring, and workspace staging. Evaluation policy stays here: load a frozen
-Harvey LAB task, run ``HarveyLabAgent.forward``, and score the batched rubric
-judge's ``criterion_pass_rate``.
+Editable surface (``beaker-repository``): ``src/harvey_lab/agent`` — prompts,
+Stirrup tool wiring, and workspace staging. Everything else in this file is
+immutable evaluation policy.
+
+Runtime, in order: fetch the frozen task tree → stage documents into a
+Stirrup ``code_exec`` workspace → ``HarveyLabAgent.forward`` runs a tool loop
+(``code_exec``, optional ``view_image``, ``finish`` / ``abandon_task_finish``)
+→ collect submitted deliverable text. Scoring is not part of the candidate:
+the batched rubric judge reads ``output.deliverables`` and emits one ``Check``
+per criterion, hill-climbing ``criterion_pass_rate``.
 
 Contract: the dataset row's ``expected`` holds the task's rubric
-(``{"criteria": [...]}``), ``run_case`` returns the produced deliverable text in
-``output``, and the scorer emits one ``Check`` per criterion so the optimizer
-sees which requirements failed.
+(``{"criteria": [...]}``). ``run_case`` returns produced deliverable text only.
+Do not copy prompt seed text into optimizer guidance; cite source paths.
 """
 
 from __future__ import annotations
@@ -35,27 +40,11 @@ from beaker import (
     scoring_inference_target,
     spec,
 )
-from beaker.tracing import current_trace
-from beaker.tracing.integrations.litellm import registered
-
-from harvey_lab.agent.agent import HarveyLabAgent
-from harvey_lab.agent.workspace import task_source_from_dir
-from harvey_lab.config import HarveyLabConfig
-from harvey_lab.data.dataset import HarveyLabRecord, RubricCriterion, load_records
-from harvey_lab.data.fetch import ensure_task_dirs
-from harvey_lab.evaluation.scoring import (
-    ALL_PASS_FIELD,
-    CRITERION_PASS_RATE_FIELD,
-    DEFAULT_JUDGE_BATCH_SIZE,
-    DEFAULT_JUDGE_MODEL,
-    build_rubric_judge,
-    score_rubric,
-)
+from harvey_lab.evaluation.scoring import ALL_PASS_FIELD, CRITERION_PASS_RATE_FIELD
 
 
 FIELD_WEIGHTS = {CRITERION_PASS_RATE_FIELD: 1.0, ALL_PASS_FIELD: 0.0}
 LLM_SCORER_MODEL = "openrouter:deepseek/deepseek-v4-flash"
-LOCAL_JUDGE_MODEL = DEFAULT_JUDGE_MODEL
 
 
 @dataclass(frozen=True)
@@ -164,11 +153,15 @@ def _tasks_root_for_case(task_id: str) -> Path:
         if not (root / task_id / "task.json").is_file():
             raise FileNotFoundError(f"HARVEY_LAB_TASKS_ROOT missing task {task_id}")
         return root
+    from harvey_lab.data.fetch import ensure_task_dirs
+
     return ensure_task_dirs([task_id])
 
 
-def _record_from_case(case: Case, tasks_root: Path) -> HarveyLabRecord:
+def _record_from_case(case: Case, tasks_root: Path) -> Any:
     """Rebuild a ``HarveyLabRecord`` from the JSONL case + on-disk task tree."""
+    from harvey_lab.data.dataset import HarveyLabRecord, RubricCriterion, load_records
+
     payload = case.input if isinstance(case.input, Mapping) else {}
     task_id = str(payload.get("task_id") or case.case_id)
     loaded = load_records(tasks_root, task_ids=[task_id])
@@ -214,6 +207,12 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
         inputs={"case_id": case.case_id, "task_id": task_id, "title": payload.get("title")},
     ) as stage:
         try:
+            from beaker.tracing import current_trace
+            from beaker.tracing.integrations.litellm import registered
+            from harvey_lab.agent.agent import HarveyLabAgent
+            from harvey_lab.agent.workspace import task_source_from_dir
+            from harvey_lab.config import HarveyLabConfig
+
             tasks_root = _tasks_root_for_case(task_id)
             record = _record_from_case(case, tasks_root)
             agent = HarveyLabAgent(
@@ -284,9 +283,11 @@ def _criteria_payload(case: Case) -> list[dict[str, Any]]:
 
 def _judge_for_scoring() -> Any:
     """Hosted gateway via ``scoring_inference_target``; local LiteLLM otherwise."""
+    from harvey_lab.evaluation.scoring import DEFAULT_JUDGE_MODEL, build_rubric_judge
+
     target = scoring_inference_target()
     if target is None:
-        return build_rubric_judge(model=LOCAL_JUDGE_MODEL)
+        return build_rubric_judge(model=DEFAULT_JUDGE_MODEL)
 
     def _llm(*, model: str, messages: Sequence[Mapping[str, str]]) -> str:
         import litellm
@@ -354,6 +355,8 @@ class _RubricJudgeScorer:
             )
 
         judge = _judge_for_scoring()
+        from harvey_lab.evaluation.scoring import DEFAULT_JUDGE_BATCH_SIZE, score_rubric
+
         scored = await asyncio.to_thread(
             score_rubric,
             criteria=criteria,
