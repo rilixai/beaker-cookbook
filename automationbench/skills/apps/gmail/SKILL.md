@@ -25,4 +25,6 @@ description: Procedures for the Gmail app (send, find, label, threads, drafts, e
 - If the task dictates a line format, reproduce that exact prefix followed by the value.
 - Subjects should carry the identifiers/date range the task mentions verbatim; mirror
   the previous sent email of the same kind when one exists.
-- Mention only items you acted on; do not name excluded items or figures.
+- Mention only items you acted on; do not name excluded items or figures - no
+  footnotes, postscripts or "separately, ..." lines about anything left out of the
+  report.
