@@ -25,6 +25,7 @@ finds.
 | [`hotpotqa/`](hotpotqa/) | WIP | Multi-hop QA over Wikipedia. A PydanticAI agent with two tools, `retrieve_k` and `summarize`. | `OPENAI_API_KEY` |
 | [`apex_agents/`](apex_agents/) | WIP | APEX-Agents: professional knowledge-work tasks. A ReAct agent with a toolbelt, graded against a rubric by an LLM judge. | `HF_TOKEN` (gated dataset), `OPENAI_API_KEY` (agent), `GOOGLE_API_KEY` (Gemini judge) |
 | [`appworld/`](appworld/) | WIP | AppWorld: an agent that drives simulated apps by writing code. Built on the OpenAI Agents SDK, scored with TGC/SGC. | `OPENAI_API_KEY` |
+| [`officeqa/`](officeqa/) | WIP | OfficeQA Pro: grounded numeric QA over 697 Treasury Bulletin PDFs. A filesystem + Python-REPL agent, scored with the upstream OfficeQA scorer at 0.0% error. Splits frozen, baseline not yet measured. | `HF_TOKEN` (gated dataset), `OPENAI_API_KEY` (or Anthropic, see its README) |
 
 WIP recipes run, but the agent, splits, and scores may still change.
 
@@ -44,14 +45,14 @@ You need [`uv`](https://docs.astral.sh/uv/) and Python 3.12 or higher. Pick a
 recipe, install it, set your keys, and you're running:
 
 ```bash
-cd hotpotqa                      # or harvey_lab / apex_agents / appworld / automationbench
+cd hotpotqa                      # or harvey_lab / apex_agents / appworld / automationbench / officeqa
 uv sync --group dev
 export OPENAI_API_KEY=sk-...
 uv run hotpotqa evaluate --split test --test-size 20 --output-dir hotpotqa_run
 ```
 
-Keys are read from environment variables. `automationbench/` also reads a
-`.env` in its own folder (`cp .env.example .env`). Every recipe README covers
+Keys are read from environment variables. `automationbench/` and `officeqa/` also read a
+`.env` in their own folder (`cp .env.example .env`). Every recipe README covers
 the knobs: model, dataset size, retrieval mode, and so on.
 
 ## Development
