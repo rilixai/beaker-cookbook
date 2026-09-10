@@ -1,0 +1,21 @@
+# Beaker project config. Safe to commit — holds no secrets.
+# `spec` owns the local @spec entrypoint used by GitHub-backed spec builds and
+# `beaker run smoke`. Run-time flags override values here when provided.
+spec:
+  agent_key: harvey-lab-agent
+  target: "beaker_spec:build_spec"
+  environment_base: "debian_slim:3.12"
+  source_dir: "harvey_lab"
+  package_import_root: ".beaker"
+  # Hosted rollouts fetch LAB task folders from GitHub at the pinned commit.
+  required_env:
+    - GITHUB_TOKEN
+  # Tools the agent prompt expects on PATH inside the code_exec environment.
+  apt_install:
+    - pandoc
+    - poppler-utils
+    - libreoffice
+agent_key: "harvey-lab-agent"
+# Harvey LAB cases are long tool loops; keep hosted concurrency modest.
+config_defaults:
+  max_concurrency: 2
