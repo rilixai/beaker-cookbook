@@ -14,8 +14,8 @@ The tools read the directory **live on every call** — nothing is cached — so
 optimizer can add/edit/split/merge skill folders between ``run_one`` calls and
 the very next rollout sees the new contents, with no environment rebuild.
 
-The only "consult your skills" nudge lives in the tool descriptions
-(docstrings); the benchmark's per-domain system prompts are never touched.
+The agent is told about the skills in the tool descriptions (docstrings) and
+in its system prompt (``prompts/system.md``, see ``prompts.py``).
 """
 
 from __future__ import annotations
