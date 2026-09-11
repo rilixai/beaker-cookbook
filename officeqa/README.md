@@ -6,8 +6,10 @@ The agent gets a filesystem, a Python REPL and a system prompt; it has to find
 the right bulletin, extract the right number, and answer inside
 `<FINAL_ANSWER>` tags. Scored with the upstream OfficeQA scorer at 0.0% error.
 
-**Status: WIP.** The harness is complete and hermetically tested; no model run
-has been made yet, so every "measured" cell below is still empty. See
+**Status: WIP.** The harness is complete and hermetically tested. The only
+model run so far is a 5-question fidelity check (see
+[Measured so far](#measured-so-far)); the baselines are still pending, so
+the headline cells are empty. See
 [What has not been measured yet](#what-has-not-been-measured-yet).
 
 ## Prerequisites
@@ -190,6 +192,30 @@ when concurrency exceeds cores in PDF mode (each worker spawns OCR processes).
 Every result records `latency_s` and `queue_wait_s`. The 4-vs-16 measurement
 that settles the default has not been run yet (see below).
 
+## Measured so far
+
+One fidelity check (step 6 of the build plan), run on 2026-09-11:
+
+```
+officeqa run --split train --limit 5 --corpus parsed --tools fs,repl,web --search fs \
+             --model gpt-5.4 --max-concurrent 5
+```
+
+| | This harness, `gpt-5.4` (resolved `gpt-5.4-2026-03-05`), n=5 train | Report, GPT-5.4 high, n=133 |
+|---|---|---|
+| Correctness @0.0% | 3/5 = 60% (same at 0.1/1/5%) | 51.1% |
+| Mean latency | 15.2 min (median 13.4; one question ran 45 min and answered on step 199 of 200) | 10.9 min |
+| Mean tool calls | 144.4 (median 176; 432 `fs_search`, 121 `fs_read`, 119 `python_exec`, 50 `web_search`) | 104.8 |
+| Cost / question | $5.44 (total $27.20) | $6.13 |
+
+All 5 finished `answered` on the first attempt (no retries, timeouts, or
+errors). With n=5 the binomial standard error on correctness is ±22 points, so
+this is directional only: score, cost and tool-call volume are in the report's
+range, and the shape (a few cheap questions, a long tail of 180–280-call
+searches) is consistent with GPT-5.4 having the highest tool-call count in the
+report's table. `web_search` hit provider rate limits (Brave/Google 429) but
+fell through to other backends.
+
 ## What has not been measured yet
 
 Steps 1–5 of the build plan (harness, data, splits, scorer, agent, tests) cost
@@ -197,13 +223,12 @@ nothing and are done. The following spend money and are **pending**:
 
 | Step | What it produces for this README |
 |---|---|
-| Fidelity check (`--corpus parsed --tools fs,repl,web`, subsample) | agreement with the report's custom-agent numbers below |
 | Probe (10 train questions at `--max-concurrent 4` and `16`) | the concurrency default and whether the agent opens `parsed/` when it appears in the manifest |
 | Baseline on `train` | score, wall-clock, dollars; count of questions blocked by the missing web tool |
 | Baseline on `test` | headline numbers, baseline model + one Anthropic reference model |
 
-Report reference for the fidelity check (custom agent, parsed corpus, file
-search, 0.0% threshold; Appendix D.2 Table 4):
+Report reference (custom agent, parsed corpus, file search, 0.0% threshold;
+Appendix D.2 Table 4):
 
 | Model | Correctness | Latency | Tool calls | Cost/question |
 |---|---|---|---|---|

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from officeqa import cli
 from officeqa.agent.agent import (
     Episode,
     LLMResponse,
@@ -261,6 +263,44 @@ def test_resume_reuses_clean_reruns_unclean(records: list[EvalRecord], corpus: P
     assert s["n"] == 3 and s["n_scored"] == 2 and s["missing"] == [records[2].uid]
     assert s["correctness"]["0%"] == pytest.approx(1 / 3)
     assert s["statuses"] == {"answered": 1, "timeout": 1, "missing": 1}
+
+
+def test_evaluate_summary_only_needs_no_corpus(
+    records: list[EvalRecord],
+    corpus: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``evaluate --summary-only`` aggregates a finished run on a box without the corpus, keeping that run's config."""
+    out = tmp_path / "run"
+    cfg = _cfg(model="scripted/x", tools=("fs", "repl", "web"))
+    res = run(
+        run_one_async(
+            records[0],
+            cfg=cfg,
+            corpus_root=corpus,
+            work_dir=out / "work",
+            client_factory=lambda _c: ScriptedClient([final("9876543.21")]),
+            isolate=False,
+        )
+    )
+    write_result(res, out / "results")
+    (out / "config.json").write_text(json.dumps({"config": dataclasses.asdict(cfg) | {"tools": list(cfg.tools)}}))
+
+    monkeypatch.setattr(cli, "load_split", lambda split, limit=None: records[:limit])
+    monkeypatch.setattr(cli, "ensure_corpus", lambda rep: pytest.fail("summary-only must not touch the corpus"))
+    monkeypatch.setenv("OFFICEQA_CACHE_DIR", str(tmp_path / "empty-cache"))
+
+    assert cli.main(["evaluate", "--split", "train", "--limit", "2", "--output-dir", str(out), "--summary-only"]) == 0
+    summary = json.loads((out / "summary.json").read_text())
+    assert summary["n"] == 2 and summary["n_scored"] == 1 and summary["missing"] == [records[1].uid]
+    assert (
+        summary["model"] == "scripted/x"
+        and summary["corpus"] == "parsed"
+        and summary["tools"] == ["fs", "repl", "web"]
+    )
+    assert "correctness" in capsys.readouterr().out
 
 
 def test_run_split_concurrency_and_queue_wait(records: list[EvalRecord], corpus: Path, tmp_path: Path) -> None:

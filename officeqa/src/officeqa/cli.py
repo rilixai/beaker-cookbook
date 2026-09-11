@@ -28,7 +28,7 @@ from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
 from officeqa import config, runner
 from officeqa.config import RunConfig
 from officeqa.data.corpus import ensure_corpus, fetch_corpus
-from officeqa.data.dataset import KNOWN_SPLITS, load_split
+from officeqa.data.dataset import KNOWN_SPLITS, EvalRecord, load_split
 from officeqa.data.manifest import build_manifest
 from officeqa.evaluation.run_eval import format_summary, select_to_run, summarize
 from officeqa.runner import RunResult, read_results, run_split, write_result
@@ -121,36 +121,72 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
 
 
+def _saved_run_config(out: Path, fallback: RunConfig) -> RunConfig:
+    """Model/corpus/tools of the run stored in ``out``, so a summary describes that run, not today's defaults."""
+    path = out / "config.json"
+    if not path.is_file():
+        return fallback
+    saved = json.loads(path.read_text(encoding="utf-8")).get("config", {})
+    if not isinstance(saved, dict):
+        return fallback
+    return dataclasses.replace(
+        fallback,
+        model=str(saved.get("model", fallback.model)),
+        corpus=str(saved.get("corpus", fallback.corpus)),
+        tools=tuple(saved.get("tools", fallback.tools)),
+        max_concurrent=int(saved.get("max_concurrent", fallback.max_concurrent)),
+    )
+
+
+def _write_summary(out: Path, records: Sequence[EvalRecord], cfg: RunConfig, *, split: str, wall: float) -> None:
+    final = read_results(out / "results")
+    results = [final[r.uid] for r in records if r.uid in final]
+    summary = summarize(results, expected=[r.uid for r in records])
+    summary["wall_clock_s"] = wall
+    summary["split"] = split
+    summary["model"] = cfg.model
+    summary["corpus"] = cfg.corpus
+    summary["tools"] = list(cfg.tools)
+    summary["max_concurrent"] = cfg.max_concurrent
+    _write_json(out / "summary.json", summary)
+    print(format_summary(summary))
+
+
 def _execute(args: argparse.Namespace, *, rerun: bool, resume: bool, summary_only: bool = False) -> int:
     cfg = _cfg_from_args(args)
     out: Path = args.output_dir
     results_dir = out / "results"
     out.mkdir(parents=True, exist_ok=True)
+    records = load_split(args.split, limit=args.limit)
+
+    if summary_only:
+        # Aggregate what is on disk; needs neither the corpus nor a model key.
+        logger.info("split=%s n=%d to_run=0 reused=%d", args.split, len(records), len(records))
+        _write_summary(out, records, _saved_run_config(out, cfg), split=args.split, wall=0.0)
+        return 0
 
     resources = log_resources(cfg)
-    records = load_split(args.split, limit=args.limit)
     corpus = ensure_corpus(cfg.corpus)
     manifest = build_manifest(corpus, default=cfg.corpus)
 
     existing = read_results(results_dir) if resume else {}
-    todo = [] if summary_only else select_to_run(records, existing, rerun=rerun)
+    todo = select_to_run(records, existing, rerun=rerun)
     logger.info("split=%s n=%d to_run=%d reused=%d", args.split, len(records), len(todo), len(records) - len(todo))
 
-    if not summary_only:
-        _write_json(
-            out / "config.json",
-            {
-                "config": dataclasses.asdict(cfg) | {"tools": list(cfg.tools)},
-                "split": args.split,
-                "limit": args.limit,
-                "uids": [r.uid for r in records],
-                "dataset_revision": config.OFFICEQA_DATASET_REVISION,
-                "manifest": manifest.to_json(),
-                "resources": resources,
-                "started_at": time.time(),
-                "argv": sys.argv[1:],
-            },
-        )
+    _write_json(
+        out / "config.json",
+        {
+            "config": dataclasses.asdict(cfg) | {"tools": list(cfg.tools)},
+            "split": args.split,
+            "limit": args.limit,
+            "uids": [r.uid for r in records],
+            "dataset_revision": config.OFFICEQA_DATASET_REVISION,
+            "manifest": manifest.to_json(),
+            "resources": resources,
+            "started_at": time.time(),
+            "argv": sys.argv[1:],
+        },
+    )
 
     t0 = time.monotonic()
     if todo:
@@ -177,19 +213,7 @@ def _execute(args: argparse.Namespace, *, rerun: bool, resume: bool, summary_onl
             on_result=on_result,
             isolate=not args.no_isolate,
         )
-    wall = time.monotonic() - t0
-
-    final = read_results(results_dir)
-    results = [final[r.uid] for r in records if r.uid in final]
-    summary = summarize(results, expected=[r.uid for r in records])
-    summary["wall_clock_s"] = wall
-    summary["split"] = args.split
-    summary["model"] = cfg.model
-    summary["corpus"] = cfg.corpus
-    summary["tools"] = list(cfg.tools)
-    summary["max_concurrent"] = cfg.max_concurrent
-    _write_json(out / "summary.json", summary)
-    print(format_summary(summary))
+    _write_summary(out, records, cfg, split=args.split, wall=time.monotonic() - t0)
     return 0
 
 
