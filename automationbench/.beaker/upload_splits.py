@@ -36,13 +36,13 @@ def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
             rows.append(
                 {
                     "id": sample.task_name,
-                    # The spec loads the task by name; ``prompt`` is what the
+                    # The Integration loads the task by name; ``prompt`` is what the
                     # agent was asked, so the case view shows the ask next to
                     # the assertion checks.
                     "input": {"task_name": sample.task_name, "prompt": _user_prompt(sample)},
                     # The task's assertions are what "correct" means for this
-                    # case; the spec's scorer evaluates them against the end
-                    # state and emits one Check per assertion.
+                    # case; ``score_case`` evaluates them against the end state
+                    # and emits one Check per assertion.
                     "expected": {"assertions": sample.info["assertions"]},
                     "metadata": {"domain": domain, "source_split": split},
                     "group_key": domain,

