@@ -427,10 +427,12 @@ REPL_SERVER_SOURCE = textwrap.dedent(
             os.dup2(cap.fileno(), 1); os.dup2(cap.fileno(), 2)
             ok = True
             try:
+                # Bare expressions echo their value, REPL-style.
                 try:
-                    # Bare expressions echo their value, REPL-style.
                     compiled = compile(code, "<python_exec>", "eval")
                 except SyntaxError:
+                    compiled = None
+                if compiled is None:
                     exec(compile(code, "<python_exec>", "exec"), _NS)
                 else:
                     value = eval(compiled, _NS)
