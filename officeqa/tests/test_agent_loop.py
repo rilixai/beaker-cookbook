@@ -336,6 +336,22 @@ def test_workspace_layout(tmp_path: Path, corpus: Path) -> None:
     assert not (ws2.cwd / "junk").exists()
 
 
+@pytest.mark.asyncio
+async def test_relative_work_dir_isolated_repl_runs(
+    tmp_path: Path, corpus: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--output-dir runs/x`` is relative; the venv python must still resolve from the REPL's cwd."""
+    monkeypatch.chdir(tmp_path)
+    ws = create_workspace(Path("runs") / "x" / "work", "u1", corpus, isolate=True)
+    assert ws.root.is_absolute() and Path(ws.python).is_absolute()
+    ts = build_toolset(ws, ["repl"])
+    try:
+        out = await ts.call("python_exec", {"code": "print(6 * 7)"})
+    finally:
+        ts.close()
+    assert out.strip() == "42"
+
+
 def test_search_arms_other_than_fs_are_stubbed(records: list[EvalRecord], corpus: Path, tmp_path: Path) -> None:
     res = run(
         run_one_async(

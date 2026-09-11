@@ -159,7 +159,7 @@ def create_workspace(
     work_dir: Path, uid: str, corpus: Path, *, isolate: bool = config.ISOLATE_PER_QUESTION, fresh: bool = True
 ) -> Workspace:
     """Lay out ``work_dir/<uid>/{officeqa_corpus -> corpus, cwd/, .venv/}``."""
-    root = work_dir / uid
+    root = work_dir.absolute() / uid
     cwd = root / "cwd"
     if fresh and cwd.exists():
         shutil.rmtree(cwd)

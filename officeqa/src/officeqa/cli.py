@@ -218,8 +218,8 @@ def cmd_fetch(args: argparse.Namespace) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+    for noisy in ("httpx", "LiteLLM", "primp", "ddgs"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     parser = argparse.ArgumentParser(
         prog="officeqa", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
