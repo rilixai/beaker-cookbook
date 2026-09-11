@@ -1,4 +1,4 @@
-"""Beaker repository optimization spec for AutomationBench skills.
+"""Beaker repository Integration for AutomationBench skills.
 
 The candidate is the live ``skills/`` tree and the agent's system prompt,
 ``prompts/system.md``. Evaluation policy stays here: load a frozen-split task
@@ -7,9 +7,10 @@ deterministic assertion metrics.
 
 Contract: the dataset row's ``expected`` holds the task's assertion list
 (``{"assertions": [...]}``), ``run_case`` returns no answer and reports the
-final world state in ``context["end_state"]``, and the scorer runs the
-benchmark's own ``partial_credit`` rubric against that state, emitting one
-``Check`` per assertion so the optimizer sees which requirements failed.
+final world state in ``CaseResult.context["end_state"]``, and ``score_case``
+runs the benchmark's own ``partial_credit`` rubric against that state,
+emitting one ``Check`` per assertion so the optimizer sees which requirements
+failed.
 
 Assertions reference simulated records by opaque id (``"contact_id":
 "003xx000004MNO1"``); the scorer resolves those against the initial and end
@@ -26,8 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator, Mapping
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -38,21 +38,23 @@ from automationbench.rubric import partial_credit
 from automationbench.rubric.registry import AssertionRegistry
 from automationbench.schema.world import WorldState
 from beaker import (
-    STANDARD_JSONL_CASE_SCHEMA,
     Case,
-    CaseDataLoader,
     CaseResult,
     CaseScore,
     Check,
-    DatasetRowContext,
-    OptimizationContext,
-    Spec,
+    Integration,
+    JsonValue,
+    RepositoryRunSetup,
+    RetryableCaseError,
+    RolloutRuntime,
+    SetupRuntime,
     inference_target,
     objective_score,
-    spec,
+    repository,
 )
 from beaker.sdk.utils import to_json_safe
 from beaker.tracing import current_trace
+from pydantic import BaseModel, Field, field_validator
 from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
 from verifiers.types import ClientConfig, RolloutInput
 
@@ -60,7 +62,6 @@ from automationbench_skills.data.tasks import Sample, load_samples
 from automationbench_skills.prompts import load_system_prompt, with_system_prompt
 from automationbench_skills.runner import (
     DEFAULT_MAX_STEPS,
-    DEFAULT_REASONING_EFFORT,
     STATE_COLUMNS,
     TIMEOUT_GRACE_SECONDS,
     ModelSpec,
@@ -77,63 +78,43 @@ DEFAULT_TIMEOUT_SECONDS = 600.0
 _GATEWAY_API_KEY_VAR = "OPENAI_API_KEY"
 
 
-@dataclass(frozen=True)
-class _TaskRow:
-    id: str
-    input: dict[str, Any]
-    expected: dict[str, Any]
-    metadata: dict[str, Any] = field(default_factory=dict)
-    group_key: str = "default"
+class TaskRow(BaseModel):
+    """JSONL row keyed by AutomationBench ``task_name`` (see ``upload_splits.py``)."""
 
+    id: str = Field(min_length=1)
+    input: dict[str, JsonValue]
+    expected: dict[str, JsonValue]
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
-class _TaskDataLoader(CaseDataLoader[_TaskRow]):
-    """JSONL rows keyed by AutomationBench ``task_name``."""
-
-    dataset_schema = STANDARD_JSONL_CASE_SCHEMA
-
-    def parse_row(self, raw: Mapping[str, Any], context: DatasetRowContext) -> _TaskRow:
-        del context
-        missing = [name for name in ("id", "input", "expected") if name not in raw]
-        if missing:
-            raise ValueError(f"missing required field(s): {', '.join(missing)}")
-        row_id = str(raw["id"]).strip()
-        if not row_id:
-            raise ValueError("id must be non-empty")
-        input_payload = raw["input"]
-        expected = raw["expected"]
-        metadata = raw.get("metadata") or {}
-        if not isinstance(input_payload, Mapping):
-            raise TypeError("input must be a JSON object")
-        if not isinstance(expected, Mapping):
-            raise TypeError("expected must be a JSON object")
+    @field_validator("expected")
+    @classmethod
+    def _assertions_present(cls, expected: dict[str, JsonValue]) -> dict[str, JsonValue]:
         assertions = expected.get("assertions")
         if not isinstance(assertions, list) or not all(
             isinstance(a, Mapping) and isinstance(a.get("type"), str) for a in assertions
         ):
-            raise TypeError(
+            raise ValueError(
                 "expected.assertions must be a list of assertion specs with a 'type' "
                 "(re-run .beaker/upload_splits.py to build the dataset)"
             )
-        if not isinstance(metadata, Mapping):
-            raise TypeError("metadata must be a JSON object")
-        task_name = str(input_payload.get("task_name") or row_id).strip()
+        return expected
+
+    def task_name(self) -> str:
+        task_name = str(self.input.get("task_name") or self.id).strip()
         if not task_name:
             raise ValueError("input.task_name must be non-empty")
-        return _TaskRow(
-            id=row_id,
-            input={"task_name": task_name, **dict(input_payload)},
-            expected=dict(expected),
-            metadata=dict(metadata),
-            group_key=str(raw.get("group_key") or metadata.get("domain") or "default"),
-        )
+        return task_name
 
-    def iter_cases(self, row: _TaskRow, context: DatasetRowContext) -> Iterable[Case]:
-        del context
+
+class TaskSetup(RepositoryRunSetup[TaskRow]):
+    row_model = TaskRow
+
+    async def load_cases(self, row: TaskRow, *, runtime: SetupRuntime) -> AsyncIterator[Case]:
+        del runtime
         yield Case(
-            input=row.input,
-            case_id=row.id,
-            ground_truth=row.expected,
-            group_key=row.group_key,
+            id=row.id,
+            input={**row.input, "task_name": row.task_name()},
+            expected=row.expected,
             metadata=row.metadata,
         )
 
@@ -178,28 +159,30 @@ def _candidate_root() -> Path:
     return Path.cwd()
 
 
-def _sample_for_case(case: Case) -> Sample:
-    payload = case.input if isinstance(case.input, Mapping) else {}
-    task_name = str(payload.get("task_name") or case.case_id).strip()
+def _sample_for(case_input: JsonValue, *, fallback_id: str | None = None) -> Sample:
+    payload = case_input if isinstance(case_input, Mapping) else {}
+    task_name = str(payload.get("task_name") or fallback_id or "").strip()
     sample = _samples_by_name().get(task_name)
     if sample is None:
         raise KeyError(f"unknown AutomationBench task_name {task_name!r}")
     return sample
 
 
-def _model_for_runtime(runtime: Any) -> ModelSpec:
-    """Gateway-routed ModelSpec when the run selected a model; else app defaults."""
-    if getattr(runtime, "model", None):
+def _model_for_runtime(runtime: RolloutRuntime[Any]) -> ModelSpec:
+    """Gateway-routed ModelSpec when the run selected a model; else app defaults.
+
+    The gateway applies the run's selected reasoning effort to requests that
+    omit it, so no ``reasoning_effort`` is sent on that path.
+    """
+    if runtime.model:
         target = inference_target(runtime)
         os.environ[_GATEWAY_API_KEY_VAR] = target.api_key
-        capabilities = runtime.model_capabilities
-        selected_effort = capabilities.reasoning_effort if capabilities else None
         return ModelSpec(
             name=target.model,
             base_url=target.base_url,
             api_key_var=_GATEWAY_API_KEY_VAR,
             api="chat_completions",
-            reasoning_effort=selected_effort or DEFAULT_REASONING_EFFORT,
+            reasoning_effort=None,
         )
     return ModelSpec()
 
@@ -230,13 +213,8 @@ def _rollout_error(raw: Any) -> BaseException | None:
     return vf.Error(str(raw))
 
 
-async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
-    del targets
-    try:
-        sample = _sample_for_case(case)
-    except KeyError as exc:
-        return CaseResult.failed(str(exc), retryable=False)
-
+async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> CaseResult:
+    sample = _sample_for(case_input)
     model = _model_for_runtime(runtime)
     root = _candidate_root()
     skills_dir = root / "skills"
@@ -245,7 +223,6 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
     with runtime.trace.stage(
         "automationbench.run_one",
         inputs={
-            "case_id": case.case_id,
             "task_name": sample.task_name,
             "skills_dir": str(skills_dir),
             "prompts_dir": str(prompts_dir),
@@ -280,17 +257,6 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
             # scores the world as the agent left it; this guard only catches a
             # rollout stuck outside that loop.
             output = await asyncio.wait_for(rollout, DEFAULT_TIMEOUT_SECONDS + TIMEOUT_GRACE_SECONDS)
-            completion = output.get("completion") or []
-            result_error = _rollout_error(output.get("error"))
-            end_state = output.get("_end_state")
-            # verifiers swallows rollout exceptions into ``state["error"]`` and
-            # still grades the untouched world. A model/provider/infra failure
-            # means the agent never got to act, so the case did not run; an
-            # agent-side failure (bad tool call, overlong prompt) is the
-            # candidate's fault and keeps its earned score.
-            if isinstance(result_error, vf.ModelError | vf.InfraError):
-                stage.output({"error": f"{type(result_error).__name__}: {result_error}"})
-                return CaseResult.failed(f"{type(result_error).__name__}: {result_error}", retryable=True)
         except TimeoutError:
             timeout = f"timeout after {DEFAULT_TIMEOUT_SECONDS + TIMEOUT_GRACE_SECONDS}s"
             stage.output({"error": timeout})
@@ -300,7 +266,20 @@ async def _run_case(*, case: Case, targets: None, runtime: Any) -> CaseResult:
                 context={"task_name": sample.task_name, "domain": sample.domain, "error": timeout},
             )
         except Exception as exc:
-            return CaseResult.failed(str(exc), retryable=True)
+            raise RetryableCaseError(f"{type(exc).__name__}: {exc}") from exc
+
+        completion = output.get("completion") or []
+        result_error = _rollout_error(output.get("error"))
+        end_state = output.get("_end_state")
+        # verifiers swallows rollout exceptions into ``state["error"]`` and
+        # still grades the untouched world. A model/provider/infra failure
+        # means the agent never got to act, so the case did not run; an
+        # agent-side failure (bad tool call, overlong prompt) is the
+        # candidate's fault and keeps its earned score.
+        if isinstance(result_error, vf.ModelError | vf.InfraError):
+            message = f"{type(result_error).__name__}: {result_error}"
+            stage.output({"error": message})
+            raise RetryableCaseError(message) from result_error
 
         error = None if result_error is None else f"{type(result_error).__name__}: {result_error}"
         # The scorer needs the error and the end state; the model/tool turns are
@@ -335,8 +314,9 @@ def _service_for(assertion_type: str) -> str | None:
 
 
 def _assertions_for(case: Case) -> list[dict[str, Any]]:
-    expected = case.ground_truth if isinstance(case.ground_truth, Mapping) else {}
-    return [dict(a) for a in expected.get("assertions") or []]
+    expected = case.expected if isinstance(case.expected, Mapping) else {}
+    assertions = expected.get("assertions")
+    return [dict(a) for a in assertions if isinstance(a, Mapping)] if isinstance(assertions, list) else []
 
 
 # Simulated records carry ``id``; the readable field varies by app.
@@ -410,72 +390,65 @@ def _check(
     )
 
 
-class _AssertionScorer:
+async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) -> CaseScore:
     """Run the benchmark's assertion rubric on the trusted side.
 
     ``partial_credit`` is the benchmark's own scoring function (including its
     free-assertion exclusion against the task's initial state); it is fed the
     dataset's assertions and the end state the candidate reported.
     """
-
-    async def score_case(self, *, case: Case, result: CaseResult) -> CaseScore:
-        assertions = _assertions_for(case)
-        context = result.context if isinstance(result.context, Mapping) else {}
-        error = None if context.get("error") is None else str(context["error"])
-        end_state = context.get("end_state")
-        initial_state = _sample_for_case(case).info.get("initial_state") or {}
-        entities = _entity_index(initial_state, end_state if isinstance(end_state, Mapping) else {})
-        initial_world = WorldState(**initial_state) if initial_state else None
-        held_initially = [
-            initial_world is not None and bool(AssertionRegistry.check(initial_world, a)) for a in assertions
-        ]
-        if isinstance(end_state, Mapping):
-            state: dict[str, Any] = {
-                "info": {"assertions": assertions},
-                "world": WorldState(**end_state),
-                "initial_state": initial_state,
-            }
-            partial = float(partial_credit(state))
-            outcomes: list[Mapping[str, Any]] = list(state.get("_assertion_results") or [])
-        else:
-            error = error or "no end state reported"
-            partial = 0.0
-            outcomes = [
-                {
-                    "type": a["type"],
-                    "passed": False,
-                    "excluded": False,
-                    "params": {k: v for k, v in a.items() if k != "type"},
-                }
-                for a in assertions
-            ]
-        scores = {
-            "task_completed_correctly": 1.0 if partial == 1.0 else 0.0,
-            "partial_credit": partial,
+    del case_files_dir
+    assertions = _assertions_for(case)
+    context = result.context
+    error = None if context.get("error") is None else str(context["error"])
+    end_state = context.get("end_state")
+    initial_state = _sample_for(case.input, fallback_id=case.id).info.get("initial_state") or {}
+    entities = _entity_index(initial_state, end_state if isinstance(end_state, Mapping) else {})
+    initial_world = WorldState(**initial_state) if initial_state else None
+    held_initially = [
+        initial_world is not None and bool(AssertionRegistry.check(initial_world, a)) for a in assertions
+    ]
+    if isinstance(end_state, Mapping):
+        state: dict[str, Any] = {
+            "info": {"assertions": assertions},
+            "world": WorldState(**end_state),
+            "initial_state": initial_state,
         }
-        return CaseScore(
-            field_scores=scores,
-            objective=objective_score(scores, field_weights=FIELD_WEIGHTS),
-            key="default",
-            checks=tuple(
-                _check(outcome, error=error, entities=entities, held_initially=held)
-                for outcome, held in zip(outcomes, held_initially, strict=True)
-            ),
-        )
-
-
-@spec(
-    dataset_schema=STANDARD_JSONL_CASE_SCHEMA,
-    # Optimizer-editable paths. Add "src" to let it change the harness too
-    # (tool exposure, search_tools output, retries): the candidate's src/ is
-    # loaded fresh per evaluation, scoring stays trusted. Regenerate the
-    # playbook after changing this.
-    repository=("skills", "prompts", "src"),
-)
-def build_spec(ctx: OptimizationContext) -> Spec:
-    del ctx
-    return Spec(
-        data_loader=_TaskDataLoader(),
-        run_case=_run_case,
-        scorer=_AssertionScorer(),
+        partial = float(partial_credit(state))
+        outcomes: list[Mapping[str, Any]] = list(state.get("_assertion_results") or [])
+    else:
+        error = error or "no end state reported"
+        partial = 0.0
+        outcomes = [
+            {
+                "type": a["type"],
+                "passed": False,
+                "excluded": False,
+                "params": {k: v for k, v in a.items() if k != "type"},
+            }
+            for a in assertions
+        ]
+    scores = {
+        "task_completed_correctly": 1.0 if partial == 1.0 else 0.0,
+        "partial_credit": partial,
+    }
+    return CaseScore(
+        field_scores=scores,
+        objective=objective_score(scores, field_weights=FIELD_WEIGHTS),
+        checks=tuple(
+            _check(outcome, error=error, entities=entities, held_initially=held)
+            for outcome, held in zip(outcomes, held_initially, strict=True)
+        ),
     )
+
+
+integration = Integration(
+    # Optimizer-editable paths, relative to source_dir. "src" lets it change
+    # the harness too (tool exposure, search_tools output, retries): the
+    # candidate's src/ is loaded fresh per evaluation, scoring stays trusted.
+    # Regenerate the playbook after changing this.
+    targets=repository(paths=("skills", "prompts", "src")),
+    run_setup=TaskSetup,
+    run_case=run_case,
+    score_case=score_case,
+)

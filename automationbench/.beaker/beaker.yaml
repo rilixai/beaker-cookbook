@@ -1,34 +1,15 @@
-# Beaker project config. Safe to commit — holds no secrets.
-# `spec` owns the local @spec entrypoint used by GitHub-backed spec builds and
-# `beaker run smoke`. Run-time flags override values here when provided.
-spec:
-  agent_key: automationbench-skills
-  target: "beaker_spec:build_spec"
-  environment_base: "debian_slim:3.13"
-  source_dir: "automationbench"
-  package_import_root: ".beaker"
-  # List required customer variable names here; keep values in .beaker/.env
-  # locally and in encrypted Beaker agent settings for hosted runs.
-  # required_env:
-  #   - DATABASE_URL
-agent_key: "automationbench-skills"
-# `config_defaults` below holds the launch defaults for hosted runs, and only
-# this top-level mapping is read: a key nested under `spec` is ignored.
-# Dataset defaults are optional conveniences. During onboarding, prefer passing
-# the same immutable `--dataset name@revision` or `--dataset-id` explicitly to
-# smoke and launch instead of committing an organization-specific selector.
-#   dataset_ref: my-dataset          # optional hosted default, `name` or `name@revision`
-#   dataset_id: <artifact_id>        # optional artifact default instead of a name
-#   local_dataset_path: beaker_dataset  # local directory, for `beaker run smoke`
-# Logical-target specs using `@spec(repository=None)` can map complete optimized
-# prompts/resources to repository paths. Repository optimization does not need
-# these mappings because its candidate is already a repository diff.
-# config_defaults:
-#   repository_destinations:
-#     - target_kind: resource
-#       target_name: wiki
-#       repository_path: docs/wiki
-#     - target_kind: prompt
-#       target_name: system
-#       repository_path: prompts/system.md
-config_defaults: {}
+# Beaker configuration. Safe to commit; keep secret values out of this file.
+# integrations.<id>.required_env lists names used by setup and evaluation.
+# Keep local values in .beaker/.env and hosted values in encrypted agent settings.
+# source_dir is Git-root-relative; package_import_root is relative to source_dir.
+# Prefer the same immutable --dataset NAME@REVISION for smoke and launch.
+# Optional config_defaults applies to every integration in this file.
+# Add it only for shared run defaults; explicit CLI options override them.
+default_integration: automationbench-skills
+integrations:
+  automationbench-skills:
+    entrypoint: beaker_integration:integration
+    source_dir: automationbench
+    package_import_root: .beaker
+    environment_base: "debian_slim:3.13"
+    agent_key: automationbench-skills
