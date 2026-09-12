@@ -14,8 +14,12 @@ failed.
 
 Assertions reference simulated records by opaque id (``"contact_id":
 "003xx000004MNO1"``); the scorer resolves those against the initial and end
-world state so each check reads as ``salesforce_campaign_member_exists · David
-Park · Q1 Product Launch Webinar`` rather than a dict of ids.
+world state so each check reads as ``salesforce_campaign_member_exists ·
+contact_id=David Park · campaign_id=Q1 Product Launch Webinar`` rather than a
+dict of ids. Each check also carries the assertion handler's docstring as
+``description``, the raw assertion params as ``expected`` and, when it failed,
+a before/after diff of the targeted app's records as ``predicted`` so a reader
+sees what the agent actually did there without replaying the trace.
 
 Model calls are traced by subclassing the verifiers client (see
 ``_TracedChatCompletionsClient``); the verifiers rollout is what talks to the
@@ -27,7 +31,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -349,26 +353,249 @@ def _entity_index(*states: Any) -> dict[str, str]:
     return index
 
 
-def _clip(text: str) -> str:
-    return text if len(text) <= _LABEL_MAX_CHARS else text[: _LABEL_MAX_CHARS - 1] + "…"
+def _clip(text: str, limit: int = _LABEL_MAX_CHARS) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+@cache
+def _description_for(assertion_type: str) -> str | None:
+    """First line of the benchmark handler's docstring, e.g. "Check if an email was sent to ..."."""
+    handler = AssertionRegistry._handlers.get(assertion_type)
+    doc = getattr(handler, "__doc__", None) if handler is not None else None
+    if not isinstance(doc, str):
+        return None
+    return next((line.strip() for line in doc.splitlines() if line.strip()), None)
+
+
+# ``predicted`` on a failed check is a before/after diff of the app it targets.
+# Records are reduced to their own fields and the diff is re-rendered with
+# fewer records / shorter strings until it serializes under the byte cap.
+_DIFF_MAX_RECORDS = 5  # per added/changed/removed list
+_DIFF_MAX_STR_CHARS = 400
+_DIFF_MAX_FIELDS = 40  # per record
+_DIFF_MAX_LIST_ITEMS = 20  # per scalar list inside a record
+_DIFF_MAX_BYTES = 8_000  # serialized ``predicted`` per check
+_DIFF_SHRINK_STEPS = ((_DIFF_MAX_RECORDS, _DIFF_MAX_STR_CHARS), (3, 400), (2, 200), (1, 120), (0, 0))
+_META_KEYS = ("scored", "excluded")
+
+_Record = dict[str, Any]  # flattened record: scalars and lists of scalars
+_Collection = dict[str, _Record]  # record key -> flattened record
+
+
+class _Authored:
+    """What the task author wrote for one record collection, per ``_authored``."""
+
+    def __init__(self) -> None:
+        self.fields_by_id: dict[str, set[str]] = {}  # author-given id -> field names the author set on it
+        self.key_fields: set[str] | None = None  # field names every authored record has; None when unknown
+
+    def add(self, raw_record: Mapping[str, Any]) -> str | None:
+        fields = set(_flatten_record(raw_record))
+        raw_id = _record_key(raw_record)
+        if raw_id is not None:
+            self.fields_by_id[raw_id] = fields
+        self.key_fields = fields if self.key_fields is None else self.key_fields & fields
+        return raw_id
+
+
+def _is_scalar(value: Any) -> bool:
+    return value is None or isinstance(value, str | int | float | bool)
+
+
+def _is_collection(value: Any) -> bool:
+    """A non-empty list of mappings: the world's record collections (messages, contacts, rows)."""
+    return isinstance(value, list) and bool(value) and all(isinstance(item, Mapping) for item in value)
+
+
+def _flatten_record(record: Mapping[str, Any]) -> _Record:
+    """The record's own fields: scalars and scalar lists, nested mappings flattened to dotted keys.
+
+    Nested collections are left out; they are diffed under their own path.
+    """
+    flat: _Record = {}
+
+    def walk(mapping: Mapping[str, Any], prefix: str) -> None:
+        for key, raw in mapping.items():
+            value = to_json_safe(raw)
+            name = f"{prefix}{key}"
+            if _is_scalar(value):
+                flat[name] = value
+            elif isinstance(value, list) and all(_is_scalar(item) for item in value):
+                flat[name] = value
+            elif isinstance(value, Mapping):
+                walk(value, name + ".")
+
+    walk(record, "")
+    return flat
+
+
+def _record_key(record: Mapping[str, Any]) -> str | None:
+    """Records match across states by ``id``; ``None`` when they have no usable one."""
+    record_id = record.get("id")
+    return str(record_id) if isinstance(record_id, str | int) and not isinstance(record_id, bool) else None
+
+
+def _authored(initial: Any, raw: Any, path: str, out: dict[str, _Authored]) -> None:
+    """Per collection path, the ids and fields the task author wrote in ``raw``.
+
+    ``initial`` is the same state after ``WorldState`` validation, which fills
+    defaults and generates ids and timestamps for what the author left out.
+    Only the author's values are stable across the initial and end worlds; the
+    run builds its own ``WorldState`` and regenerates everything else.
+    """
+    if isinstance(initial, Mapping):
+        raw_map = raw if isinstance(raw, Mapping) else {}
+        for key, value in initial.items():
+            _authored(value, raw_map.get(key), f"{path}.{key}" if path else str(key), out)
+    elif _is_collection(initial):
+        raw_records = raw if isinstance(raw, list) else []
+        authored = out.setdefault(path, _Authored())
+        for position, record in enumerate(initial):
+            raw_record = raw_records[position] if position < len(raw_records) else None
+            raw_record = raw_record if isinstance(raw_record, Mapping) else {}
+            raw_id = authored.add(raw_record)
+            _authored(record, raw_record, f"{path}[{raw_id if raw_id is not None else position}]", out)
+
+
+def _view(record: _Record, fields: set[str] | None) -> _Record:
+    return record if fields is None else {k: v for k, v in record.items() if k in fields}
+
+
+def _collections(node: Any, path: str, authored: Mapping[str, _Authored]) -> Iterator[tuple[str, _Collection]]:
+    """Every record collection under ``node`` by path (``gmail.messages``, ``zendesk.tickets[t1].comments``).
+
+    A record keeps its ``id`` as key when the author gave it; otherwise (no id,
+    or one generated by the schema) it is keyed by its authored content, so it
+    still shows up as added/removed but never as changed.
+    """
+    if isinstance(node, Mapping):
+        for key, value in node.items():
+            yield from _collections(value, f"{path}.{key}" if path else str(key), authored)
+    elif _is_collection(node):
+        known = authored.get(path, _Authored())
+        records: _Collection = {}
+        for position, record in enumerate(node):
+            record_id = _record_key(record)
+            flat = _flatten_record(record)
+            label: str | int
+            if record_id is not None and record_id in known.fields_by_id:
+                key, label = f"id:{record_id}", record_id
+            else:
+                content = {k: v for k, v in _view(flat, known.key_fields).items() if k != "id"}
+                key, label = "json:" + json.dumps(content, sort_keys=True), position
+            records.setdefault(key, flat)
+            yield from _collections(record, f"{path}[{label}]", authored)
+        yield path, records
+
+
+def _shrink(record: _Record, max_str: int) -> dict[str, Any]:
+    kept: dict[str, Any] = {}
+    for name, value in list(record.items())[:_DIFF_MAX_FIELDS]:
+        if isinstance(value, str):
+            kept[name] = _clip(value, max_str)
+        elif isinstance(value, list):
+            kept[name] = [_clip(v, max_str) if isinstance(v, str) else v for v in value[:_DIFF_MAX_LIST_ITEMS]]
+            if len(value) > _DIFF_MAX_LIST_ITEMS:
+                kept[name].append(f"… +{len(value) - _DIFF_MAX_LIST_ITEMS} more")
+        else:
+            kept[name] = value
+    if len(record) > _DIFF_MAX_FIELDS:
+        kept["truncated_fields"] = len(record) - _DIFF_MAX_FIELDS
+    return kept
+
+
+def _service_diff(service: str, raw_initial: Any, initial: Any, end: Any) -> dict[str, Any]:
+    """Added / changed / removed records of one app between the initial and end world state.
+
+    ``initial`` and ``end`` are ``WorldState`` dumps; ``raw_initial`` is the task
+    author's initial state, which decides what counts as a real change (see
+    ``_authored``): an id-matched record is changed when a field the author set
+    on it differs.
+    """
+    authored: dict[str, _Authored] = {}
+    _authored(initial, raw_initial, service, authored)
+    before = dict(_collections(initial, service, authored))
+    after = dict(_collections(end, service, authored))
+    added: list[dict[str, Any]] = []
+    changed: list[dict[str, Any]] = []
+    removed: list[dict[str, Any]] = []
+    for path in sorted(before.keys() | after.keys()):
+        old, new = before.get(path, {}), after.get(path, {})
+        fields_by_id = authored[path].fields_by_id if path in authored else {}
+        added.extend({"path": path, "record": new[k]} for k in new if k not in old)
+        for record_id, fields in fields_by_id.items():
+            key = f"id:{record_id}"
+            if key in old and key in new and _view(old[key], fields) != _view(new[key], fields):
+                changed.append({"path": path, "before": old[key], "after": new[key]})
+        removed.extend({"path": path, "record": old[k]} for k in old if k not in new)
+
+    def render(entries: list[dict[str, Any]], max_records: int, max_str: int) -> list[dict[str, Any]]:
+        kept = [
+            {k: _shrink(v, max_str) if isinstance(v, dict) else v for k, v in entry.items()}
+            for entry in entries[:max_records]
+        ]
+        if len(entries) > max_records:
+            kept.append({"truncated": len(entries) - max_records})
+        return kept
+
+    lists = {"added": added, "changed": changed, "removed": removed}
+    if not any(lists.values()):
+        return {"service": service, "added": [], "changed": [], "removed": []}
+    for max_records, max_str in _DIFF_SHRINK_STEPS:
+        diff: dict[str, Any] = {"service": service}
+        diff.update({k: render(v, max_records, max_str) for k, v in lists.items() if v})
+        if len(json.dumps(diff, ensure_ascii=False)) <= _DIFF_MAX_BYTES:
+            break
+    return diff
+
+
+class _ServiceDiffs:
+    """Per-service diff of the case's world, computed once and shared by every check targeting that app."""
+
+    def __init__(
+        self, raw_initial: Mapping[str, Any], initial_world: WorldState | None, end_state: Mapping[str, Any]
+    ) -> None:
+        self._raw_initial = raw_initial
+        self._initial: Mapping[str, Any] = initial_world.model_dump(mode="json") if initial_world is not None else {}
+        self._end = end_state
+        self._cache: dict[str, dict[str, Any] | None] = {}
+
+    def get(self, service: str | None) -> dict[str, Any] | None:
+        if service is None:
+            return None
+        if service not in self._cache:
+            if service not in self._raw_initial and service not in self._end:
+                self._cache[service] = None
+            else:
+                self._cache[service] = _service_diff(
+                    service, self._raw_initial.get(service), self._initial.get(service), self._end.get(service)
+                )
+        return self._cache[service]
 
 
 def _check(
-    outcome: Mapping[str, Any], *, error: str | None, entities: Mapping[str, str], held_initially: bool = False
+    outcome: Mapping[str, Any],
+    *,
+    error: str | None,
+    entities: Mapping[str, str],
+    held_initially: bool = False,
+    diffs: _ServiceDiffs | None = None,
 ) -> Check:
     assertion_type = str(outcome["type"])
     params = dict(outcome.get("params") or {})
     passed = bool(outcome.get("passed"))
     excluded = bool(outcome.get("excluded"))
+    service = _service_for(assertion_type)
 
-    # ``type · param values``; an id is swapped for the record's label when the
+    # ``type · key=value``; an id is swapped for the record's label when the
     # world state knows it ("David Park" rather than "003xx000004MNO1").
     rendered = [
-        entities.get(str(v), v if isinstance(v, str) else json.dumps(to_json_safe(v), default=str))
+        f"{k}={_clip(entities.get(str(v), v if isinstance(v, str) else json.dumps(to_json_safe(v), default=str)))}"
         for k, v in params.items()
-        if k not in ("scored", "excluded")
+        if k not in _META_KEYS
     ]
-    name = " · ".join([assertion_type, *(_clip(v) for v in rendered)])
+    name = " · ".join([assertion_type, *rendered])
+    expected = {k: to_json_safe(v) for k, v in params.items() if k not in _META_KEYS}
     if excluded:
         message = (
             "excluded from scoring by the task author"
@@ -381,12 +608,18 @@ def _check(
         message = (
             "satisfied in the initial state; broken by the run" if held_initially else "not satisfied by the end state"
         ) + (f" (rollout error: {error})" if error else "")
+    # Only failed, scored checks carry the diff: that is where a reader needs
+    # to know what the agent did in the app without replaying the trace.
+    predicted = diffs.get(service) if diffs is not None and not passed and not excluded else None
     return Check(
         name=name,
         verdict="pass" if passed else "fail",
         message=message,
-        group=_service_for(assertion_type),
+        group=service,
         informational=excluded,
+        description=_description_for(assertion_type),
+        expected=expected,
+        predicted=predicted,
     )
 
 
@@ -408,6 +641,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
     held_initially = [
         initial_world is not None and bool(AssertionRegistry.check(initial_world, a)) for a in assertions
     ]
+    diffs: _ServiceDiffs | None = None
     if isinstance(end_state, Mapping):
         state: dict[str, Any] = {
             "info": {"assertions": assertions},
@@ -416,6 +650,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
         }
         partial = float(partial_credit(state))
         outcomes: list[Mapping[str, Any]] = list(state.get("_assertion_results") or [])
+        diffs = _ServiceDiffs(initial_state, initial_world, end_state)
     else:
         error = error or "no end state reported"
         partial = 0.0
@@ -436,7 +671,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
         field_scores=scores,
         objective=objective_score(scores, field_weights=FIELD_WEIGHTS),
         checks=tuple(
-            _check(outcome, error=error, entities=entities, held_initially=held)
+            _check(outcome, error=error, entities=entities, held_initially=held, diffs=diffs)
             for outcome, held in zip(outcomes, held_initially, strict=True)
         ),
     )
