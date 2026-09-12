@@ -474,6 +474,7 @@ def _collections(node: Any, path: str, authored: Mapping[str, _Authored]) -> Ite
     elif _is_collection(node):
         known = authored.get(path, _Authored())
         records: _Collection = {}
+        seen: dict[str, int] = {}
         for position, record in enumerate(node):
             record_id = _record_key(record)
             flat = _flatten_record(record)
@@ -483,6 +484,8 @@ def _collections(node: Any, path: str, authored: Mapping[str, _Authored]) -> Ite
             else:
                 content = {k: v for k, v in _view(flat, known.key_fields).items() if k != "id"}
                 key, label = "json:" + json.dumps(content, sort_keys=True), position
+                seen[key] = seen.get(key, 0) + 1
+                key = f"{key}#{seen[key]}"
             records.setdefault(key, flat)
             yield from _collections(record, f"{path}[{label}]", authored)
         yield path, records
@@ -504,18 +507,26 @@ def _shrink(record: _Record, max_str: int) -> dict[str, Any]:
     return kept
 
 
-def _service_diff(service: str, raw_initial: Any, initial: Any, end: Any) -> dict[str, Any]:
+def _service_diff(
+    service: str, fields: list[str], raw_initial: Mapping[str, Any], initial: Mapping[str, Any], end: Mapping[str, Any]
+) -> dict[str, Any]:
     """Added / changed / removed records of one app between the initial and end world state.
 
-    ``initial`` and ``end`` are ``WorldState`` dumps; ``raw_initial`` is the task
-    author's initial state, which decides what counts as a real change (see
+    ``fields`` are the ``WorldState`` fields the app spans (``["gmail"]``, or
+    ``["facebook_conversions", "facebook_lead_ads", "facebook_pages"]`` for
+    ``facebook``); record paths start with the concrete field. ``initial`` and
+    ``end`` are ``WorldState`` dumps; ``raw_initial`` is the task author's
+    initial state, which decides what counts as a real change (see
     ``_authored``): an id-matched record is changed when a field the author set
     on it differs.
     """
     authored: dict[str, _Authored] = {}
-    _authored(initial, raw_initial, service, authored)
-    before = dict(_collections(initial, service, authored))
-    after = dict(_collections(end, service, authored))
+    before: dict[str, _Collection] = {}
+    after: dict[str, _Collection] = {}
+    for field in fields:
+        _authored(initial.get(field), raw_initial.get(field), field, authored)
+        before.update(_collections(initial.get(field), field, authored))
+        after.update(_collections(end.get(field), field, authored))
     added: list[dict[str, Any]] = []
     changed: list[dict[str, Any]] = []
     removed: list[dict[str, Any]] = []
@@ -544,7 +555,7 @@ def _service_diff(service: str, raw_initial: Any, initial: Any, end: Any) -> dic
     for max_records, max_str in _DIFF_SHRINK_STEPS:
         diff: dict[str, Any] = {"service": service}
         diff.update({k: render(v, max_records, max_str) for k, v in lists.items() if v})
-        if len(json.dumps(diff, ensure_ascii=False)) <= _DIFF_MAX_BYTES:
+        if len(json.dumps(diff, ensure_ascii=False).encode("utf-8")) <= _DIFF_MAX_BYTES:
             break
     return diff
 
@@ -564,12 +575,15 @@ class _ServiceDiffs:
         if service is None:
             return None
         if service not in self._cache:
-            if service not in self._raw_initial and service not in self._end:
-                self._cache[service] = None
-            else:
-                self._cache[service] = _service_diff(
-                    service, self._raw_initial.get(service), self._initial.get(service), self._end.get(service)
-                )
+            spanned = (
+                [service]
+                if service in _SERVICE_FIELDS
+                else [f for f in _SERVICE_FIELDS if f.startswith(service + "_")]
+            )
+            fields = sorted(f for f in spanned if f in self._raw_initial or f in self._end)
+            self._cache[service] = (
+                _service_diff(service, fields, self._raw_initial, self._initial, self._end) if fields else None
+            )
         return self._cache[service]
 
 
