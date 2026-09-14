@@ -186,7 +186,9 @@ denominator.
   `os.scandir`, `pathlib` iteration and shell `ls`/`find`/`tree`/`fd` are
   blocked so the agent must search rather than enumerate the corpus. The
   subprocess gets a minimal environment (`PATH`, `HOME`, locale, `TMPDIR`,
-  `TESSDATA_PREFIX`), not the host's `OPENAI_API_KEY`/`HF_TOKEN`.
+  `TESSDATA_PREFIX`), not the host's `OPENAI_API_KEY`/`HF_TOKEN`. It is
+  still an ordinary local process, not a sandbox: model-written Python can
+  read the host filesystem. Run untrusted models inside a container.
 - **`web_search`** (only with `--tools ...,web`): DuckDuckGo via `ddgs`.
 
 File tools are confined to the working directory and the corpus
