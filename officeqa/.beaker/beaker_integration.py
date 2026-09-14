@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
+from threading import Lock
 
 from beaker import (
     Case,
@@ -17,6 +19,10 @@ from beaker import (
     repository,
 )
 from pydantic import BaseModel, Field
+
+
+HOSTED_CORPUS = "parsed"
+_CORPUS_LOCK = Lock()
 
 
 class Row(BaseModel):
@@ -48,6 +54,26 @@ def _litellm_model(selected_model: str | None) -> str | None:
     return f"{provider}/{model}" if separator else selected_model
 
 
+def _ensure_hosted_corpus() -> Path:
+    """Fetch and verify the lightweight parsed corpus once per evaluator."""
+
+    from officeqa import config
+    from officeqa.data.corpus import IncompleteCorpusError, ensure_corpus, fetch_corpus
+
+    with _CORPUS_LOCK:
+        try:
+            return ensure_corpus(
+                HOSTED_CORPUS,
+                expected_documents=config.EXPECTED_CORPUS_DOCUMENTS,
+            )
+        except (FileNotFoundError, IncompleteCorpusError):
+            fetch_corpus((HOSTED_CORPUS,))
+            return ensure_corpus(
+                HOSTED_CORPUS,
+                expected_documents=config.EXPECTED_CORPUS_DOCUMENTS,
+            )
+
+
 async def run_case(*, case_input: object, runtime: RolloutRuntime) -> CaseResult:
     from officeqa.config import RunConfig
     from officeqa.data.dataset import EvalRecord
@@ -69,10 +95,21 @@ async def run_case(*, case_input: object, runtime: RolloutRuntime) -> CaseResult
         difficulty="",
     )
     selected_model = _litellm_model(runtime.model)
-    cfg = RunConfig(model=selected_model) if selected_model is not None else RunConfig()
+    cfg = (
+        RunConfig(model=selected_model, corpus=HOSTED_CORPUS)
+        if selected_model is not None
+        else RunConfig(corpus=HOSTED_CORPUS)
+    )
+
+    with runtime.trace.stage(
+        "officeqa.prepare_corpus",
+        inputs={"representation": HOSTED_CORPUS},
+    ) as stage:
+        corpus_root = await asyncio.to_thread(_ensure_hosted_corpus)
+        stage.output({"representation": HOSTED_CORPUS})
 
     with runtime.trace.stage("officeqa.run_one", inputs={"uid": uid, "question": question}) as stage:
-        result = await run_one_async(sample, cfg=cfg)
+        result = await run_one_async(sample, cfg=cfg, corpus_root=corpus_root)
         output = {
             "final_answer": result.final_answer,
             "status": result.status,
