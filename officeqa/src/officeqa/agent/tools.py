@@ -28,6 +28,7 @@ import os
 import re
 import select
 import shutil
+import signal
 import subprocess
 import textwrap
 from collections.abc import Awaitable, Callable, Iterable, Sequence
@@ -489,6 +490,19 @@ def repl_environment() -> dict[str, str]:
     return env
 
 
+def _kill_process_group(proc: subprocess.Popen[bytes]) -> None:
+    """SIGKILL the session started for ``proc`` (its pid is the pgid), including
+    grandchildren that outlived it. No-op where process groups don't exist."""
+    if not hasattr(os, "killpg"):
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError as e:
+        logger.debug("killpg(%d) failed: %s", proc.pid, e)
+
+
 class PythonRepl:
     """One persistent Python process per question; ``run`` execs code into a shared namespace."""
 
@@ -509,6 +523,8 @@ class PythonRepl:
         server = self._ws.root / "_repl_server.py"
         server.write_text(REPL_SERVER_SOURCE, encoding="utf-8")
         env = repl_environment()
+        # Own session/process group so a timeout can take down everything the
+        # agent's code spawned (OCR workers, shell pipelines), not just the REPL.
         self._proc = subprocess.Popen(
             [self._ws.python, "-u", str(server), str(w), str(self._ws.root / "_repl_output.bin")],
             cwd=str(self._ws.cwd),
@@ -517,6 +533,7 @@ class PythonRepl:
             stderr=subprocess.DEVNULL,
             pass_fds=(w,),
             env=env,
+            start_new_session=True,
         )
         os.close(w)
         self._resp_r = os.fdopen(r, "r", buffering=1)
@@ -527,6 +544,7 @@ class PythonRepl:
 
     def _kill(self) -> None:
         if self._proc is not None:
+            _kill_process_group(self._proc)
             try:
                 self._proc.kill()
                 self._proc.wait(timeout=5)

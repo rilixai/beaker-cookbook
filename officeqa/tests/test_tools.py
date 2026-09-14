@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -271,6 +273,68 @@ def test_python_exec_timeout_kills_and_restarts(workspace: Workspace) -> None:
         assert out.strip() == "False"  # state lost after kill, process restarted
     finally:
         repl.close()
+
+
+SPAWN_SLOW_WRITER = (
+    "import subprocess, sys; "
+    "p = subprocess.Popen([sys.executable, '-c', "
+    "\"import time; time.sleep(2); open('child_out.txt', 'w').write('escaped')\"]); "
+    "open('child.pid', 'w').write(str(p.pid))"
+)
+
+
+def _pid_alive(pid: int) -> bool:
+    """Running (a killed-but-unreaped zombie counts as dead)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    status = Path(f"/proc/{pid}/status")
+    if status.exists():
+        return "State:\tZ" not in status.read_text()
+    return True
+
+
+def _child_pid(workspace: Workspace) -> int:
+    return int((workspace.cwd / "child.pid").read_text())
+
+
+def test_repl_timeout_kills_subprocesses_spawned_by_agent_code(workspace: Workspace) -> None:
+    """The timeout bounds everything the question launched, not just the REPL interpreter."""
+    repl = PythonRepl(workspace, default_timeout_s=1.0)
+    try:
+        assert run(repl.run(SPAWN_SLOW_WRITER)) == "(no output)"
+        child = _child_pid(workspace)
+        assert _pid_alive(child)
+        out = run(repl.run("import time; time.sleep(30)"))
+        assert "killed" in out
+        time.sleep(0.5)
+        assert not _pid_alive(child)
+        time.sleep(2.5)
+        assert not (workspace.cwd / "child_out.txt").exists()
+    finally:
+        repl.close()
+
+
+def test_repl_close_kills_orphans_of_an_already_exited_repl(workspace: Workspace) -> None:
+    repl = PythonRepl(workspace)
+    try:
+        out = run(repl.run(SPAWN_SLOW_WRITER + "; import os; os._exit(0)"))
+        assert "REPL process exited" in out
+        child = _child_pid(workspace)
+        time.sleep(0.5)
+        assert not _pid_alive(child)
+    finally:
+        repl.close()
+
+    repl = PythonRepl(workspace)
+    assert run(repl.run(SPAWN_SLOW_WRITER)) == "(no output)"
+    child = _child_pid(workspace)
+    repl.close()
+    time.sleep(0.5)
+    assert not _pid_alive(child)
+    time.sleep(2.5)
+    assert not (workspace.cwd / "child_out.txt").exists()
 
 
 def test_toolset_registration_and_unknown_tool(workspace: Workspace) -> None:
