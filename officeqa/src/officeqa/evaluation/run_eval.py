@@ -17,6 +17,7 @@ from officeqa.data.dataset import EvalRecord
 
 
 if TYPE_CHECKING:
+    from officeqa.config import RunConfig
     from officeqa.runner import RunResult
 
 
@@ -55,6 +56,8 @@ def summarize(results: Sequence[RunResult], *, expected: Sequence[str] | None = 
         "total_cost_usd": sum(costs) if costs else None,
         "mean_cost_usd": (sum(costs) / len(costs)) if costs else None,
         "cost_known_for": len(costs),
+        # Model calls cancelled mid-flight by a task timeout; their spend is not in the totals.
+        "interrupted_requests": sum(r.interrupted_requests for r in present),
         "total_tokens": sum(
             int(r.usage.get("prompt_tokens", 0)) + int(r.usage.get("completion_tokens", 0)) for r in present
         ),
@@ -64,12 +67,26 @@ def summarize(results: Sequence[RunResult], *, expected: Sequence[str] | None = 
 
 
 def select_to_run(
-    records: Sequence[EvalRecord], existing: Mapping[str, RunResult], *, rerun: bool = False
+    records: Sequence[EvalRecord],
+    existing: Mapping[str, RunResult],
+    *,
+    rerun: bool = False,
+    cfg: RunConfig | None = None,
 ) -> list[EvalRecord]:
-    """Resume policy: reuse questions that completed cleanly, re-run the rest; ``rerun`` forces all."""
+    """Resume policy: reuse questions that completed cleanly, re-run the rest; ``rerun`` forces all.
+
+    With ``cfg``, a clean result is only reused when it records the same
+    behavior-affecting configuration (:meth:`RunConfig.behavior`), so a
+    directory never silently mixes models, corpora or tool sets.
+    """
     if rerun:
         return list(records)
-    return [r for r in records if r.uid not in existing or not existing[r.uid].clean]
+
+    def reusable(uid: str) -> bool:
+        r = existing.get(uid)
+        return r is not None and r.clean and (cfg is None or r.compatible_with(cfg))
+
+    return [r for r in records if not reusable(r.uid)]
 
 
 def format_summary(summary: Mapping[str, Any]) -> str:
@@ -81,4 +98,9 @@ def format_summary(summary: Mapping[str, Any]) -> str:
         f"mean latency {summary['mean_latency_s'] / 60:.1f} min  mean tool calls {summary['mean_tool_calls']:.1f}  "
         f"mean steps {summary['mean_steps']:.1f}  total cost {'$%.2f' % cost if cost is not None else 'unknown'}"
     )
+    interrupted = summary.get("interrupted_requests", 0)
+    if interrupted:
+        lines.append(
+            f"cost/tokens are lower bounds: {interrupted} model call(s) were cancelled in flight by the task timeout"
+        )
     return "\n".join(lines)

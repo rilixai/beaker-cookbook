@@ -8,6 +8,7 @@ client and no network.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -181,6 +182,7 @@ class Episode:
     usage: Usage = field(default_factory=Usage)
     cost_usd: float = 0.0
     cost_known: bool = True
+    interrupted_requests: int = 0  # model calls cancelled in flight (timeout); usage/cost unknown
     tool_call_counts: dict[str, int] = field(default_factory=dict)
     truncated_tool_outputs: int = 0
 
@@ -202,6 +204,7 @@ class Episode:
             "truncated_tool_outputs": self.truncated_tool_outputs,
             "usage": asdict(self.usage),
             "cost_usd": self.cost_usd if self.cost_known else None,
+            "interrupted_requests": self.interrupted_requests,
             "trajectory": self.trajectory,
             "step_records": [asdict(s) for s in self.steps],
         }
@@ -278,7 +281,11 @@ class OfficeQAAgent:
             messages.append({"role": "user", "content": prompts.step_reminder(remaining)})
 
             t0 = time.monotonic()
-            resp = await self._client.complete(messages, schemas)
+            try:
+                resp = await self._client.complete(messages, schemas)
+            except asyncio.CancelledError:
+                ep.interrupted_requests += 1
+                raise
             latency = time.monotonic() - t0
             ep.usage.add(resp.usage)
             if resp.cost_usd is None:

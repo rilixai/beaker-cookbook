@@ -14,7 +14,7 @@ from officeqa import config
 from officeqa.agent import prompts
 from officeqa.cli import log_resources
 from officeqa.config import RunConfig
-from officeqa.data.corpus import ensure_corpus, fetch_corpus
+from officeqa.data.corpus import IncompleteCorpusError, count_documents, ensure_corpus, fetch_corpus
 from officeqa.data.manifest import build_manifest
 
 
@@ -44,6 +44,20 @@ def test_ensure_corpus_requires_representation(fake_cache: Path) -> None:
     shutil.rmtree(fake_cache / "hf" / config.CORPUS_REPRESENTATIONS["parsed"][0])
     with pytest.raises(FileNotFoundError):
         ensure_corpus("parsed")
+
+
+def test_ensure_corpus_rejects_incomplete_download(fake_cache: Path) -> None:
+    root = fake_cache / config.CORPUS_ROOT_NAME
+    n = count_documents(root, "parsed")
+    assert ensure_corpus("parsed", expected_documents=n) == root
+    # An interrupted `officeqa fetch` leaves fewer documents than the pinned snapshot has.
+    next(p for p in (root / "parsed").iterdir() if p.suffix == ".txt").unlink()
+    with pytest.raises(IncompleteCorpusError, match=rf"has {n - 1} documents, expected {n}.*officeqa fetch"):
+        ensure_corpus("parsed", expected_documents=n)
+    assert ensure_corpus("parsed") == root  # library callers without an expectation are unaffected
+    # Stray non-document files (e.g. partial-download markers) do not count as documents.
+    (fake_cache / "hf" / config.CORPUS_REPRESENTATIONS["parsed"][0] / "x.txt.incomplete").write_bytes(b"")
+    assert count_documents(root, "parsed") == n - 1
 
 
 def test_fetch_corpus_uses_snapshot_and_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -80,6 +94,36 @@ def test_run_config_defaults_match_baseline() -> None:
         RunConfig(tools=("fs", "laser"))
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"max_concurrent": 0},  # would block forever on the semaphore
+        {"max_concurrent": -1},
+        {"n_rollouts": 0},
+        {"max_steps": 0},
+        {"window_size": 0},
+        {"tool_output_limit": 0},
+        {"max_retries": -1},
+        {"max_output_tokens": 0},
+        {"task_timeout_s": 0.0},
+        {"llm_timeout_s": -5.0},
+    ],
+)
+def test_run_config_rejects_out_of_range_numbers(bad: dict[str, float]) -> None:
+    (name,) = bad
+    with pytest.raises(ValueError, match=name):
+        RunConfig(**bad)  # type: ignore[arg-type]
+    RunConfig(max_retries=0, max_concurrent=1, n_rollouts=1)  # boundaries are allowed
+
+
+def test_run_config_behavior_excludes_operational_knobs() -> None:
+    a = RunConfig()
+    b = RunConfig(max_concurrent=1, max_retries=0, task_timeout_s=10.0, llm_timeout_s=10.0)
+    assert a.behavior() == b.behavior()
+    for change in ({"model": "other"}, {"tools": ("fs", "repl", "web")}, {"corpus": "parsed"}, {"max_steps": 10}):
+        assert RunConfig(**change).behavior() != a.behavior()  # type: ignore[arg-type]
+
+
 # --- prompts ------------------------------------------------------------------
 
 REVISION_LINE = (
@@ -101,6 +145,9 @@ def test_seed_prompt_differs_only_by_web_sentence() -> None:
 def test_prompt_selection_and_reminder() -> None:
     assert prompts.system_prompt_for(("fs", "repl")) == prompts.SYSTEM_PROMPT_SEED
     assert prompts.system_prompt_for(("fs", "repl", "web")) == prompts.SYSTEM_PROMPT_VERBATIM
+    # The agent passes registered tool names, not --tools names.
+    assert prompts.system_prompt_for(("fs_search", "fs_read", "python_exec")) == prompts.SYSTEM_PROMPT_SEED
+    assert prompts.system_prompt_for(("fs_search", "fs_read", "web_search")) == prompts.SYSTEM_PROMPT_VERBATIM
     assert "1 step" in prompts.step_reminder(1) or "last step" in prompts.step_reminder(1)
     assert "42 steps remaining" in prompts.step_reminder(42)
 

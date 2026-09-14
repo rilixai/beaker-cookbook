@@ -53,8 +53,12 @@ assert SYSTEM_PROMPT_SEED.count("\n") == SYSTEM_PROMPT_VERBATIM.count("\n")
 
 
 def system_prompt_for(tools: tuple[str, ...] | list[str]) -> str:
-    """Verbatim prompt when ``web`` is registered, seed variant otherwise."""
-    return SYSTEM_PROMPT_VERBATIM if "web" in tools else SYSTEM_PROMPT_SEED
+    """Verbatim prompt when web search is available, seed variant otherwise.
+
+    Accepts either the ``--tools`` name (``web``) or the registered tool name
+    (``web_search``), since the agent is handed the latter.
+    """
+    return SYSTEM_PROMPT_VERBATIM if {"web", "web_search"} & set(tools) else SYSTEM_PROMPT_SEED
 
 
 # Ours, not from the report. The report says the agent receives "a reminder

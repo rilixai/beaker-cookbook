@@ -64,7 +64,7 @@ def build_manifest(
     ``default`` names the one the run is configured for.
     """
     reps: list[Representation] = []
-    suffixes = {"pdf": ".pdf", "text": ".txt"}
+    suffixes = config.CORPUS_FORMAT_SUFFIXES
     for name, (_hf_subdir, fmt) in config.CORPUS_REPRESENTATIONS.items():
         sub = corpus_root / name
         if sub.is_dir():

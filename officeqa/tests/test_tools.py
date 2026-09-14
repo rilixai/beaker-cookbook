@@ -32,6 +32,24 @@ def test_confine_allows_cwd_and_corpus(workspace: Workspace) -> None:
     assert parsed.is_file()
 
 
+def test_confine_hides_undeclared_files_in_the_corpus_root(workspace: Workspace, corpus: Path) -> None:
+    """Only pdfs/ and parsed/ are reachable under ../officeqa_corpus, not whatever else lands in the cache root."""
+    (corpus / "stray-credentials.json").write_text('{"token": "hf_secret"}')
+    (corpus / "notes").mkdir()
+    (corpus / "notes" / "x.txt").write_text("hf_secret")
+    (corpus / "escape").symlink_to(Path.home())
+    ts = build_toolset(workspace, ("fs",))
+    for bad in ("../officeqa_corpus/stray-credentials.json", "../officeqa_corpus/notes", "../officeqa_corpus/escape"):
+        with pytest.raises(PathOutsideWorkspace):
+            confine(bad, workspace)
+        assert "outside the working directory" in run(ts.call("fs_read", {"path": bad}))
+    listing = run(ts.call("fs_search", {"path": "../officeqa_corpus"}))
+    assert "pdfs/" in listing and "parsed/" in listing
+    assert "stray" not in listing and "notes" not in listing and "escape" not in listing
+    assert "hf_secret" not in run(ts.call("fs_search", {"path": "../officeqa_corpus", "query": "hf_secret"}))
+    assert "stray" not in run(ts.call("fs_search", {"path": "../officeqa_corpus", "glob": "*"}))
+
+
 @pytest.mark.parametrize("bad", ["..", "../..", "../../..", "/etc/passwd", "../.venv", "/", "../cwd/../.venv"])
 def test_confine_rejects_outside(workspace: Workspace, bad: str) -> None:
     with pytest.raises(PathOutsideWorkspace):
@@ -148,6 +166,24 @@ def test_python_exec_is_stateful(tools) -> None:  # type: ignore[no-untyped-def]
     assert run(tools.call("python_exec", {"code": "x = 21"})) == "(no output)"
     assert run(tools.call("python_exec", {"code": "print(x * 2)"})).strip() == "42"
     assert run(tools.call("python_exec", {"code": "x + 1"})).strip() == "22"  # REPL-style echo
+
+
+def test_python_exec_does_not_inherit_host_secrets(workspace: Workspace, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-for-the-model")
+    monkeypatch.setenv("HF_TOKEN", "hf_test")
+    ts = build_toolset(workspace, ("repl",))
+    try:
+        out = run(
+            ts.call(
+                "python_exec",
+                {"code": "import os; print(sorted(k for k in os.environ if 'KEY' in k or 'TOKEN' in k))"},
+            )
+        )
+        assert out.strip() == "[]"
+        assert "sk-test" not in run(ts.call("python_exec", {"code": "import os; print(dict(os.environ))"}))
+        assert run(ts.call("python_exec", {"code": "import os; print('PATH' in os.environ)"})).strip() == "True"
+    finally:
+        ts.close()
 
 
 def test_python_exec_captures_stderr_and_tracebacks(tools) -> None:  # type: ignore[no-untyped-def]

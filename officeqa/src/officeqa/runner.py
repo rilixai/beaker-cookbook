@@ -61,6 +61,19 @@ class RunResult:
     rollouts: list[dict[str, Any]] = field(default_factory=list)
     started_at: float = 0.0
     finished_at: float = 0.0
+    config: dict[str, Any] = field(default_factory=dict)  # RunConfig.behavior() that produced this result
+    retried_attempts: list[dict[str, Any]] = field(default_factory=list)  # timed-out attempts that were retried
+    # Model calls cancelled in flight by the task timeout. Their tokens never reach us, so
+    # ``usage``/``cost_usd`` are lower bounds whenever this is > 0.
+    interrupted_requests: int = 0
+
+    def compatible_with(self, cfg: RunConfig) -> bool:
+        """Whether this result was produced by a run with the same behavior-affecting configuration.
+
+        Results written before per-result provenance existed carry no ``config``
+        and are trusted; the directory-level ``config.json`` check still applies.
+        """
+        return not self.config or self.config == cfg.behavior()
 
     @property
     def correct(self) -> float:
@@ -90,7 +103,7 @@ def score_all(ground_truth: str, final_answer: str | None) -> dict[str, float]:
 
 
 class RetryBudget:
-    """Report §4.1 fn. 9: up to 30 restarts per run after crashes. Shared across a split."""
+    """Report §4.1 fn. 9: up to 30 restarts per run after crashes or timeouts. Shared across a split."""
 
     def __init__(self, limit: int = config.MAX_RETRIES) -> None:
         self.limit = limit
@@ -193,7 +206,7 @@ async def run_one_async(
     client_factory = client_factory or CLIENT_FACTORY
     toolset_factory = toolset_factory or make_toolset_factory()
     budget = retry_budget or RetryBudget(cfg.max_retries)
-    corpus = corpus_root or ensure_corpus(cfg.corpus)
+    corpus = corpus_root or ensure_corpus(cfg.corpus, expected_documents=config.EXPECTED_CORPUS_DOCUMENTS)
     manifest = build_manifest(corpus, default=cfg.corpus)
     work = work_dir or (config.cache_dir() / "work")
 
@@ -201,6 +214,7 @@ async def run_one_async(
     t0 = time.monotonic()
     attempts = 0
     episodes: list[Episode] = []
+    retried: list[Episode] = []  # timed-out attempts superseded by a retry; their spend still counts
     error: str | None = None
     status = "error"
 
@@ -218,6 +232,12 @@ async def run_one_async(
                 ep = Episode()
                 ep.status = "error"
             else:
+                if ep.status == "timeout":
+                    logger.warning("uid=%s attempt %d %s", sample.uid, attempts, err)
+                    if budget.take():
+                        retried.append(ep)
+                        continue
+                    err = f"{err} (retry budget exhausted after {budget.used} retries)"
                 error = err or error
             episodes.append(ep)
             break
@@ -245,11 +265,13 @@ async def run_one_async(
     total_cost = 0.0
     cost_known = True
     counts: Counter[str] = Counter()
-    for ep_ in episodes:
+    interrupted = 0
+    for ep_ in episodes + retried:
         usage.add(ep_.usage)
         total_cost += ep_.cost_usd
         cost_known = cost_known and ep_.cost_known
         counts.update(ep_.tool_call_counts)
+        interrupted += ep_.interrupted_requests
 
     final_answer = chosen.final_answer if status == "answered" else None
     return RunResult(
@@ -261,7 +283,7 @@ async def run_one_async(
         trajectory=chosen.trajectory,
         tool_calls=sum(counts.values()),
         tool_call_counts=dict(counts),
-        steps=sum(e.n_steps for e in episodes),
+        steps=sum(e.n_steps for e in episodes + retried),
         usage=asdict(usage),
         cost_usd=total_cost if cost_known else None,
         latency_s=time.monotonic() - t0,
@@ -272,6 +294,17 @@ async def run_one_async(
         rollouts=rollouts,
         started_at=started,
         finished_at=time.time(),
+        config=cfg.behavior(),
+        retried_attempts=[
+            {
+                "status": ep_.status,
+                "steps": ep_.n_steps,
+                "tool_calls": ep_.tool_calls,
+                "cost_usd": ep_.cost_usd if ep_.cost_known else None,
+            }
+            for ep_ in retried
+        ],
+        interrupted_requests=interrupted,
     )
 
 
@@ -297,7 +330,7 @@ async def run_split_async(
     """Run many samples with bounded concurrency; results arrive via ``on_result`` as they finish."""
     sem = asyncio.Semaphore(cfg.max_concurrent)
     budget = RetryBudget(cfg.max_retries)
-    corpus = corpus_root or ensure_corpus(cfg.corpus)
+    corpus = corpus_root or ensure_corpus(cfg.corpus, expected_documents=config.EXPECTED_CORPUS_DOCUMENTS)
 
     async def one(sample: EvalRecord) -> RunResult:
         queued = time.monotonic()

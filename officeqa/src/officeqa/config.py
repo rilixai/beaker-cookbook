@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 # --- Data -------------------------------------------------------------------
@@ -40,6 +41,7 @@ CORPUS_REPRESENTATIONS: dict[str, tuple[str, str]] = {
     "pdfs": ("treasury_bulletin_pdfs", "pdf"),
     "parsed": ("treasury_bulletins_parsed/transformed", "text"),
 }
+CORPUS_FORMAT_SUFFIXES: dict[str, str] = {"pdf": ".pdf", "text": ".txt"}
 CORPUS_ROOT_NAME = "officeqa_corpus"
 DEFAULT_CORPUS = "pdfs"
 
@@ -188,5 +190,36 @@ class RunConfig:
             raise ValueError(f"unknown corpus {self.corpus!r}; known: {sorted(CORPUS_REPRESENTATIONS)}")
         if self.search not in KNOWN_SEARCH_ARMS:
             raise ValueError(f"unknown search arm {self.search!r}; known: {KNOWN_SEARCH_ARMS}")
-        if self.n_rollouts < 1:
-            raise ValueError("n_rollouts must be >= 1")
+        bounds: dict[str, tuple[int, int]] = {
+            "n_rollouts": (self.n_rollouts, 1),
+            "max_steps": (self.max_steps, 1),
+            "window_size": (self.window_size, 1),
+            "tool_output_limit": (self.tool_output_limit, 1),
+            "max_retries": (self.max_retries, 0),
+            "max_concurrent": (self.max_concurrent, 1),
+            "max_output_tokens": (self.max_output_tokens, 1),
+        }
+        for name, (value, minimum) in bounds.items():
+            if value < minimum:
+                raise ValueError(f"{name} must be >= {minimum}, got {value}")
+        timeouts = {"task_timeout_s": self.task_timeout_s, "llm_timeout_s": self.llm_timeout_s}
+        for name, seconds in timeouts.items():
+            if not seconds > 0:
+                raise ValueError(f"{name} must be > 0, got {seconds}")
+
+    def behavior(self) -> dict[str, Any]:
+        """Fields that change what the agent does or scores; two runs are resumable into one
+        directory only when these match. Operational knobs (concurrency, retries, timeouts) are excluded."""
+        return {
+            "model": self.model,
+            "reasoning_effort": self.reasoning_effort,
+            "tools": list(self.tools),
+            "corpus": self.corpus,
+            "search": self.search,
+            "n_rollouts": self.n_rollouts,
+            "max_steps": self.max_steps,
+            "window_size": self.window_size,
+            "tool_output_limit": self.tool_output_limit,
+            "max_output_tokens": self.max_output_tokens,
+            "extra": dict(self.extra),
+        }

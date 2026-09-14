@@ -27,7 +27,7 @@ from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
 
 from officeqa import config, runner
 from officeqa.config import RunConfig
-from officeqa.data.corpus import ensure_corpus, fetch_corpus
+from officeqa.data.corpus import IncompleteCorpusError, ensure_corpus, fetch_corpus
 from officeqa.data.dataset import KNOWN_SPLITS, EvalRecord, load_split
 from officeqa.data.manifest import build_manifest
 from officeqa.evaluation.run_eval import format_summary, select_to_run, summarize
@@ -138,6 +138,34 @@ def _saved_run_config(out: Path, fallback: RunConfig) -> RunConfig:
     )
 
 
+def _saved_behavior(out: Path) -> dict[str, object] | None:
+    """Behavior-affecting fields of the run already stored in ``out``, or None when there is none."""
+    path = out / "config.json"
+    if not path.is_file():
+        return None
+    saved = json.loads(path.read_text(encoding="utf-8")).get("config")
+    if not isinstance(saved, dict):
+        return None
+    current = RunConfig().behavior()
+    return {k: saved.get(k, v) for k, v in current.items()}
+
+
+def _check_resume_compatible(out: Path, cfg: RunConfig) -> str | None:
+    """Explain why ``cfg`` cannot resume into ``out``, or None when it can."""
+    saved = _saved_behavior(out)
+    if saved is None:
+        return None
+    diffs = {k: (saved[k], v) for k, v in cfg.behavior().items() if saved[k] != v}
+    if not diffs:
+        return None
+    lines = [f"  {k}: existing={old!r} requested={new!r}" for k, (old, new) in sorted(diffs.items())]
+    return (
+        f"{out} holds results from a different configuration; resuming would mix them into one score:\n"
+        + "\n".join(lines)
+        + "\nUse a new --output-dir, or --rerun to discard the existing results."
+    )
+
+
 def _write_summary(out: Path, records: Sequence[EvalRecord], cfg: RunConfig, *, split: str, wall: float) -> None:
     final = read_results(out / "results")
     results = [final[r.uid] for r in records if r.uid in final]
@@ -153,7 +181,11 @@ def _write_summary(out: Path, records: Sequence[EvalRecord], cfg: RunConfig, *, 
 
 
 def _execute(args: argparse.Namespace, *, rerun: bool, resume: bool, summary_only: bool = False) -> int:
-    cfg = _cfg_from_args(args)
+    try:
+        cfg = _cfg_from_args(args)
+    except ValueError as exc:
+        logger.error("invalid flags: %s", exc)
+        return 2
     out: Path = args.output_dir
     results_dir = out / "results"
     out.mkdir(parents=True, exist_ok=True)
@@ -165,12 +197,22 @@ def _execute(args: argparse.Namespace, *, rerun: bool, resume: bool, summary_onl
         _write_summary(out, records, _saved_run_config(out, cfg), split=args.split, wall=0.0)
         return 0
 
+    if resume and not rerun:
+        problem = _check_resume_compatible(out, cfg)
+        if problem is not None:
+            logger.error("%s", problem)
+            return 2
+
     resources = log_resources(cfg)
-    corpus = ensure_corpus(cfg.corpus)
+    try:
+        corpus = ensure_corpus(cfg.corpus, expected_documents=config.EXPECTED_CORPUS_DOCUMENTS)
+    except (FileNotFoundError, IncompleteCorpusError) as exc:
+        logger.error("%s", exc)
+        return 2
     manifest = build_manifest(corpus, default=cfg.corpus)
 
     existing = read_results(results_dir) if resume else {}
-    todo = select_to_run(records, existing, rerun=rerun)
+    todo = select_to_run(records, existing, rerun=rerun, cfg=cfg)
     logger.info("split=%s n=%d to_run=%d reused=%d", args.split, len(records), len(todo), len(records) - len(todo))
 
     _write_json(

@@ -56,14 +56,19 @@ uv run officeqa fetch --split test
 uv run officeqa run --split test --limit 10 --output-dir runs/test-gpt54
 
 # 3. Resume + score. Clean results are reused, errored/timed-out ones re-run.
+#    Resuming with a different model/corpus/tool set/step budget is refused
+#    (use a new --output-dir or --rerun) so one directory never mixes configurations.
 uv run officeqa evaluate --split test --output-dir runs/test-gpt54
 uv run officeqa evaluate --split test --output-dir runs/test-gpt54 --rerun          # force everything
 uv run officeqa evaluate --split test --output-dir runs/test-gpt54 --summary-only   # just aggregate
 ```
 
-`run` writes `results/<uid>.json` per question (final answer, scores at every
-tolerance, full trajectory, tool-call counts, token usage, cost, latency, queue
-wait, attempts), `config.json` (flags, uids, dataset revision, corpus manifest,
+`run` refuses to start on a cache whose representation does not hold all 697
+pinned documents (an interrupted `fetch`); re-running `fetch` resumes the
+download. It writes `results/<uid>.json` per question (final answer, scores at
+every tolerance, full trajectory, tool-call counts, token usage, cost, latency,
+queue wait, attempts, the behavior-affecting config that produced it, and any
+timed-out attempts that were retried), `config.json` (flags, uids, dataset revision, corpus manifest,
 cpu/RAM readout) and `summary.json`. All flags default to the baseline:
 
 | Flag | Default | Notes |
@@ -179,11 +184,16 @@ denominator.
 - **`python_exec`**: one persistent subprocess REPL per question in its own
   working directory and virtualenv; `glob`, `os.listdir`, `os.walk`,
   `os.scandir`, `pathlib` iteration and shell `ls`/`find`/`tree`/`fd` are
-  blocked so the agent must search rather than enumerate the corpus.
+  blocked so the agent must search rather than enumerate the corpus. The
+  subprocess gets a minimal environment (`PATH`, `HOME`, locale, `TMPDIR`,
+  `TESSDATA_PREFIX`), not the host's `OPENAI_API_KEY`/`HF_TOKEN`.
 - **`web_search`** (only with `--tools ...,web`): DuckDuckGo via `ddgs`.
 
-Both tools are confined to the working directory and the corpus symlink;
-symlink escapes are rejected.
+File tools are confined to the working directory and the corpus
+representations listed in the manifest (not the whole cache directory);
+symlink escapes are rejected. Per-question timeouts (`--task-timeout`) are
+retried out of the same `--max-retries` budget as crashes; the tokens and cost
+of every retried attempt are added to the question's totals.
 
 ### Concurrency
 
@@ -215,6 +225,12 @@ range, and the shape (a few cheap questions, a long tail of 180–280-call
 searches) is consistent with GPT-5.4 having the highest tool-call count in the
 report's table. `web_search` hit provider rate limits (Brave/Google 429) but
 fell through to other backends.
+
+Caveat: because of a since-fixed bug in prompt selection, this run used the
+no-web system prompt variant (the sentence "You also have access to web search
+in the case that you need to look something up." was missing) even though
+`web_search` was registered and called 50 times. Re-run to get a clean
+measurement.
 
 ## What has not been measured yet
 

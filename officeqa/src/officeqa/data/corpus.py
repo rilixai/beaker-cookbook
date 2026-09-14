@@ -99,17 +99,39 @@ def fetch_corpus(
         _snapshot(allow_patterns=[patterns[rep]], local_dir=target, revision=revision)
     root = materialize(cache)
     for rep in representations:
-        n = sum(1 for _ in (root / rep).iterdir())
+        n = count_documents(root, rep)
         if n != config.EXPECTED_CORPUS_DOCUMENTS:
             logger.warning("%s has %d documents; expected %d", rep, n, config.EXPECTED_CORPUS_DOCUMENTS)
     return root
 
 
-def ensure_corpus(required: str, *, cache: Path | None = None) -> Path:
-    """Return the corpus root, verifying the required representation is present."""
+class IncompleteCorpusError(RuntimeError):
+    """A representation is present but its document count differs from the pinned snapshot."""
+
+
+def count_documents(root: Path, representation: str) -> int:
+    _hf_subdir, fmt = config.CORPUS_REPRESENTATIONS[representation]
+    suffix = config.CORPUS_FORMAT_SUFFIXES[fmt]
+    return sum(1 for p in (root / representation).iterdir() if p.suffix == suffix)
+
+
+def ensure_corpus(required: str, *, cache: Path | None = None, expected_documents: int | None = None) -> Path:
+    """Return the corpus root, verifying the required representation is present.
+
+    With ``expected_documents`` the representation must also hold exactly that
+    many documents, so an interrupted ``officeqa fetch`` cannot be silently
+    benchmarked against.
+    """
     root = materialize(cache)
     if not (root / required).is_dir():
         raise FileNotFoundError(f"corpus representation {required!r} missing under {root}; run `officeqa fetch` first")
+    if expected_documents is not None:
+        n = count_documents(root, required)
+        if n != expected_documents:
+            raise IncompleteCorpusError(
+                f"corpus representation {required!r} under {root} has {n} documents, expected "
+                f"{expected_documents}; re-run `officeqa fetch --representations {required}` (downloads resume)"
+            )
     return root
 
 

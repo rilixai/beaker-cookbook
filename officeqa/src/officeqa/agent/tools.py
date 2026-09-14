@@ -30,7 +30,7 @@ import select
 import shutil
 import subprocess
 import textwrap
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -65,16 +65,23 @@ class PathOutsideWorkspace(PermissionError):
     pass
 
 
+def _permitted(resolved: Path, workspace: Workspace) -> bool:
+    """Inside the cwd or one of the declared corpus representations."""
+    return any(resolved == root or root in resolved.parents for root in workspace.allowed_roots)
+
+
 def confine(user_path: str, workspace: Workspace) -> Path:
-    """Resolve ``user_path`` relative to the cwd; reject anything outside the allowed roots."""
+    """Resolve ``user_path`` relative to the cwd; reject anything outside the allowed roots.
+
+    The corpus root itself is reachable so the agent can list the representations
+    under it, but its other contents (anything that is not ``pdfs/`` or ``parsed/``) are not.
+    """
     candidate = Path(user_path)
     if not candidate.is_absolute():
         candidate = workspace.cwd / candidate
     resolved = candidate.resolve()
-    allowed = list(workspace.allowed_roots) + [workspace.corpus_link.resolve()]
-    for root in allowed:
-        if resolved == root or root in resolved.parents:
-            return resolved
+    if _permitted(resolved, workspace) or resolved == workspace.corpus_link.resolve():
+        return resolved
     raise PathOutsideWorkspace(
         f"{user_path!r} is outside the working directory. Reachable paths: the current directory (.) "
         f"and the corpus at ../{config.CORPUS_ROOT_NAME}/ ({', '.join(f'{n}/' for n in config.CORPUS_REPRESENTATIONS)})."
@@ -113,13 +120,18 @@ def _human(n: int) -> str:
     return f"{size:.1f}GB"
 
 
+def _visible(paths: Iterable[Path], workspace: Workspace) -> list[Path]:
+    """Drop entries (or symlink targets) outside the allowed roots, e.g. stray files in the cache root."""
+    return sorted(p for p in paths if _permitted(p.resolve(), workspace))
+
+
 def _list_dir(directory: Path, pattern: str | None, workspace: Workspace, max_results: int) -> str:
     if directory.is_file():
         entries = [directory]
     elif pattern:
-        entries = sorted(directory.glob(pattern))
+        entries = _visible(directory.glob(pattern), workspace)
     else:
-        entries = sorted(directory.iterdir())
+        entries = _visible(directory.iterdir(), workspace)
     total = len(entries)
     lines = []
     for p in entries[:max_results]:
@@ -243,7 +255,7 @@ def make_fs_search(workspace: Workspace) -> Tool:
         if target.is_file():
             files: list[Path] = [target]
         else:
-            files = sorted(p for p in (target.glob(glob) if glob else target.rglob("*")) if p.is_file())
+            files = [p for p in _visible(target.glob(glob) if glob else target.rglob("*"), workspace) if p.is_file()]
         if not files:
             return "(no files to search)"
         rg = shutil.which("rg")
@@ -465,6 +477,18 @@ REPL_SERVER_SOURCE = textwrap.dedent(
 )
 
 
+# The model's code runs in a separate interpreter; it gets a minimal environment
+# rather than a copy of the harness's, so provider keys (OPENAI_API_KEY, HF_TOKEN,
+# ...) and other host secrets are not one ``os.environ`` away.
+REPL_ENV_PASSTHROUGH = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR", "TESSDATA_PREFIX")
+
+
+def repl_environment() -> dict[str, str]:
+    env = {k: os.environ[k] for k in REPL_ENV_PASSTHROUGH if k in os.environ}
+    env["PYTHONUNBUFFERED"] = "1"
+    return env
+
+
 class PythonRepl:
     """One persistent Python process per question; ``run`` execs code into a shared namespace."""
 
@@ -484,8 +508,7 @@ class PythonRepl:
         os.set_inheritable(w, True)
         server = self._ws.root / "_repl_server.py"
         server.write_text(REPL_SERVER_SOURCE, encoding="utf-8")
-        env = dict(os.environ)
-        env["PYTHONUNBUFFERED"] = "1"
+        env = repl_environment()
         self._proc = subprocess.Popen(
             [self._ws.python, "-u", str(server), str(w), str(self._ws.root / "_repl_output.bin")],
             cwd=str(self._ws.cwd),

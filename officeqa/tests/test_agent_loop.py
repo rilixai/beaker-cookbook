@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from officeqa import cli
+from officeqa.agent import prompts
 from officeqa.agent.agent import (
     Episode,
     LLMResponse,
@@ -24,7 +25,7 @@ from officeqa.config import RunConfig
 from officeqa.data.corpus import Workspace, create_workspace
 from officeqa.data.dataset import EvalRecord
 from officeqa.data.manifest import build_manifest
-from officeqa.evaluation.run_eval import select_to_run, summarize
+from officeqa.evaluation.run_eval import format_summary, select_to_run, summarize
 from officeqa.runner import (
     RetryBudget,
     RunResult,
@@ -234,6 +235,67 @@ def test_timeout_scores_zero_keeps_partial_trajectory(records: list[EvalRecord],
     assert res.error is not None and "timed out" in res.error and not res.clean
 
 
+class SlowThenFastFactory:
+    """First ``slow`` clients stall past the task timeout; later ones answer immediately."""
+
+    def __init__(self, slow: int, answer: str) -> None:
+        self.slow, self.answer, self.created = slow, answer, 0
+
+    def __call__(self, _cfg: RunConfig) -> Any:
+        self.created += 1
+        if self.created <= self.slow:
+
+            class Slow:
+                async def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> LLMResponse:
+                    await asyncio.sleep(5)
+                    return final("never")
+
+            return Slow()
+        return ScriptedClient([final(self.answer)])
+
+
+def test_timeout_is_retried_from_the_shared_budget(records: list[EvalRecord], corpus: Path, tmp_path: Path) -> None:
+    budget = RetryBudget(3)
+    res = run(
+        run_one_async(
+            records[0],
+            cfg=_cfg(task_timeout_s=0.3),
+            corpus_root=corpus,
+            work_dir=tmp_path / "w",
+            client_factory=SlowThenFastFactory(slow=2, answer="9876543.21"),
+            retry_budget=budget,
+            isolate=False,
+        )
+    )
+    assert res.status == "answered" and res.correct == 1.0 and res.attempts == 3 and budget.used == 2
+    assert [a["status"] for a in res.retried_attempts] == ["timeout", "timeout"]
+    # Each timed-out attempt had one model call cancelled in flight; the summary flags the spend as a lower bound.
+    assert res.interrupted_requests == 2
+    s = summarize([res], expected=[res.uid])
+    assert s["interrupted_requests"] == 2 and "lower bounds" in format_summary(s)
+    assert "lower bounds" not in format_summary(summarize([], expected=[]))
+
+
+def test_timeout_with_exhausted_budget_keeps_last_timeout(
+    records: list[EvalRecord], corpus: Path, tmp_path: Path
+) -> None:
+    budget = RetryBudget(1)
+    res = run(
+        run_one_async(
+            records[0],
+            cfg=_cfg(task_timeout_s=0.3),
+            corpus_root=corpus,
+            work_dir=tmp_path / "w",
+            client_factory=SlowThenFastFactory(slow=99, answer="x"),
+            retry_budget=budget,
+            isolate=False,
+        )
+    )
+    assert res.status == "timeout" and res.attempts == 2 and budget.used == 1 and not res.clean
+    assert res.error is not None and "timed out" in res.error and "retry budget exhausted" in res.error
+    assert len(res.retried_attempts) == 1 and res.trajectory[0]["role"] == "system"
+
+
 def test_resume_reuses_clean_reruns_unclean(records: list[EvalRecord], corpus: Path, tmp_path: Path) -> None:
     results_dir = tmp_path / "results"
     cfg = _cfg()
@@ -257,6 +319,14 @@ def test_resume_reuses_clean_reruns_unclean(records: list[EvalRecord], corpus: P
     todo = select_to_run(records, existing)
     assert [r.uid for r in todo] == [records[1].uid, records[2].uid]  # clean q1 reused; timeout + missing re-run
     assert [r.uid for r in select_to_run(records, existing, rerun=True)] == [r.uid for r in records]
+
+    # A clean result is only reusable under the configuration that produced it.
+    assert first.config == cfg.behavior() and first.compatible_with(cfg)
+    assert [r.uid for r in select_to_run(records, existing, cfg=cfg)] == [records[1].uid, records[2].uid]
+    other = dataclasses.replace(cfg, model="scripted/other")
+    assert [r.uid for r in select_to_run(records, existing, cfg=other)] == [r.uid for r in records]
+    legacy = {u: RunResult.from_json(r.to_json() | {"config": {}}) for u, r in existing.items()}
+    assert [r.uid for r in select_to_run(records, legacy, cfg=other)] == [records[1].uid, records[2].uid]
 
     # Timeouts/errors are included (as 0) in aggregates, never dropped.
     s = summarize(list(existing.values()), expected=[r.uid for r in records])
@@ -301,6 +371,55 @@ def test_evaluate_summary_only_needs_no_corpus(
         and summary["tools"] == ["fs", "repl", "web"]
     )
     assert "correctness" in capsys.readouterr().out
+
+
+def test_resume_refuses_to_mix_configurations(
+    records: list[EvalRecord], corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "out"
+    cfg = _cfg(model="scripted/a", tools=("fs", "repl"))
+    saved = {"config": dataclasses.asdict(cfg) | {"tools": list(cfg.tools)}, "uids": [records[0].uid]}
+    out.mkdir()
+    (out / "config.json").write_text(json.dumps(saved))
+    monkeypatch.setattr(cli, "load_split", lambda split, limit=None: records[:limit])
+    monkeypatch.setattr(cli, "ensure_corpus", lambda *a, **k: pytest.fail("must refuse before touching the corpus"))
+    monkeypatch.setattr(cli, "run_split", lambda *a, **k: pytest.fail("must not run the agent"))
+    base = ["--split", "train", "--limit", "1", "--output-dir", str(out), "--corpus", "parsed", "--tools", "fs,repl"]
+    base += ["--max-steps", str(cfg.max_steps)]
+
+    assert cli.main(["evaluate", *base, "--model", "scripted/b"]) == 2  # different model
+    assert cli.main(["run", *base, "--model", "scripted/a", "--tools", "fs"]) == 2  # different tool set
+    assert json.loads((out / "config.json").read_text()) == saved  # original provenance untouched
+
+    # Operational knobs may change between resumes; --rerun bypasses the check entirely.
+    monkeypatch.setattr(cli, "ensure_corpus", lambda *a, **k: corpus)
+    monkeypatch.setattr(cli, "run_split", lambda *a, **k: [])
+    assert cli.main(["evaluate", *base, "--model", "scripted/a", "--max-concurrent", "2", "--max-retries", "0"]) == 0
+    assert cli.main(["run", *base, "--model", "scripted/b", "--rerun"]) == 0
+    assert json.loads((out / "config.json").read_text())["config"]["model"] == "scripted/b"
+
+
+def test_cli_rejects_invalid_numeric_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli, "load_split", lambda *a, **k: pytest.fail("flags are validated first"))
+    args = ["run", "--split", "train", "--output-dir", str(tmp_path / "o")]
+    assert cli.main([*args, "--max-concurrent", "0"]) == 2
+    assert cli.main([*args, "--max-steps", "-1"]) == 2
+    assert cli.main([*args, "--task-timeout", "0"]) == 2
+
+
+def test_web_toolset_gets_the_verbatim_prompt(workspace: Workspace) -> None:
+    class Backend:
+        def search(self, query: str, max_results: int) -> list[dict[str, str]]:
+            return []
+
+    with_web = build_toolset(workspace, ("fs", "repl", "web"), web_backend=Backend())
+    without = build_toolset(workspace, ("fs", "repl"))
+    try:
+        assert OfficeQAAgent(ScriptedClient([]), with_web)._system_prompt == prompts.SYSTEM_PROMPT_VERBATIM
+        assert OfficeQAAgent(ScriptedClient([]), without)._system_prompt == prompts.SYSTEM_PROMPT_SEED
+    finally:
+        with_web.close()
+        without.close()
 
 
 def test_run_split_concurrency_and_queue_wait(records: list[EvalRecord], corpus: Path, tmp_path: Path) -> None:
