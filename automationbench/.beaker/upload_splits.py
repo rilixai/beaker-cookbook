@@ -15,8 +15,8 @@ from pathlib import Path
 from automationbench_skills.data.tasks import PUBLIC_DOMAINS, Sample, load_split
 
 
-TRAIN_PER_DOMAIN = 4
-TEST_PER_DOMAIN = 2
+TRAIN_PER_DOMAIN = 6
+TEST_PER_DOMAIN = 3
 DATASET_NAME = "automationbench-skills-quickstart"
 
 
