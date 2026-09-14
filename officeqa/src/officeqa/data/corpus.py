@@ -26,6 +26,7 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -158,9 +159,40 @@ class Workspace:
         return tuple(roots)
 
 
+PARENT_SITE_PTH = "_officeqa_parent_site.pth"
+
+
+def parent_site_packages() -> list[str]:
+    """site-packages of the interpreter running the harness, i.e. the recipe's own ``.venv``
+    where ``scripts/install-ocr-deps.sh`` puts the OCR libraries."""
+    paths = sysconfig.get_paths()
+    out: list[str] = []
+    for key in ("purelib", "platlib"):
+        p = paths[key]
+        if p not in out and Path(p).is_dir():
+            out.append(p)
+    return out
+
+
+def _site_packages_of(python: str) -> Path:
+    out = subprocess.run(
+        [python, "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return Path(out.stdout.strip())
+
+
 def _make_venv(venv: Path) -> str:
-    """Per-question virtualenv (report §3.2). System site-packages stay visible so
-    preinstalled OCR libraries work; anything the agent installs lands here."""
+    """Per-question virtualenv (report §3.2).
+
+    ``--system-site-packages`` only exposes the *base* interpreter, not the recipe's
+    ``.venv`` the harness runs from, so a ``.pth`` file additionally puts the parent's
+    site-packages on the child's path (after the child's own, so whatever the agent
+    ``pip install``s wins and never leaks back).
+    """
+    py = venv / ("Scripts" if os.name == "nt" else "bin") / ("python.exe" if os.name == "nt" else "python")
     if not venv.exists():
         uv = shutil.which("uv")
         if uv:
@@ -173,7 +205,10 @@ def _make_venv(venv: Path) -> str:
             subprocess.run(
                 [sys.executable, "-m", "venv", "--system-site-packages", str(venv)], check=True, capture_output=True
             )
-    py = venv / ("Scripts" if os.name == "nt" else "bin") / ("python.exe" if os.name == "nt" else "python")
+        parents = parent_site_packages()
+        if parents:
+            pth = _site_packages_of(str(py)) / PARENT_SITE_PTH
+            pth.write_text("".join(f"{p}\n" for p in parents), encoding="utf-8")
     return str(py)
 
 

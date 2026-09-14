@@ -34,9 +34,11 @@ the headline cells are empty. See
    `pytesseract easyocr pymupdf opencv-python-headless Pillow pdf2image
    pdfplumber pypdf PyPDF2 pdfminer.six rapidocr-onnxruntime ocrmypdf openpyxl
    camelot-py[base] tesserocr paddlepaddle paddleocr surya-ocr
-   python-doctr[torch]`. Per-question virtualenvs are created with
-   `--system-site-packages`, so whatever is installed in `.venv` is visible to
-   the agent. `--corpus parsed` needs none of this.
+   python-doctr[torch]`. Per-question virtualenvs put the recipe `.venv`'s
+   site-packages on their path (via a `.pth` file, behind their own), so
+   whatever is installed in `.venv` imports for the agent while anything the
+   agent `pip install`s stays in its own question. `--corpus parsed` needs
+   none of this.
 4. **A model key** for your `--model` (LiteLLM strings; default `gpt-5.4`, so
    `OPENAI_API_KEY`).
 

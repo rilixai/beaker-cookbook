@@ -40,8 +40,8 @@ if [ "$SYSTEM_ONLY" -eq 1 ]; then
   exit 0
 fi
 
-# Python packages go into the recipe's environment; per-question venvs are
-# created with --system-site-packages so the agent sees them.
+# Python packages go into the recipe's .venv; per-question venvs put its
+# site-packages on their path (a .pth file) so the agent can import them.
 cd "$(dirname "$0")/.."
 PIP=(uv pip install --python .venv/bin/python)
 if [ ! -x .venv/bin/python ]; then

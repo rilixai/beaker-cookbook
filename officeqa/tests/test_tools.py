@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
 
 from officeqa.agent.tools import PathOutsideWorkspace, PythonRepl, build_toolset, confine
-from officeqa.data.corpus import Workspace
+from officeqa.data import corpus as corpus_mod
+from officeqa.data.corpus import Workspace, create_workspace
 
 
 def run(coro):  # type: ignore[no-untyped-def]
@@ -182,6 +184,31 @@ def test_python_exec_does_not_inherit_host_secrets(workspace: Workspace, monkeyp
         assert out.strip() == "[]"
         assert "sk-test" not in run(ts.call("python_exec", {"code": "import os; print(dict(os.environ))"}))
         assert run(ts.call("python_exec", {"code": "import os; print('PATH' in os.environ)"})).strip() == "True"
+    finally:
+        ts.close()
+
+
+def test_isolated_python_exec_sees_recipe_env_packages(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Packages installed in the harness's own venv (install-ocr-deps.sh) must import in the per-question venv."""
+    parent_site = tmp_path / "recipe-site-packages"
+    parent_site.mkdir()
+    (parent_site / "officeqa_probe_ocr_lib.py").write_text("VERSION = 'from-recipe-venv'\n")
+    monkeypatch.setattr(corpus_mod, "parent_site_packages", lambda: [str(parent_site)])
+    ws = create_workspace(tmp_path / "work", "q-venv", corpus, isolate=True)
+    assert ws.python != sys.executable
+    ts = build_toolset(ws, ("repl",))
+    try:
+        assert run(ts.call("python_exec", {"code": "import sys; print(sys.prefix)"})).strip() == str(ws.root / ".venv")
+        out = run(ts.call("python_exec", {"code": "import officeqa_probe_ocr_lib as m; print(m.VERSION)"}))
+        assert out.strip() == "from-recipe-venv"
+        # The child's own site-packages come first, so agent installs shadow the parent and stay local.
+        code = (
+            "import sys, sysconfig; own = sysconfig.get_paths()['purelib']; "
+            f"print(sys.path.index(own) < sys.path.index({str(parent_site)!r}))"
+        )
+        assert run(ts.call("python_exec", {"code": code})).strip() == "True"
     finally:
         ts.close()
 
