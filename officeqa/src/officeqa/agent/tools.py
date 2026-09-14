@@ -669,13 +669,25 @@ class ToolSet:
         tool = self.tools.get(name)
         if tool is None:
             return f"Error: unknown tool {name!r}. Available: {', '.join(self.tools)}."
+
+        async def invoke() -> str:
+            try:
+                return await tool.fn(**arguments)
+            except TypeError as e:
+                return f"Error: bad arguments for {name}: {e}"
+            except Exception as e:
+                logger.exception("tool %s failed", name)
+                return f"Error: {type(e).__name__}: {e}"
+
         try:
-            return await tool.fn(**arguments)
-        except TypeError as e:
-            return f"Error: bad arguments for {name}: {e}"
-        except Exception as e:
-            logger.exception("tool %s failed", name)
-            return f"Error: {type(e).__name__}: {e}"
+            from beaker.tracing import current_trace
+        except ImportError:
+            return await invoke()
+
+        with current_trace().tool_call(name, arguments=arguments) as call:
+            output = await invoke()
+            call.output(output)
+        return output
 
     def close(self) -> None:
         if self.repl is not None:

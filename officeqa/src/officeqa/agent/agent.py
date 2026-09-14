@@ -129,7 +129,18 @@ class LiteLLMClient:
             kwargs["tool_choice"] = "auto"
         if self.reasoning_effort and self.reasoning_effort != "none":
             kwargs["reasoning_effort"] = self.reasoning_effort
-        resp = await litellm.acompletion(**kwargs)
+        # Beaker's LiteLLM adapter is optional evaluation instrumentation. It
+        # preserves normal production behavior when the dev-only dependency is
+        # absent, and is a no-op when no Beaker trace capture is active.
+        try:
+            from beaker.tracing import current_trace
+            from beaker.tracing.integrations.litellm import registered
+        except ImportError:
+            resp = await litellm.acompletion(**kwargs)
+        else:
+            async with registered(current_trace()) as litellm_trace:
+                resp = await litellm.acompletion(**kwargs)
+                await litellm_trace.flush()
         choice = resp.choices[0]
         msg = choice.message
         tool_calls: list[dict[str, Any]] = []
