@@ -459,6 +459,10 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
         partial = float(partial_credit(state))
         outcomes: list[Mapping[str, Any]] = list(state.get("_assertion_results") or [])
         diffs = ServiceDiffs(initial_state, initial_world, end_state)
+    elif not context:
+        # Beaker sheds ``context`` when a case result is over its wire limit;
+        # an absent context is not a failed case.
+        raise RuntimeError("CaseResult.context is empty (dropped for size?); the end state cannot be scored")
     else:
         error = error or "no end state reported"
         partial = 0.0
