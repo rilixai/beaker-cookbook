@@ -39,6 +39,7 @@ from typing import Any
 
 import verifiers as vf
 from automationbench.clients import RetryingOpenAIChatCompletionsClient
+from automationbench.domains import get_combined_dataset
 from automationbench.rubric import partial_credit
 from automationbench.rubric.registry import AssertionRegistry
 from automationbench.schema.world import WorldState
@@ -84,6 +85,8 @@ DEFAULT_TIMEOUT_SECONDS = 600.0
 # Dedicated variable for the run's gateway credential so the process's own
 # ``OPENAI_API_KEY`` (used by ``ModelSpec()`` defaults) is left untouched.
 _GATEWAY_API_KEY_VAR = "BEAKER_INFERENCE_API_KEY"
+# The scored benchmark domains (``upload_splits.py`` draws from the same set).
+_PUBLIC_DOMAINS = ("sales", "marketing", "operations", "support", "finance", "hr")
 
 
 class TaskRow(BaseModel):
@@ -167,6 +170,23 @@ class _TracedChatCompletionsClient(RetryingOpenAIChatCompletionsClient, _SpanPer
 @cache
 def _samples_by_name() -> dict[str, Sample]:
     return {sample.task_name: sample for sample in load_samples()}
+
+
+@cache
+def _authored_initial_states() -> dict[str, dict[str, Any]]:
+    """``task_name -> initial_state`` straight from the pinned benchmark package.
+
+    ``partial_credit`` excludes assertions already satisfied in the initial
+    world, so the scorer reads that world from the trusted dependency rather
+    than through the optimizer-editable ``src/`` loader ``run_case`` uses.
+    """
+    states: dict[str, dict[str, Any]] = {}
+    for row in get_combined_dataset(list(_PUBLIC_DOMAINS)):
+        info = row["info"]
+        if isinstance(info, str):
+            info = json.loads(info)
+        states[str(info["task_name"])] = dict(info.get("initial_state") or {})
+    return states
 
 
 def _candidate_root() -> Path:
@@ -682,7 +702,10 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
     context = result.context
     error = None if context.get("error") is None else str(context["error"])
     end_state = context.get("end_state")
-    initial_state = _sample_for(case.input, fallback_id=case.id).info.get("initial_state") or {}
+    task_name = str((case.input if isinstance(case.input, Mapping) else {}).get("task_name") or case.id).strip()
+    if task_name not in _authored_initial_states():
+        raise KeyError(f"unknown AutomationBench task_name {task_name!r}")
+    initial_state = _authored_initial_states()[task_name]
     entities = _entity_index(initial_state, end_state if isinstance(end_state, Mapping) else {})
     initial_world = WorldState(**initial_state) if initial_state else None
     held_initially = [
