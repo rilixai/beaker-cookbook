@@ -109,12 +109,13 @@ async def run_code_agent_on_task(
     logger: Logger,
     prompt_file_path: str,
     max_steps: int,
+    run_config: RunConfig | None = None,
 ) -> None:
     with AppWorld(task_id=task_id) as world:
         logger.start_task(world)
         instructions = render_instructions(prompt_file_path, world)
         agent, step_counter = build_agent(world, profile, instructions, logger)
-        run_config = RunConfig(tracing_disabled=True)
+        run_config = run_config if run_config is not None else RunConfig(tracing_disabled=True)
         input_: Any = "Begin. Submit your first code step with the execute_python tool."
         while not world.task_completed() and step_counter["count"] < max_steps:
             try:
@@ -160,6 +161,7 @@ async def run_code_agent_on_tasks(
     appworld_config: dict[str, Any],
     logger_config: dict[str, Any],
     max_steps: int,
+    run_config: RunConfig | None = None,
 ) -> None:
     print(f"Running Experiment: {experiment_name}")
     set_default_openai_api(profile.api_type)
@@ -183,4 +185,5 @@ async def run_code_agent_on_tasks(
                 logger=logger,
                 prompt_file_path=prompt_file_path,
                 max_steps=max_steps,
+                run_config=run_config,
             )
