@@ -1,6 +1,6 @@
 # beaker-cookbook
 <div align="center">
-  <img width="227" height="225" alt="Beaker" src="https://github.com/user-attachments/assets/174d316a-24c0-4832-9f93-9c0a77a19433" />
+  <img width="480" alt="Beaker" src="assets/logo.png" />
 
   <h3>Beaker, the autonomous AI engineer</h3>
 
