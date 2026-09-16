@@ -58,7 +58,7 @@ class Setup(RepositoryRunSetup[Row]):
 
 
 async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime) -> CaseResult:
-    from agents import set_trace_processors, set_tracing_disabled
+    from agents import RunHooks, set_trace_processors, set_tracing_disabled
     from agents.run import RunConfig
     from appworld import AppWorld, evaluate_tasks
     from appworld.apps.lib.models.db import get_db_home_path
@@ -81,6 +81,21 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime) -> CaseRes
             raise ValueError("This native Responses agent supports openai:<model> overrides only")
         profile = ModelProfile(name=model)
     previous_root = path_store.root
+
+    class ExecutionEvidence(RunHooks):
+        def __init__(self):
+            self.requests = 0
+            self.responses = 0
+            self.models = set()
+
+        async def on_llm_start(self, context, agent, system_prompt, input_items):
+            self.requests += 1
+            self.models.add(str(agent.model))
+
+        async def on_llm_end(self, context, agent, response):
+            self.responses += 1
+
+    evidence = ExecutionEvidence()
     try:
         with tempfile.TemporaryDirectory(prefix="beaker-appworld-case-") as temp:
             root = Path(temp)
@@ -102,6 +117,8 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime) -> CaseRes
                     logger_config={"color": False, "verbose": False},
                     max_steps=MAX_STEPS,
                     run_config=RunConfig(tracing_disabled=False),
+                    raise_execution_errors=True,
+                    run_hooks=evidence,
                 )
             metrics = evaluate_tasks(
                 task_ids=[task_id],
@@ -111,12 +128,27 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime) -> CaseRes
                 save_reports=False,
             )
             tracker = metrics["individual"][task_id]
-            return CaseResult(output={"task_id": task_id, "evaluation": tracker}, output_kind="record")
+            return CaseResult(
+                output={
+                    "task_id": task_id,
+                    "requested_model": profile.name,
+                    "execution": {
+                        "database_initialized": True,
+                        "model_requests": evidence.requests,
+                        "model_responses": evidence.responses,
+                        "requested_models": sorted(evidence.models),
+                    },
+                    "evaluation": tracker,
+                },
+                output_kind="record",
+            )
     finally:
-        AppWorld.close_all()
-        set_tracing_disabled(True)
-        path_store.update_root(previous_root)
-        get_db_home_path.cache_clear()
+        try:
+            AppWorld.close_all()
+        finally:
+            set_tracing_disabled(True)
+            path_store.update_root(previous_root)
+            get_db_home_path.cache_clear()
 
 
 async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) -> CaseScore:
@@ -125,6 +157,11 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
     evaluation = result.output.get("evaluation")
     if not isinstance(evaluation, dict):
         raise ValueError("AppWorld evaluator result is missing")
+    execution = result.output.get("execution")
+    if not isinstance(execution, dict) or not execution.get("database_initialized"):
+        raise RuntimeError("AppWorld execution did not initialize its database")
+    if execution.get("model_responses", 0) < 1 or execution.get("model_requests") != execution.get("model_responses"):
+        raise RuntimeError(f"AppWorld model execution was incomplete: {execution}")
     checks = []
     for key, verdict in (("passes", "pass"), ("failures", "fail")):
         for assertion in evaluation[key]:
@@ -141,6 +178,17 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
     tgc = float(all(check.verdict == "pass" for check in checks))
     if bool(evaluation["success"]) != bool(tgc):
         raise ValueError("AppWorld success flag disagrees with assertion results")
+    checks.append(
+        Check(
+            name="Execution completed",
+            verdict="pass",
+            informational=True,
+            message=(
+                f"Database initialized; requested models: {execution['requested_models']}; "
+                f"successful model responses: {execution['model_responses']}; AppWorld evaluation completed."
+            ),
+        )
+    )
     return CaseScore(objective=tgc, field_scores={"task_goal_completion": tgc}, checks=tuple(checks))
 
 

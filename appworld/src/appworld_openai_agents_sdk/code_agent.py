@@ -22,6 +22,7 @@ from agents import (
     FunctionToolResult,
     MaxTurnsExceeded,
     RunContextWrapper,
+    RunHooks,
     Runner,
     function_tool,
     set_default_openai_api,
@@ -110,6 +111,8 @@ async def run_code_agent_on_task(
     prompt_file_path: str,
     max_steps: int,
     run_config: RunConfig | None = None,
+    raise_execution_errors: bool = False,
+    run_hooks: RunHooks | None = None,
 ) -> None:
     with AppWorld(task_id=task_id) as world:
         logger.start_task(world)
@@ -124,6 +127,7 @@ async def run_code_agent_on_task(
                     input=input_,
                     max_turns=max_steps - step_counter["count"],
                     run_config=run_config,
+                    hooks=run_hooks,
                 )
             except MaxTurnsExceeded:
                 world.save_state()
@@ -133,6 +137,8 @@ async def run_code_agent_on_task(
             except (AgentsException, OpenAIError) as error:
                 print(f"Task {task_id} aborted: {error!r}")
                 world.save_state()
+                if raise_execution_errors:
+                    raise
                 break
             world.save_state()
             if world.task_completed():
@@ -162,6 +168,8 @@ async def run_code_agent_on_tasks(
     logger_config: dict[str, Any],
     max_steps: int,
     run_config: RunConfig | None = None,
+    raise_execution_errors: bool = False,
+    run_hooks: RunHooks | None = None,
 ) -> None:
     print(f"Running Experiment: {experiment_name}")
     set_default_openai_api(profile.api_type)
@@ -186,4 +194,6 @@ async def run_code_agent_on_tasks(
                 prompt_file_path=prompt_file_path,
                 max_steps=max_steps,
                 run_config=run_config,
+                raise_execution_errors=raise_execution_errors,
+                run_hooks=run_hooks,
             )
