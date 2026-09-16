@@ -19,7 +19,7 @@ RECIPE_DIR = Path(__file__).parent.parent
 
 
 def test_reasoning_profile_omits_sampling_params() -> None:
-    settings = ModelProfile(name="gpt-5.6", family="reasoning", reasoning_effort="high").settings()
+    settings = ModelProfile(name="gpt-5.6-sol", family="reasoning", reasoning_effort="high").settings()
     assert "temperature" not in settings
     assert "top_p" not in settings
     assert "seed" not in settings
@@ -36,12 +36,12 @@ def test_standard_profile_omits_reasoning() -> None:
 
 def test_family_default_output_budgets() -> None:
     assert DEFAULT_MAX_OUTPUT_TOKENS["reasoning"] > DEFAULT_MAX_OUTPUT_TOKENS["standard"]
-    profile = ModelProfile(name="gpt-5.6", family="reasoning", max_output_tokens=1234)
+    profile = ModelProfile(name="gpt-5.6-sol", family="reasoning", max_output_tokens=1234)
     assert profile.settings()["max_tokens"] == 1234
 
 
 def test_family_inferred_from_name() -> None:
-    assert ModelProfile(name="gpt-5.6").family == "reasoning"
+    assert ModelProfile(name="gpt-5.6-sol").family == "reasoning"
     assert ModelProfile(name="o3").family == "reasoning"
     assert ModelProfile(name="gpt-4o").family == "standard"
     assert ModelProfile(name="gpt-4o", family="reasoning").family == "reasoning"
@@ -49,7 +49,7 @@ def test_family_inferred_from_name() -> None:
 
 def test_cli_rejects_flags_for_wrong_model_kind() -> None:
     with pytest.raises(SystemExit):
-        _profile_from_args(_parse_args(["run", "--model", "gpt-5.6", "--temperature", "0.2"]))
+        _profile_from_args(_parse_args(["run", "--model", "gpt-5.6-sol", "--temperature", "0.2"]))
     with pytest.raises(SystemExit):
         _profile_from_args(_parse_args(["run", "--model", "gpt-4o", "--reasoning-effort", "high"]))
 
@@ -73,13 +73,13 @@ def test_cli_flags_override_config() -> None:
 
 def test_invalid_effort_rejected() -> None:
     with pytest.raises(ValueError):
-        ModelProfile(name="gpt-5.6", family="reasoning", reasoning_effort="ultra")
+        ModelProfile(name="gpt-5.6-sol", family="reasoning", reasoning_effort="ultra")
 
 
 def test_example_configs_load() -> None:
     config = RECIPE_DIR / "configs" / "model.toml"
     default = ModelProfile.from_toml(config)
-    assert default.name == "gpt-5.6"
+    assert default.name == "gpt-5.6-sol"
     assert default.family == "reasoning" and default.reasoning_effort == "medium"
     standard = ModelProfile.from_toml(config, model="gpt-4.1")
     assert standard.family == "standard" and standard.temperature == 0.0
