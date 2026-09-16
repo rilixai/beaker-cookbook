@@ -289,8 +289,6 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             timeout = f"timeout after {DEFAULT_TIMEOUT_SECONDS + TIMEOUT_GRACE_SECONDS}s"
             stage.output({"error": timeout})
             raise RetryableCaseError(timeout) from exc
-        except Exception as exc:
-            raise RetryableCaseError(f"{type(exc).__name__}: {exc}") from exc
         finally:
             if client is not None:
                 await client.close()
@@ -298,7 +296,6 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
         completion = output.get("completion") or []
         result_error = _rollout_error(output.get("error"))
         end_state = output.get("_end_state")
-        perf = output.get("_perf") or {}
         # verifiers swallows rollout exceptions into ``state["error"]`` and
         # still grades the untouched world. A model/provider/infra failure
         # means the agent never got to act, so the case did not run; an
@@ -309,10 +306,11 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             stage.output({"error": message})
             raise RetryableCaseError(message) from result_error
         # The client retries provider failures for longer than the env's time
-        # budget, so a run whose every request failed ends by timeout with
-        # ``error`` unset and an untouched world: the agent never acted.
-        if result_error is None and not perf.get("model_calls"):
-            message = "rollout ended without a completed model call"
+        # budget, so a run whose every request failed ends by the env's own
+        # timeout with no completed turn (``completion`` is empty) and an
+        # untouched world: the agent never acted.
+        if output.get("stop_condition") == "timeout_reached" and not completion:
+            message = "timed out before the first completed model turn"
             stage.output({"error": message})
             raise RetryableCaseError(message)
 
