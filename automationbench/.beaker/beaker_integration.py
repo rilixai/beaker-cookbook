@@ -64,7 +64,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, field_validator
 from verifiers.clients import OpenAIChatCompletionsClient
 from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
-from verifiers.types import RolloutInput
+from verifiers.types import ClientConfig, RolloutInput
 from world_diff import ServiceDiffs, clip, service_for
 
 from automationbench_skills.data.tasks import Sample, load_samples
@@ -217,12 +217,15 @@ def _client_for(runtime: RolloutRuntime[Any]) -> tuple[_TracedChatCompletionsCli
     if runtime.model:
         target = inference_target(runtime)
         model = ModelSpec(name=target.model, base_url=target.base_url, api="chat_completions", reasoning_effort=None)
-        client = AsyncOpenAI(api_key=target.api_key, base_url=target.base_url)
+        api_key: str | None = target.api_key
     else:
         model = ModelSpec()
         if model.resolved_api() != "chat_completions":
             raise RuntimeError(f"Beaker evaluation expects a Chat Completions model; got {model.resolved_api()!r}.")
-        client = AsyncOpenAI(api_key=os.environ.get(model.api_key_var), base_url=model.base_url)
+        api_key = os.environ.get(model.api_key_var)
+    # Same SDK-level retry and timeout settings as the harness's own verifiers client.
+    sdk = ClientConfig(api_key_var=model.api_key_var)
+    client = AsyncOpenAI(api_key=api_key, base_url=model.base_url, max_retries=sdk.max_retries, timeout=sdk.timeout)
     return _TracedChatCompletionsClient(client), model
 
 
