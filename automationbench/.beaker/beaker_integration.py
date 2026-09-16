@@ -60,6 +60,7 @@ from beaker import (
 from beaker.sdk.utils import to_json_safe
 from beaker.tracing import current_trace
 from pydantic import BaseModel, Field, field_validator
+from verifiers.clients import OpenAIChatCompletionsClient
 from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
 from verifiers.types import ClientConfig, RolloutInput
 
@@ -80,7 +81,9 @@ from automationbench_skills.vendored.model_setup import build_sampling_args
 # as a field score but does not drive the optimizer objective.
 FIELD_WEIGHTS = {"partial_credit": 1.0, "task_completed_correctly": 0.0}
 DEFAULT_TIMEOUT_SECONDS = 600.0
-_GATEWAY_API_KEY_VAR = "OPENAI_API_KEY"
+# Dedicated variable for the run's gateway credential so the process's own
+# ``OPENAI_API_KEY`` (used by ``ModelSpec()`` defaults) is left untouched.
+_GATEWAY_API_KEY_VAR = "BEAKER_INFERENCE_API_KEY"
 
 
 class TaskRow(BaseModel):
@@ -124,17 +127,13 @@ class TaskSetup(RepositoryRunSetup[TaskRow]):
         )
 
 
-class _TracedChatCompletionsClient(RetryingOpenAIChatCompletionsClient):
-    """Same client the harness already accepts, with Beaker spans on each call.
+class _SpanPerRequest(OpenAIChatCompletionsClient):
+    """One Beaker ``model_call`` span per provider request.
 
-    verifiers drives the agent loop itself and takes the client object as a
-    parameter, so Beaker's LiteLLM/OpenAI/Anthropic integrations never see the
-    calls. Subclassing keeps the exact type the harness checks for and wraps
-    the one method every turn goes through: each span carries the full message
-    list for that turn (tool calls and simulated tool results included, since
-    they come back as messages) and the provider response, which is where the
-    run's token usage and model-call counts come from. Only the candidate's
-    calls are traced; the assertion rubric is deterministic and makes none.
+    Sits below ``RetryingOpenAIChatCompletionsClient`` in the MRO so its retry
+    loop calls into here on every attempt: a retried request (empty response,
+    5xx, dropped connection) gets its own span with its own usage or error,
+    instead of only the final attempt being recorded.
     """
 
     async def get_native_response(
@@ -149,6 +148,20 @@ class _TracedChatCompletionsClient(RetryingOpenAIChatCompletionsClient):
             response = await super().get_native_response(prompt, model, sampling_args, tools, **kwargs)
             call.output(to_json_safe(response))
             return response
+
+
+class _TracedChatCompletionsClient(RetryingOpenAIChatCompletionsClient, _SpanPerRequest):
+    """Same client the harness already accepts, with Beaker spans on each request.
+
+    verifiers drives the agent loop itself and takes the client object as a
+    parameter, so Beaker's LiteLLM/OpenAI/Anthropic integrations never see the
+    calls. Subclassing keeps the exact type the harness checks for; each span
+    carries the full message list for that turn (tool calls and simulated tool
+    results included, since they come back as messages) and the provider
+    response, which is where the run's token usage and model-call counts come
+    from. Only the candidate's calls are traced; the assertion rubric is
+    deterministic and makes none.
+    """
 
 
 @cache
@@ -234,6 +247,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             "system_prompt_chars": len(system_prompt or ""),
         },
     ) as stage:
+        client: _TracedChatCompletionsClient | None = None
         try:
             env = get_env(
                 toolset="zapier",
@@ -260,22 +274,22 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             )
             # The env stops its own loop at ``DEFAULT_TIMEOUT_SECONDS`` and
             # scores the world as the agent left it; this guard only catches a
-            # rollout stuck outside that loop.
+            # rollout stuck outside that loop, which leaves nothing to grade.
             output = await asyncio.wait_for(rollout, DEFAULT_TIMEOUT_SECONDS + TIMEOUT_GRACE_SECONDS)
-        except TimeoutError:
+        except TimeoutError as exc:
             timeout = f"timeout after {DEFAULT_TIMEOUT_SECONDS + TIMEOUT_GRACE_SECONDS}s"
             stage.output({"error": timeout})
-            return CaseResult(
-                output=None,
-                output_kind="none",
-                context={"task_name": sample.task_name, "domain": sample.domain, "error": timeout},
-            )
+            raise RetryableCaseError(timeout) from exc
         except Exception as exc:
             raise RetryableCaseError(f"{type(exc).__name__}: {exc}") from exc
+        finally:
+            if client is not None:
+                await client.close()
 
         completion = output.get("completion") or []
         result_error = _rollout_error(output.get("error"))
         end_state = output.get("_end_state")
+        perf = output.get("_perf") or {}
         # verifiers swallows rollout exceptions into ``state["error"]`` and
         # still grades the untouched world. A model/provider/infra failure
         # means the agent never got to act, so the case did not run; an
@@ -285,6 +299,13 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             message = f"{type(result_error).__name__}: {result_error}"
             stage.output({"error": message})
             raise RetryableCaseError(message) from result_error
+        # The client retries provider failures for longer than the env's time
+        # budget, so a run whose every request failed ends by timeout with
+        # ``error`` unset and an untouched world: the agent never acted.
+        if result_error is None and not perf.get("model_calls"):
+            message = "rollout ended without a completed model call"
+            stage.output({"error": message})
+            raise RetryableCaseError(message)
 
         error = None if result_error is None else f"{type(result_error).__name__}: {result_error}"
         # The scorer needs the error and the end state; the model/tool turns are
