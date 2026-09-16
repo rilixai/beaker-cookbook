@@ -1,10 +1,13 @@
 """Convert frozen AutomationBench splits to a temporary Beaker JSONL dataset and upload it.
 
 Writes nothing into the repository. Invoke from the automationbench project root.
+The dataset is uploaded to the agent recorded in ``.beaker/beaker.yaml`` (the key
+``beaker agent setup`` wrote), unless ``--agent`` overrides it.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import subprocess
@@ -12,12 +15,25 @@ import tempfile
 from collections import defaultdict
 from pathlib import Path
 
+import yaml
+
 from automationbench_skills.data.tasks import PUBLIC_DOMAINS, Sample, load_split
 
 
 TRAIN_PER_DOMAIN = 6
 TEST_PER_DOMAIN = 3
 DATASET_NAME = "automationbench-skills-quickstart"
+BEAKER_YAML = Path(__file__).resolve().parent / "beaker.yaml"
+
+
+def configured_agent_key() -> str:
+    config = yaml.safe_load(BEAKER_YAML.read_text(encoding="utf-8"))
+    integrations = config["integrations"]
+    integration = integrations[config.get("default_integration") or next(iter(integrations))]
+    agent_key = integration.get("agent_key")
+    if not agent_key:
+        raise RuntimeError(f"no agent_key in {BEAKER_YAML}; run `beaker agent setup` first or pass --agent")
+    return str(agent_key)
 
 
 def _user_prompt(sample: Sample) -> str:
@@ -52,6 +68,10 @@ def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--agent", default=None, help="agent key; defaults to agent_key in .beaker/beaker.yaml")
+    args = parser.parse_args()
+    agent_key = args.agent or configured_agent_key()
     train_rows = _take_per_domain("train", TRAIN_PER_DOMAIN)
     test_rows = _take_per_domain("test", TEST_PER_DOMAIN)
     with tempfile.TemporaryDirectory(prefix="beaker-dataset-") as temp_dir:
@@ -74,7 +94,7 @@ def main() -> None:
                 "--name",
                 DATASET_NAME,
                 "--agent",
-                "automationbench-skills",
+                agent_key,
                 "--total-count",
                 str(sum(len(rows) for rows in splits.values())),
                 "--split",
