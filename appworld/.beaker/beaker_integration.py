@@ -113,6 +113,8 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime) -> CaseRes
     from agents import set_tracing_disabled
     from agents.run import RunConfig
     from agents.tracing import get_trace_provider
+    from appworld import AppWorld
+    from appworld.apps.lib.models.db import get_db_home_path
     from appworld.common.path_store import path_store
     from appworld.evaluator import evaluate_task
 
@@ -136,6 +138,9 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime) -> CaseRes
             previous_root = path_store.root
             previous_disabled = get_trace_provider()._disabled
             path_store.update_root(temp)
+            # AppWorld caches paths without including APPWORLD_ROOT in the key.
+            # A reused evaluator must not retain the previous case's deleted root.
+            get_db_home_path.cache_clear()
             try:
                 # Enable telemetry only for this evaluation scope and restore it below.
                 if runtime.trace.enabled:
@@ -160,7 +165,11 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime) -> CaseRes
                 return CaseResult(output={"tasks": outcomes}, output_kind="record")
             finally:
                 set_tracing_disabled(previous_disabled)
-                path_store.update_root(previous_root)
+                try:
+                    AppWorld.close_all()
+                finally:
+                    path_store.update_root(previous_root)
+                    get_db_home_path.cache_clear()
 
 
 async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) -> CaseScore:
