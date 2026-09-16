@@ -29,7 +29,6 @@ model, so there is no framework integration to enable here.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from collections.abc import AsyncIterator, Mapping
@@ -64,20 +63,17 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, field_validator
 from verifiers.clients import OpenAIChatCompletionsClient
 from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
-from verifiers.types import ClientConfig, RolloutInput
+from verifiers.types import ClientConfig
 from world_diff import ServiceDiffs, clip, service_for
 
 from automationbench_skills.data.tasks import Sample, load_samples
-from automationbench_skills.prompts import load_system_prompt, with_system_prompt
+from automationbench_skills.prompts import load_system_prompt
 from automationbench_skills.runner import (
     DEFAULT_MAX_STEPS,
-    STATE_COLUMNS,
     TIMEOUT_GRACE_SECONDS,
     ModelSpec,
-    get_env,
+    run_rollout_raw,
 )
-from automationbench_skills.skills_tools import set_skills_dir
-from automationbench_skills.vendored.model_setup import build_sampling_args
 
 
 # Hill-climb on assertion partial credit. Strict pass rate is still recorded
@@ -256,42 +252,29 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             "system_prompt_chars": len(system_prompt or ""),
         },
     ) as stage:
-        client: _TracedChatCompletionsClient | None = None
+        client, model = _client_for(runtime)
         try:
-            env = get_env(
-                toolset="zapier",
-                skills=True,
+            # Same execution path as the app's own ``run_one_async``; only the
+            # client (traced, run-scoped) and the scoring below are Beaker's.
+            # The env stops its own loop at ``DEFAULT_TIMEOUT_SECONDS`` and
+            # scores the world as the agent left it; the helper's watchdog only
+            # catches a rollout stuck outside that loop, which leaves nothing
+            # to grade.
+            output = await run_rollout_raw(
+                sample,
+                model=model,
+                client=client,
+                skills_dir=skills_dir,
+                prompts_dir=prompts_dir,
                 max_steps=DEFAULT_MAX_STEPS,
                 timeout=DEFAULT_TIMEOUT_SECONDS,
             )
-            set_skills_dir(skills_dir)
-            client, model = _client_for(runtime)
-            sampling_args = build_sampling_args(
-                model.name, "chat_completions", model.reasoning_effort, model.extra_body
-            )
-            rollout = env.run_rollout(
-                RolloutInput(
-                    prompt=with_system_prompt(sample.prompt, system_prompt),
-                    example_id=sample.index,
-                    answer=sample.answer,
-                    info=sample.info,
-                ),
-                client,
-                model.name,
-                sampling_args or {},
-                state_columns=STATE_COLUMNS,
-            )
-            # The env stops its own loop at ``DEFAULT_TIMEOUT_SECONDS`` and
-            # scores the world as the agent left it; this guard only catches a
-            # rollout stuck outside that loop, which leaves nothing to grade.
-            output = await asyncio.wait_for(rollout, DEFAULT_TIMEOUT_SECONDS + TIMEOUT_GRACE_SECONDS)
         except TimeoutError as exc:
             timeout = f"timeout after {DEFAULT_TIMEOUT_SECONDS + TIMEOUT_GRACE_SECONDS}s"
             stage.output({"error": timeout})
             raise RetryableCaseError(timeout) from exc
         finally:
-            if client is not None:
-                await client.close()
+            await client.close()
 
         completion = output.get("completion") or []
         result_error = _rollout_error(output.get("error"))

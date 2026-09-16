@@ -203,6 +203,38 @@ def _to_result(sample: Sample, output: dict[str, Any]) -> RunResult:
     )
 
 
+async def run_rollout_raw(
+    sample: Sample,
+    *,
+    model: ModelSpec,
+    client: Client,
+    skills_dir: Path | str | None = None,
+    prompts_dir: Path | str | None = None,
+    toolset: str = "zapier",
+    max_steps: int = DEFAULT_MAX_STEPS,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    """Run ONE agent rollout with ``client`` and return verifiers' raw output.
+
+    The shared execution path behind :func:`run_one_async` and the Beaker
+    integration: environment, skills directory, system prompt, sampling
+    arguments and the outer watchdog are set up identically for both. Raises
+    ``TimeoutError`` when the rollout outlives ``timeout`` plus its grace.
+    """
+    env = get_env(toolset=toolset, skills=skills_dir is not None, max_steps=max_steps, timeout=timeout)
+    set_skills_dir(skills_dir)
+    sampling_args = build_sampling_args(model.name, model.resolved_api(), model.reasoning_effort, model.extra_body)
+    rollout = env.run_rollout(
+        _rollout_input(sample, load_system_prompt(prompts_dir, skills=skills_dir is not None)),
+        client,
+        model.name,
+        sampling_args or {},
+        state_columns=STATE_COLUMNS,
+    )
+    output = await (asyncio.wait_for(rollout, timeout + TIMEOUT_GRACE_SECONDS) if timeout else rollout)
+    return dict(output)
+
+
 async def run_one_async(
     sample: Sample,
     *,
@@ -227,19 +259,17 @@ async def run_one_async(
     """
     if isinstance(model, str):
         model = ModelSpec(name=model)
-    env = get_env(toolset=toolset, skills=skills_dir is not None, max_steps=max_steps, timeout=timeout)
-    set_skills_dir(skills_dir)
-    client = get_client(model)
-    sampling_args = build_sampling_args(model.name, model.resolved_api(), model.reasoning_effort, model.extra_body)
-    rollout = env.run_rollout(
-        _rollout_input(sample, load_system_prompt(prompts_dir, skills=skills_dir is not None)),
-        client,
-        model.name,
-        sampling_args or {},
-        state_columns=STATE_COLUMNS,
-    )
     try:
-        output = await (asyncio.wait_for(rollout, timeout + TIMEOUT_GRACE_SECONDS) if timeout else rollout)
+        output = await run_rollout_raw(
+            sample,
+            model=model,
+            client=get_client(model),
+            skills_dir=skills_dir,
+            prompts_dir=prompts_dir,
+            toolset=toolset,
+            max_steps=max_steps,
+            timeout=timeout,
+        )
     except TimeoutError:
         return RunResult(
             task_name=sample.task_name,
