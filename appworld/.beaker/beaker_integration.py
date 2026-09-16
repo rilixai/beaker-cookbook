@@ -61,6 +61,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime) -> CaseRes
     from agents import set_trace_processors, set_tracing_disabled
     from agents.run import RunConfig
     from appworld import AppWorld, evaluate_tasks
+    from appworld.apps.lib.models.db import get_db_home_path
     from appworld.common.path_store import path_store
     from beaker.tracing.integrations import openai_agents
 
@@ -85,7 +86,9 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime) -> CaseRes
             root = Path(temp)
             (root / "data").symlink_to(data_root / "data", target_is_directory=True)
             path_store.update_root(str(root))
-            # Each Beaker repository case runs in its own evaluator process.
+            # AppWorld memoizes paths without including APPWORLD_ROOT in the key.
+            # Beaker can evaluate several cases in the same candidate process.
+            get_db_home_path.cache_clear()
             # Export its SDK spans through Beaker, without the default OpenAI exporter.
             set_trace_processors([])
             set_tracing_disabled(False)
@@ -113,6 +116,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime) -> CaseRes
         AppWorld.close_all()
         set_tracing_disabled(True)
         path_store.update_root(previous_root)
+        get_db_home_path.cache_clear()
 
 
 async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) -> CaseScore:
