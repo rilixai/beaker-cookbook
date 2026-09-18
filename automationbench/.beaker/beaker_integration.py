@@ -76,9 +76,9 @@ from automationbench_skills.runner import (
 )
 
 
-# Hill-climb on assertion partial credit. Strict pass rate is still recorded
-# as a field score but does not drive the optimizer objective.
-FIELD_WEIGHTS = {"partial_credit": 1.0, "task_completed_correctly": 0.0}
+# Hill-climb mostly on assertion partial credit, with strict task completion
+# as a smaller term so fully-correct runs are preferred.
+FIELD_WEIGHTS = {"partial_credit": 0.8, "task_completed_correctly": 0.2}
 DEFAULT_TIMEOUT_SECONDS = 600.0
 # The scored benchmark domains (``upload_splits.py`` draws from the same set).
 _PUBLIC_DOMAINS = ("sales", "marketing", "operations", "support", "finance", "hr")
