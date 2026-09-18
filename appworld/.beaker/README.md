@@ -38,3 +38,16 @@ and tool traces in Beaker. Scoring runs after the tracing scope closes.
 Run commands from `appworld/` with `uv run beaker`, selecting integration
 `appworld_openai_agents_sdk`. Strict smoke validates structure and labeled data;
 it does not execute the agent or establish benchmark quality.
+
+## Task Goal Completion agent
+
+`AppWorld Task Goal Completion` uses `.beaker/tgc.yaml` and integration
+`appworld_tgc`. Each case is one task. Its objective is 1 only when the official
+AppWorld evaluator passes every requirement for that task, otherwise 0.
+There is no partial credit. It reuses the SGC integration's runner and tracing.
+
+`uv run python .beaker/upload_dataset.py --tgc` uploads `appworld-tgc-full`:
+90 training cases and 57 evaluation cases from the official dev split.
+Use `uv run beaker --config-file .beaker/tgc.yaml` for this agent's commands.
+The earlier execution timeout remains undiagnosed; task-level grouping alone
+is not evidence that it is fixed.

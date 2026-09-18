@@ -14,16 +14,21 @@ from appworld_setup import prepare_appworld
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--tgc", action="store_true", help="Upload all 147 tasks individually for the TGC agent.")
     parser.add_argument(
         "--full", action="store_true", help="Upload all training scenarios and use dev for evaluation."
     )
     args = parser.parse_args()
+    if args.tgc:
+        args.full = True
+    cli = ["beaker", "--config-file", ".beaker/tgc.yaml"] if args.tgc else ["beaker"]
+    integration_id = "appworld_tgc" if args.tgc else "appworld_openai_agents_sdk"
     root = prepare_appworld()
     splits = {}
     for source_split in ("train", "dev") if args.full else ("train",):
         groups: dict[str, list[str]] = OrderedDict()
         for task_id in (root / f"data/datasets/{source_split}.txt").read_text().splitlines():
-            groups.setdefault(task_id.split("_")[0], []).append(task_id)
+            groups.setdefault(task_id if args.tgc else task_id.split("_")[0], []).append(task_id)
         rows = []
         selected_groups = list(groups.items()) if args.full else list(groups.items())[:4]
         for scenario, tasks in selected_groups:
@@ -33,7 +38,10 @@ def main() -> None:
                 specs = json.loads((task_dir / "specs.json").read_text())
                 inputs.append({"task_id": task_id, "instruction": specs["instruction"]})
                 expected[task_id] = json.loads((task_dir / "ground_truth/test_data.json").read_text())
-            rows.append({"id": scenario, "input": {"tasks": inputs}, "expected": expected})
+            if args.tgc:
+                rows.append({"id": scenario, "input": inputs[0], "expected": expected[scenario]})
+            else:
+                rows.append({"id": scenario, "input": {"tasks": inputs}, "expected": expected})
         if args.full:
             splits["train" if source_split == "train" else "test"] = rows
         else:
@@ -46,12 +54,12 @@ def main() -> None:
             (directory / f"{split}.jsonl").write_text("".join(json.dumps(row) + "\n" for row in selected))
         subprocess.run(
             [
-                "beaker",
+                *cli,
                 "run",
                 "smoke",
                 "--strict",
                 "--integration-id",
-                "appworld_openai_agents_sdk",
+                integration_id,
                 "--config",
                 json.dumps({"local_dataset_path": temporary}),
             ],
@@ -59,14 +67,14 @@ def main() -> None:
         )
         subprocess.run(
             [
-                "beaker",
+                *cli,
                 "dataset",
                 "upload",
                 temporary,
                 "--agent",
-                "appworld-fresh",
+                "appworld-task-goal-completion" if args.tgc else "appworld-fresh",
                 "--name",
-                "appworld-sgc-full" if args.full else "appworld-sgc-quickstart",
+                "appworld-tgc-full" if args.tgc else "appworld-sgc-full" if args.full else "appworld-sgc-quickstart",
                 "--total-count",
                 str(sum(len(rows) for rows in splits.values())),
                 "--split",
