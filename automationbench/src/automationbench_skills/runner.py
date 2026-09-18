@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,8 +40,8 @@ from automationbench_skills.vendored.model_setup import (
 )
 
 
-DEFAULT_MODEL = "gpt-5.6-luna"
-DEFAULT_REASONING_EFFORT = "xhigh"
+DEFAULT_MODEL = "gpt-6-astra"
+DEFAULT_REASONING_EFFORT = "max"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_API_KEY_VAR = "OPENROUTER_API_KEY"
 DEFAULT_MAX_STEPS = 50  # upstream eval.py's --max-turns default
@@ -55,7 +56,8 @@ STATE_COLUMNS = ["_usage", "_debug", "_assertion_results", "_end_state", "_perf"
 class ModelSpec:
     """A model selection threaded straight into AutomationBench's own routing
     (Anthropic-native for claude-*, Gemini interactions for gemini-*, OpenAI
-    chat/responses; gateway models via base_url). Not a capability profile."""
+    chat/responses; gateway models via base_url), plus OpenRouter for
+    ``vendor/model`` names. Not a capability profile."""
 
     name: str = DEFAULT_MODEL
     base_url: str | None = None
@@ -215,6 +217,8 @@ def get_client(model: ModelSpec) -> Client:
     if key not in _CLIENT_CACHE:
         resolved = model.resolved_api()
         key_var = model.effective_api_key_var()
+        if not os.environ.get(key_var):
+            raise ValueError(f"No API key found. Set the {key_var} environment variable.")
         if resolved == "chat_completions":
             _CLIENT_CACHE[key] = CostTrackingChatCompletionsClient(
                 ClientConfig(

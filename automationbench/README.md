@@ -78,6 +78,30 @@ uv run automationbench-skills run --split test --limit 3 \
 (upstream behavior). For a plain OpenAI-compatible gateway, use another model
 name or pass `--api chat_completions`.
 
+### OpenRouter
+
+A `vendor/model` name (or any `--base-url` on `openrouter.ai`) routes to
+[OpenRouter](https://openrouter.ai) over chat-completions, reading
+`OPENROUTER_API_KEY`. Reasoning is sent as OpenRouter's `reasoning` object:
+`--reasoning-effort` becomes `reasoning.effort` (pass `default` to send no
+effort) and `--reasoning-enabled` sets `reasoning.enabled` for models that only
+expose an on/off switch. Each response's `usage.cost` is accumulated into the
+task's `cost_usd`.
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+uv run automationbench-skills run --split test --no-skills --prompts-dir prompts \
+  --model z-ai/glm-5.3-flash --reasoning-effort max
+uv run automationbench-skills run --split test --skills-dir skills --prompts-dir prompts \
+  --model qwen/qwen3.8-flash --reasoning-effort default --reasoning-enabled
+```
+
+Every per-task JSON also records `latency_s` (wall time of the rollout),
+`usage` (input/output tokens) and `perf` (model calls, model/tool time,
+cached and reasoning tokens); `evaluate` reports `avg_latency_s` and
+`avg_cost_usd` next to the two scores (cost is `-` when the provider does not
+return it).
+
 ## Reference numbers
 
 Upstream reports strict pass rates (`task_completed_correctly`) of roughly
@@ -85,13 +109,17 @@ Upstream reports strict pass rates (`task_completed_correctly`) of roughly
 number, which adds guardrail and hidden-task components and uses a different
 harness.
 
-With this harness on the 150-task test split (`gpt-6-astra` with `max` reasoning,
-`--max-concurrent 16`, one seed):
+With this harness on the 150-task test split (`--max-concurrent 16`, one seed;
+skills arm uses `--skills-dir skills`, the seed skills):
 
-| arm | pass_rate | partial_credit |
-|---|---|---|
-| `--no-skills` | 0.510 | 0.829 |
-| `--skills-dir skills` (seed skills) | 0.507 | 0.837 |
+| model | arm | pass_rate | partial_credit |
+|---|---|---|---|
+| `gpt-6-astra` (`--reasoning-effort max`) | no skills | 0.510 | 0.829 |
+| `gpt-6-astra` (`--reasoning-effort max`) | skills | 0.507 | 0.837 |
+| `z-ai/glm-5.3-flash` via OpenRouter (`--reasoning-effort max`) | no skills | 0.333 | 0.701 |
+| `z-ai/glm-5.3-flash` via OpenRouter (`--reasoning-effort max`) | skills | 0.313 | 0.713 |
+| `qwen/qwen3.8-flash` via OpenRouter (`--reasoning-effort default --reasoning-enabled`) | no skills | 0.413 | 0.795 |
+| `qwen/qwen3.8-flash` via OpenRouter (`--reasoning-effort default --reasoning-enabled`) | skills | 0.447 | 0.802 |
 
 ### How a case is scored
 
