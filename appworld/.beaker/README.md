@@ -12,6 +12,12 @@ unused. `upload_dataset.py` validates real instructions and requirements, stages
 JSONL in a temporary directory, and uploads it to AppWorld Fresh. Dataset
 revisions are passed explicitly to smoke and launch rather than saved in YAML.
 
+`uv run python .beaker/upload_dataset.py --full` uploads `appworld-sgc-full`
+with all 90 official training tasks (30 scenarios) for optimization and all
+57 dev tasks (19 scenarios) for evaluation. Each scenario remains one Beaker
+case. The full dataset replaces the earlier training-only revision under that
+name; existing runs retain their original immutable dataset revisions.
+
 Editable scope: `code_agent.py` and the agent prompts. The integration imports
 the candidate application's runner and uses its prompt directory. Scoring,
 bootstrap code, fixed model configuration, and vendored code are outside scope.

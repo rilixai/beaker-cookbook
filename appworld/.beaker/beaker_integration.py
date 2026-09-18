@@ -1,4 +1,4 @@
-"""Optimize scenario goal completion using complete AppWorld training scenarios."""
+"""Optimize scenario goal completion using complete AppWorld train/dev scenarios."""
 
 from __future__ import annotations
 
@@ -55,10 +55,14 @@ class Setup(RepositoryRunSetup[Row]):
     async def load_cases(self, row: Row, *, runtime) -> AsyncIterator[Case]:
         import json
 
-        training = (self.root / "data/datasets/train.txt").read_text().splitlines()
-        expected_ids = {t for t in training if t.split("_")[0] == row.id}
+        allowed_tasks = [
+            task_id
+            for split in ("train", "dev")
+            for task_id in (self.root / f"data/datasets/{split}.txt").read_text().splitlines()
+        ]
+        expected_ids = {t for t in allowed_tasks if t.split("_")[0] == row.id}
         if {t.task_id for t in row.input.tasks} != expected_ids or not expected_ids:
-            raise ValueError(f"Scenario {row.id} must include all its training variants")
+            raise ValueError(f"Scenario {row.id} must include all its train/dev variants")
         for task in row.input.tasks:
             specs = json.loads((self.root / "data/tasks" / task.task_id / "specs.json").read_text())
             if task.instruction != specs["instruction"]:

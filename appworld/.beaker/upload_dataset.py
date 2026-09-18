@@ -1,7 +1,8 @@
-"""Upload four complete scenarios from the official training split."""
+"""Upload complete scenarios from the official training and development splits."""
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import tempfile
@@ -12,22 +13,36 @@ from appworld_setup import prepare_appworld
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--full", action="store_true", help="Upload all training scenarios and use dev for evaluation."
+    )
+    args = parser.parse_args()
     root = prepare_appworld()
-    groups: dict[str, list[str]] = OrderedDict()
-    for task_id in (root / "data/datasets/train.txt").read_text().splitlines():
-        groups.setdefault(task_id.split("_")[0], []).append(task_id)
-    rows = []
-    for scenario, tasks in list(groups.items())[:4]:
-        inputs, expected = [], {}
-        for task_id in tasks:
-            task_dir = root / "data/tasks" / task_id
-            specs = json.loads((task_dir / "specs.json").read_text())
-            inputs.append({"task_id": task_id, "instruction": specs["instruction"]})
-            expected[task_id] = json.loads((task_dir / "ground_truth/test_data.json").read_text())
-        rows.append({"id": scenario, "input": {"tasks": inputs}, "expected": expected})
+    splits = {}
+    for source_split in ("train", "dev") if args.full else ("train",):
+        groups: dict[str, list[str]] = OrderedDict()
+        for task_id in (root / f"data/datasets/{source_split}.txt").read_text().splitlines():
+            groups.setdefault(task_id.split("_")[0], []).append(task_id)
+        rows = []
+        selected_groups = list(groups.items()) if args.full else list(groups.items())[:4]
+        for scenario, tasks in selected_groups:
+            inputs, expected = [], {}
+            for task_id in tasks:
+                task_dir = root / "data/tasks" / task_id
+                specs = json.loads((task_dir / "specs.json").read_text())
+                inputs.append({"task_id": task_id, "instruction": specs["instruction"]})
+                expected[task_id] = json.loads((task_dir / "ground_truth/test_data.json").read_text())
+            rows.append({"id": scenario, "input": {"tasks": inputs}, "expected": expected})
+        if args.full:
+            splits["train" if source_split == "train" else "test"] = rows
+        else:
+            splits = {"train": rows[:3], "test": rows[3:]}
+    if {row["id"] for row in splits["train"]} & {row["id"] for row in splits["test"]}:
+        raise ValueError("Training and evaluation scenarios must be disjoint")
     with tempfile.TemporaryDirectory(prefix="beaker-appworld-dataset-") as temporary:
         directory = Path(temporary)
-        for split, selected in (("train", rows[:3]), ("test", rows[3:])):
+        for split, selected in splits.items():
             (directory / f"{split}.jsonl").write_text("".join(json.dumps(row) + "\n" for row in selected))
         subprocess.run(
             [
@@ -51,13 +66,13 @@ def main() -> None:
                 "--agent",
                 "appworld-fresh",
                 "--name",
-                "appworld-sgc-quickstart",
+                "appworld-sgc-full" if args.full else "appworld-sgc-quickstart",
                 "--total-count",
-                "4",
+                str(sum(len(rows) for rows in splits.values())),
                 "--split",
-                "train=3",
+                f"train={len(splits['train'])}",
                 "--split",
-                "test=1",
+                f"test={len(splits['test'])}",
                 "--json",
             ],
             check=True,
