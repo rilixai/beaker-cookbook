@@ -39,9 +39,6 @@ still scored on the world it has changed so far.
   has `list_skills()` / `read_skill(skill_id)` over the skills directory. An
   empty skills directory is fine.
 
-In both arms the task message is the dataset's. `--prompts-dir prompts` selects
-the prompt directory; without it the dataset's system prompt is used.
-
 A skill is a folder with a `SKILL.md` (YAML frontmatter `name`/`description`,
 markdown body). Its ID is its path under `skills/`:
 
@@ -61,12 +58,12 @@ the tasks' `zapier_tools`.
 `splits/train.txt` (450 tasks) and `splits/test.txt` (150 tasks) are a fixed
 75/25 split per domain, stratified by task family. See
 [`splits/README.md`](src/automationbench_skills/splits/README.md) for how they
-were made and the leakage policy. The 200-task `simple` domain
+were made. The 200-task `simple` domain
 (`splits/simple.txt`) is train-only and never scored.
 
 ## Models
 
-`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort xhigh`. Routing
+`--model` defaults to `gpt-6-astra` with `--reasoning-effort max`. Routing
 follows the benchmark (`vendored/model_setup.py`): `claude-*` goes to
 Anthropic, `gemini-*` to the Gemini interactions API, everything else to OpenAI
 chat-completions/responses. `--reasoning-effort` maps to each API's reasoning
@@ -88,16 +85,13 @@ Upstream reports strict pass rates (`task_completed_correctly`) of roughly
 number, which adds guardrail and hidden-task components and uses a different
 harness.
 
-With this harness on the 150-task test split (`gpt-5-mini`,
+With this harness on the 150-task test split (`gpt-6-astra` with `max` reasoning,
 `--max-concurrent 16`, one seed):
 
 | arm | pass_rate | partial_credit |
 |---|---|---|
-| `--no-skills` | 0.013 | 0.221 |
-| `--skills-dir skills` (seed skills) | 0.053 | 0.294 |
-
-The seed skills are stubs, so the gap is mostly run-to-run variance at n=150.
-Average a few runs before reading anything into differences this size.
+| `--no-skills` | 0.510 | 0.829 |
+| `--skills-dir skills` (seed skills) | 0.507 | 0.837 |
 
 ### How a case is scored
 
@@ -111,12 +105,8 @@ doing nothing scores 0.
 **Prefer `partial_credit` as the metric to optimize**, the share of assertions
 that hold (0–1). It is the objective in `.beaker/beaker_integration.py` and
 gives a much denser signal than `task_completed_correctly` (all assertions
-hold), which is the strict pass rate: report it, don't optimize for it.
-
-In Beaker's case view each assertion is one check, named with the records it
-refers to (`salesforce_campaign_member_exists · David Park · Q1 Product Launch
-Webinar`) rather than raw ids. A rollout the model or provider never completed
-is a failed case, not a zero.
+hold), which is the strict pass rate. It is also possible to optimize a combination
+of both.
 
 ## Development
 
