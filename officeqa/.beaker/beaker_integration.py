@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 
 HOSTED_CORPUS = "parsed"
+HOSTED_MAX_STEPS = 100
 _CORPUS_LOCK = Lock()
 
 
@@ -96,9 +97,9 @@ async def run_case(*, case_input: object, runtime: RolloutRuntime) -> CaseResult
     )
     selected_model = _litellm_model(runtime.model)
     cfg = (
-        RunConfig(model=selected_model, corpus=HOSTED_CORPUS)
+        RunConfig(model=selected_model, corpus=HOSTED_CORPUS, max_steps=HOSTED_MAX_STEPS)
         if selected_model is not None
-        else RunConfig(corpus=HOSTED_CORPUS)
+        else RunConfig(corpus=HOSTED_CORPUS, max_steps=HOSTED_MAX_STEPS)
     )
 
     with runtime.trace.stage(
