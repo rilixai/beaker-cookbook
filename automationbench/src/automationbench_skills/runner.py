@@ -40,8 +40,8 @@ from automationbench_skills.vendored.model_setup import (
 )
 
 
-DEFAULT_MODEL = "gpt-6-astra"
-DEFAULT_REASONING_EFFORT = "max"
+DEFAULT_MODEL = "gpt-5.6-luna"
+DEFAULT_REASONING_EFFORT = "medium"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_API_KEY_VAR = "OPENROUTER_API_KEY"
 DEFAULT_MAX_STEPS = 50  # upstream eval.py's --max-turns default

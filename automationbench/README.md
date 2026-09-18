@@ -63,7 +63,7 @@ were made. The 200-task `simple` domain
 
 ## Models
 
-`--model` defaults to `gpt-6-astra` with `--reasoning-effort max`. Routing
+`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort medium`. Routing
 follows the benchmark (`vendored/model_setup.py`): `claude-*` goes to
 Anthropic, `gemini-*` to the Gemini interactions API, everything else to OpenAI
 chat-completions/responses. `--reasoning-effort` maps to each API's reasoning
