@@ -78,29 +78,9 @@ uv run automationbench-skills run --split test --limit 3 \
 (upstream behavior). For a plain OpenAI-compatible gateway, use another model
 name or pass `--api chat_completions`.
 
-### OpenRouter
-
-A `vendor/model` name (or any `--base-url` on `openrouter.ai`) routes to
-[OpenRouter](https://openrouter.ai) over chat-completions, reading
-`OPENROUTER_API_KEY`. Reasoning is sent as OpenRouter's `reasoning` object:
-`--reasoning-effort` becomes `reasoning.effort` (pass `default` to send no
-effort) and `--reasoning-enabled` sets `reasoning.enabled` for models that only
-expose an on/off switch. Each response's `usage.cost` is accumulated into the
-task's `cost_usd`.
-
-```bash
-export OPENROUTER_API_KEY=sk-or-...
-uv run automationbench-skills run --split test --no-skills --prompts-dir prompts \
-  --model z-ai/glm-5.3-flash --reasoning-effort max
-uv run automationbench-skills run --split test --skills-dir skills --prompts-dir prompts \
-  --model qwen/qwen3.8-flash --reasoning-effort default --reasoning-enabled
-```
-
-Every per-task JSON also records `latency_s` (wall time of the rollout),
-`usage` (input/output tokens) and `perf` (model calls, model/tool time,
-cached and reasoning tokens); `evaluate` reports `avg_latency_s` and
-`avg_cost_usd` next to the two scores (cost is `-` when the provider does not
-return it).
+A `vendor/model` name (e.g. `z-ai/glm-5.3-flash`) routes to OpenRouter using
+`OPENROUTER_API_KEY`; `--reasoning-enabled` toggles reasoning for models that
+only expose an on/off switch.
 
 ## Reference numbers
 
