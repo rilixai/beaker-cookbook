@@ -13,7 +13,15 @@ from automationbench_skills import runner as runner_mod
 from automationbench_skills.data import PUBLIC_DOMAINS, load_samples, load_split, task_family
 from automationbench_skills.evaluation.summary import format_summary, summarize
 from automationbench_skills.prompts import load_system_prompt, with_system_prompt
-from automationbench_skills.runner import STATE_COLUMNS, _rollout_input, _to_result, get_env
+from automationbench_skills.runner import (
+    DEFAULT_REASONING_EFFORT,
+    OPENROUTER_BASE_URL,
+    STATE_COLUMNS,
+    ModelSpec,
+    _rollout_input,
+    _to_result,
+    get_env,
+)
 from automationbench_skills.skills_tools import list_skills, read_skill, set_skills_dir
 
 
@@ -140,6 +148,41 @@ class TestPrompts:
 
 
 class TestRunner:
+    def test_openrouter_routing(self) -> None:
+        openrouter = ModelSpec(name="z-ai/glm-5.3-flash", reasoning_effort="max")
+        assert openrouter.is_openrouter()
+        assert openrouter.resolved_api() == "chat_completions"
+        assert openrouter.effective_base_url() == OPENROUTER_BASE_URL
+        assert openrouter.effective_api_key_var() == "OPENROUTER_API_KEY"
+        assert openrouter.sampling_args() == {"extra_body": {"reasoning": {"effort": "max"}}}
+
+        qwen = ModelSpec(name="qwen/qwen3.8-flash", reasoning_effort="default", reasoning_enabled=True)
+        assert qwen.sampling_args() == {"extra_body": {"reasoning": {"enabled": True}}}
+
+        native = ModelSpec(name="gpt-6-astra")
+        assert not native.is_openrouter()
+        assert native.effective_api_key_var() == "OPENAI_API_KEY"
+        assert native.sampling_args() == {"reasoning_effort": DEFAULT_REASONING_EFFORT}
+
+        explicit = ModelSpec(name="z-ai/glm-5.3-flash", api_key_var="CUSTOM_API_KEY")
+        assert explicit.effective_api_key_var() == "CUSTOM_API_KEY"
+
+    def test_record_cost_reads_openrouter_usage(self) -> None:
+        from types import SimpleNamespace
+
+        import pytest
+        from openai.types import CompletionUsage
+
+        from automationbench_skills.clients import record_cost
+
+        usage = CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2, cost=0.0123)
+        response = SimpleNamespace(usage=usage)
+        state: dict[str, Any] = {}
+        record_cost(state, response)
+        record_cost(state, response)
+        assert state["_perf"]["cost_usd"] == pytest.approx(0.0246)
+        record_cost(None, response)
+
     async def test_baseline_has_no_skill_tools(self) -> None:
         client = ScriptedClient()
         output = await _rollout(client, skills=False)
@@ -217,6 +260,16 @@ class TestRunner:
         assert [m["role"] for m in result.trajectory] == ["assistant"]
         assert 0.0 <= result.partial_credit <= 1.0
 
+    async def test_result_records_latency_and_usage(self, monkeypatch: Any) -> None:
+        monkeypatch.setattr(runner_mod, "get_client", lambda model: ScriptedClient())
+        result = await runner_mod.run_one_async(_sample(), skills_dir=None)
+        assert isinstance(result.latency_s, float) and result.latency_s > 0
+        assert result.cost_usd is None
+        assert isinstance(result.usage, dict)
+        assert isinstance(result.perf, dict)
+        serialized = result.to_json()
+        assert {"latency_s", "cost_usd", "usage", "perf"} <= serialized.keys()
+
     def test_client_cache_is_per_event_loop(self, monkeypatch: Any) -> None:
         import asyncio
 
@@ -293,12 +346,33 @@ class TestRunner:
 class TestSummary:
     def test_summarize_and_format(self) -> None:
         rows = [
-            {"domain": "sales", "task_completed_correctly": 1.0, "partial_credit": 1.0},
-            {"domain": "sales", "task_completed_correctly": 0.0, "partial_credit": 0.5},
+            {
+                "domain": "sales",
+                "task_completed_correctly": 1.0,
+                "partial_credit": 1.0,
+                "latency_s": 2.0,
+                "cost_usd": 0.0123,
+            },
+            {
+                "domain": "sales",
+                "task_completed_correctly": 0.0,
+                "partial_credit": 0.5,
+                "latency_s": 4.0,
+                "cost_usd": 0.0456,
+            },
             {"domain": "hr", "task_completed_correctly": 0.0, "partial_credit": 0.0},
         ]
         summary = summarize(rows)
-        assert summary["domains"]["sales"] == {"tasks": 2, "pass_rate": 0.5, "partial_credit": 0.75}
+        assert summary["domains"]["sales"] == {
+            "tasks": 2,
+            "pass_rate": 0.5,
+            "partial_credit": 0.75,
+            "avg_latency_s": 3.0,
+            "avg_cost_usd": 0.02895,
+        }
+        assert summary["domains"]["hr"]["avg_latency_s"] is None
+        assert summary["domains"]["hr"]["avg_cost_usd"] is None
         assert summary["overall"]["tasks"] == 3
         text = format_summary(summary)
         assert "overall" in text and "sales" in text
+        assert "3.0" in text and "0.0290" in text and "-" in text

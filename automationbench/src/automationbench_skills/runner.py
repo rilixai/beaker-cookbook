@@ -17,13 +17,17 @@ them between calls changes agent behavior with no env rebuild.
 from __future__ import annotations
 
 import asyncio
+import json
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from verifiers.clients import Client
+from verifiers.legacy.types import ClientConfig
 from verifiers.types import RolloutInput
 
+from automationbench_skills.clients import CostTrackingChatCompletionsClient
 from automationbench_skills.data.tasks import Sample
 from automationbench_skills.prompts import load_system_prompt, with_system_prompt
 from automationbench_skills.skills_tools import SKILL_TOOLS, set_skills_dir
@@ -37,6 +41,8 @@ from automationbench_skills.vendored.model_setup import (
 
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_REASONING_EFFORT = "xhigh"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_API_KEY_VAR = "OPENROUTER_API_KEY"
 DEFAULT_MAX_STEPS = 50  # upstream eval.py's --max-turns default
 # Scoring and cleanup run after the env's own timeout stops the loop; the outer
 # guard only catches a rollout stuck outside that loop.
@@ -56,10 +62,40 @@ class ModelSpec:
     api_key_var: str = "OPENAI_API_KEY"
     api: str = "auto"  # or: anthropic | chat_completions | responses | gemini_interactions
     reasoning_effort: str | None = DEFAULT_REASONING_EFFORT
+    reasoning_enabled: bool | None = None
     extra_body: str | None = None  # raw JSON merged into every request body
 
+    def is_openrouter(self) -> bool:
+        return "openrouter.ai" in (self.base_url or "") or (self.base_url is None and "/" in self.name)
+
+    def effective_base_url(self) -> str | None:
+        if self.is_openrouter() and self.base_url is None:
+            return OPENROUTER_BASE_URL
+        return self.base_url
+
+    def effective_api_key_var(self) -> str:
+        if self.is_openrouter() and self.api_key_var == "OPENAI_API_KEY":
+            return OPENROUTER_API_KEY_VAR
+        return str(resolve_api_key_var(self.resolved_api(), self.api_key_var))
+
     def resolved_api(self) -> str:
+        if self.is_openrouter() and self.api == "auto":
+            return "chat_completions"
         return str(resolve_api(self.name, self.base_url, self.api))
+
+    def sampling_args(self) -> dict[str, Any]:
+        effort = self.reasoning_effort if self.reasoning_effort not in (None, "", "default") else None
+        if self.is_openrouter():
+            reasoning: dict[str, Any] = {}
+            if effort is not None:
+                reasoning["effort"] = effort
+            if self.reasoning_enabled is not None:
+                reasoning["enabled"] = self.reasoning_enabled
+            extra_body: dict[str, Any] = {"reasoning": reasoning} if reasoning else {}
+            if self.extra_body:
+                extra_body = {**extra_body, **json.loads(self.extra_body)}
+            return {"extra_body": extra_body} if extra_body else {}
+        return build_sampling_args(self.name, self.resolved_api(), effort, self.extra_body) or {}
 
 
 @dataclass
@@ -75,6 +111,10 @@ class RunResult:
     assertion_results: list[dict[str, Any]] = field(default_factory=list)
     error: Any | None = None
     raw: dict[str, Any] = field(default_factory=dict)  # full verifiers RolloutOutput
+    latency_s: float | None = None
+    cost_usd: float | None = None
+    usage: dict[str, Any] = field(default_factory=dict)
+    perf: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -86,6 +126,10 @@ class RunResult:
             "end_state": self.end_state,
             "assertion_results": self.assertion_results,
             "error": str(self.error) if self.error is not None else None,
+            "latency_s": self.latency_s,
+            "cost_usd": self.cost_usd,
+            "usage": self.usage,
+            "perf": self.perf,
         }
 
 
@@ -170,8 +214,17 @@ def get_client(model: ModelSpec) -> Client:
     key = (model, asyncio.get_running_loop())
     if key not in _CLIENT_CACHE:
         resolved = model.resolved_api()
-        key_var = resolve_api_key_var(resolved, model.api_key_var)
-        _CLIENT_CACHE[key] = build_client(resolved, key_var, model.base_url)
+        key_var = model.effective_api_key_var()
+        if resolved == "chat_completions":
+            _CLIENT_CACHE[key] = CostTrackingChatCompletionsClient(
+                ClientConfig(
+                    api_key_var=key_var,
+                    api_base_url=model.effective_base_url() or "https://api.openai.com/v1",
+                    extra_headers={},
+                )
+            )
+        else:
+            _CLIENT_CACHE[key] = build_client(resolved, key_var, model.effective_base_url())
     return _CLIENT_CACHE[key]
 
 
@@ -184,12 +237,14 @@ def _rollout_input(sample: Sample, system_prompt: str | None = None) -> RolloutI
     )
 
 
-def _to_result(sample: Sample, output: dict[str, Any]) -> RunResult:
+def _to_result(sample: Sample, output: dict[str, Any], latency_s: float | None = None) -> RunResult:
     metrics = output.get("metrics") or {}
     partial = float(metrics.get("partial_credit", output.get("reward", 0.0)))
     strict = float(metrics.get("task_completed_correctly", 1.0 if partial == 1.0 else 0.0))
     completion = output.get("completion") or []
     trajectory = [m if isinstance(m, dict) else m.model_dump(mode="json") for m in completion]
+    usage = output.get("_usage") or {}
+    perf = output.get("_perf") or {}
     return RunResult(
         task_name=sample.task_name,
         domain=sample.domain,
@@ -200,6 +255,10 @@ def _to_result(sample: Sample, output: dict[str, Any]) -> RunResult:
         assertion_results=output.get("_assertion_results") or [],
         error=output.get("error"),
         raw=dict(output),
+        latency_s=latency_s,
+        cost_usd=perf.get("cost_usd"),
+        usage=usage,
+        perf=perf,
     )
 
 
@@ -223,7 +282,7 @@ async def run_rollout_raw(
     """
     env = get_env(toolset=toolset, skills=skills_dir is not None, max_steps=max_steps, timeout=timeout)
     set_skills_dir(skills_dir)
-    sampling_args = build_sampling_args(model.name, model.resolved_api(), model.reasoning_effort, model.extra_body)
+    sampling_args = model.sampling_args()
     rollout = env.run_rollout(
         _rollout_input(sample, load_system_prompt(prompts_dir, skills=skills_dir is not None)),
         client,
@@ -259,6 +318,7 @@ async def run_one_async(
     """
     if isinstance(model, str):
         model = ModelSpec(name=model)
+    started = time.monotonic()
     try:
         output = await run_rollout_raw(
             sample,
@@ -279,8 +339,9 @@ async def run_one_async(
             trajectory=[],
             end_state=None,
             error=f"timeout after {timeout}s",
+            latency_s=time.monotonic() - started,
         )
-    return _to_result(sample, output)
+    return _to_result(sample, output, latency_s=time.monotonic() - started)
 
 
 def run_one(

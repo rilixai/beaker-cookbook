@@ -34,9 +34,16 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
         help="Directory holding the agent's system prompt: system.md, or system_no_skills.md with --no-skills (read live)",
     )
     p.add_argument("--model", default=DEFAULT_MODEL)
-    p.add_argument("--reasoning-effort", default=DEFAULT_REASONING_EFFORT)
+    p.add_argument(
+        "--reasoning-effort", default=DEFAULT_REASONING_EFFORT, help="reasoning level; 'default' sends none"
+    )
+    p.add_argument("--reasoning-enabled", action="store_true", default=None)
     p.add_argument("--base-url", default=None, help="OpenAI-compatible gateway base URL")
-    p.add_argument("--api-key-var", default="OPENAI_API_KEY")
+    p.add_argument(
+        "--api-key-var",
+        default="OPENAI_API_KEY",
+        help="API key environment variable (default OPENAI_API_KEY, OPENROUTER_API_KEY for OpenRouter models)",
+    )
     p.add_argument("--api", default="auto", help="auto|chat_completions|responses|anthropic|gemini_interactions")
     p.add_argument("--toolset", choices=["zapier", "api"], default="zapier")
     p.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
@@ -80,6 +87,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         api_key_var=args.api_key_var,
         api=args.api,
         reasoning_effort=args.reasoning_effort,
+        reasoning_enabled=args.reasoning_enabled,
     )
     (output_dir / "config.json").write_text(
         json.dumps(
@@ -87,9 +95,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 "split": args.split,
                 "limit": args.limit,
                 "model": model.name,
-                "base_url": model.base_url,
+                "base_url": model.effective_base_url(),
                 "api": model.api,
                 "reasoning_effort": model.reasoning_effort,
+                "reasoning_enabled": model.reasoning_enabled,
                 "toolset": args.toolset,
                 "max_steps": args.max_steps,
                 "skills_dir": str(skills_dir) if skills_dir else None,
