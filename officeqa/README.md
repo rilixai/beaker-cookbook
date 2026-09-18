@@ -58,11 +58,12 @@ uv run officeqa fetch --split test
 uv run officeqa run --split test --limit 10 --output-dir runs/test-gpt54
 
 # 3. Resume + score. Clean results are reused, errored/timed-out ones re-run.
-#    Resuming with a different model/corpus/tool set/step budget is refused
-#    (use a new --output-dir or --rerun) so one directory never mixes configurations.
+#    Resuming with a different model/corpus/tool set/step budget, or after the
+#    cached corpus gained/lost a representation, is refused (use a new
+#    --output-dir or --rerun) so one directory never mixes configurations.
 uv run officeqa evaluate --split test --output-dir runs/test-gpt54
 uv run officeqa evaluate --split test --output-dir runs/test-gpt54 --rerun          # force everything
-uv run officeqa evaluate --split test --output-dir runs/test-gpt54 --summary-only   # just aggregate
+uv run officeqa evaluate --output-dir runs/test-gpt54 --summary-only   # just aggregate, over the saved population
 ```
 
 `run` refuses to start on a cache whose representation does not hold all 697

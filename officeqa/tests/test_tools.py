@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from officeqa.agent.tools import PathOutsideWorkspace, PythonRepl, build_toolset, confine
+from officeqa.agent import tools as tools_mod
+from officeqa.agent.tools import PathOutsideWorkspace, PythonRepl, build_toolset, confine, read_confined_bytes
 from officeqa.data import corpus as corpus_mod
 from officeqa.data.corpus import Workspace, create_workspace
 
@@ -66,6 +67,33 @@ def test_confine_rejects_symlink_escape(workspace: Workspace, tmp_path: Path) ->
     (workspace.cwd / "sneaky").symlink_to(outside)
     with pytest.raises(PathOutsideWorkspace):
         confine("sneaky", workspace)
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="needs O_NOFOLLOW")
+def test_fs_read_does_not_follow_a_symlink_swapped_in_after_confinement(
+    workspace: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """confine() validates a symlink-free path; a link planted at that path afterwards must not be followed."""
+    outside = tmp_path / "secret.txt"
+    outside.write_text("root:x:0:0")
+    victim = workspace.cwd / "notes.txt"
+    victim.write_text("harmless")
+    assert read_confined_bytes(victim) == b"harmless"
+
+    real_confine = confine
+
+    def confine_then_swap(user_path: str, ws: Workspace) -> Path:
+        resolved = real_confine(user_path, ws)  # validated while notes.txt is a regular file...
+        victim.unlink()
+        victim.symlink_to(outside)  # ...then replaced before the read
+        return resolved
+
+    monkeypatch.setattr(tools_mod, "confine", confine_then_swap)
+    ts = build_toolset(workspace, ("fs",))
+    out = run(ts.call("fs_read", {"path": "notes.txt"}))
+    assert out.startswith("Error:") and "symbolic link" in out and "root:" not in out
+    with pytest.raises(PathOutsideWorkspace):
+        read_confined_bytes(victim)
 
 
 def test_fs_tools_return_errors_not_content_outside(tools) -> None:  # type: ignore[no-untyped-def]
@@ -213,6 +241,29 @@ def test_isolated_python_exec_sees_recipe_env_packages(
         assert run(ts.call("python_exec", {"code": code})).strip() == "True"
     finally:
         ts.close()
+
+
+def test_interrupted_venv_is_rebuilt_not_reused(tmp_path: Path, corpus: Path) -> None:
+    """A ``.venv`` left without a working interpreter (killed/out-of-disk ``uv venv``) must be recreated."""
+    work = tmp_path / "work"
+    broken = work / "q-venv" / ".venv"
+    (broken / "bin").mkdir(parents=True)
+    (broken / "pyvenv.cfg").write_text("home = /nowhere\n")
+    ws = create_workspace(work, "q-venv", corpus, isolate=True)
+    assert Path(ws.python).is_file() and not (broken / "pyvenv.cfg").read_text().startswith("home = /nowhere")
+    ts = build_toolset(ws, ("repl",))
+    try:
+        assert run(ts.call("python_exec", {"code": "import sys; print(sys.prefix)"})).strip() == str(broken)
+    finally:
+        ts.close()
+
+    # A venv whose interpreter exists but cannot start is treated the same way.
+    py = Path(ws.python)
+    py.unlink()
+    py.write_text("#!/bin/sh\nexit 7\n")
+    py.chmod(0o755)
+    ws2 = create_workspace(work, "q-venv", corpus, isolate=True)
+    assert Path(ws2.python) == py and corpus_mod._site_packages_of(py) is not None
 
 
 def test_python_exec_captures_stderr_and_tracebacks(tools) -> None:  # type: ignore[no-untyped-def]

@@ -62,18 +62,24 @@ class RunResult:
     started_at: float = 0.0
     finished_at: float = 0.0
     config: dict[str, Any] = field(default_factory=dict)  # RunConfig.behavior() that produced this result
-    retried_attempts: list[dict[str, Any]] = field(default_factory=list)  # timed-out attempts that were retried
+    corpus_manifest: dict[str, int] = field(default_factory=dict)  # CorpusManifest.fingerprint() the agent saw
+    retried_attempts: list[dict[str, Any]] = field(default_factory=list)  # attempts superseded by a retry
     # Model calls cancelled in flight by the task timeout. Their tokens never reach us, so
     # ``usage``/``cost_usd`` are lower bounds whenever this is > 0.
     interrupted_requests: int = 0
 
-    def compatible_with(self, cfg: RunConfig) -> bool:
-        """Whether this result was produced by a run with the same behavior-affecting configuration.
+    def compatible_with(self, cfg: RunConfig, manifest: CorpusManifest | None = None) -> bool:
+        """Whether this result was produced by a run with the same behavior-affecting configuration
+        and (when ``manifest`` is given) the same reachable corpus.
 
-        Results written before per-result provenance existed carry no ``config``
-        and are trusted; the directory-level ``config.json`` check still applies.
+        Results written before per-result provenance existed carry no ``config`` /
+        ``corpus_manifest`` and are trusted; the directory-level ``config.json`` check still applies.
         """
-        return not self.config or self.config == cfg.behavior()
+        if self.config and self.config != cfg.behavior():
+            return False
+        if manifest is not None and self.corpus_manifest and self.corpus_manifest != manifest.fingerprint():
+            return False
+        return True
 
     @property
     def correct(self) -> float:
@@ -140,20 +146,34 @@ def make_toolset_factory(web_backend: WebSearchBackend | None = None) -> Toolset
     return factory
 
 
-def _vote_key(answer: str) -> str:
-    return str(normalize_text(answer)).replace(",", "").replace("$", "").strip()
+def _same_answer(a: str, b: str) -> bool:
+    """Scorer equivalence at 0% tolerance, so votes group exactly the way answers are graded."""
+    try:
+        return bool(float(score_answer(a, b, 0.0)) == 1.0 or float(score_answer(b, a, 0.0)) == 1.0)
+    except ValueError:
+        return bool(str(normalize_text(a)).casefold() == str(normalize_text(b)).casefold())
 
 
 def plurality_vote(answers: Sequence[str | None], *, seed: str) -> int:
-    """Index of the rollout whose answer wins the plurality; random tiebreak (report App. D.5)."""
-    keyed = [(i, _vote_key(a)) for i, a in enumerate(answers) if a is not None and a.strip()]
-    if not keyed:
+    """Index of the rollout whose answer wins the plurality; random tiebreak (report App. D.5).
+
+    Answers are grouped by :func:`score_answer` equivalence (``1,000`` / ``$1000`` / ``1000.0``,
+    ``Texas`` / ``texas``), not by string, so equivalent formats never split a majority.
+    """
+    given = [i for i, a in enumerate(answers) if a is not None and a.strip()]
+    if not given:
         return 0
-    counts = Counter(k for _, k in keyed)
-    top = max(counts.values())
-    winners = [k for k, c in counts.items() if c == top]
-    chosen = random.Random(seed).choice(sorted(winners))
-    return next(i for i, k in keyed if k == chosen)
+    clusters: list[list[int]] = []
+    for i in given:
+        for cluster in clusters:
+            if _same_answer(str(answers[cluster[0]]), str(answers[i])):
+                cluster.append(i)
+                break
+        else:
+            clusters.append([i])
+    top = max(len(c) for c in clusters)
+    winners = [c[0] for c in clusters if len(c) == top]
+    return random.Random(seed).choice(winners)
 
 
 async def _run_episode(
@@ -163,8 +183,11 @@ async def _run_episode(
     cfg: RunConfig,
     client_factory: ClientFactory,
     toolset_factory: ToolsetFactory,
+    ep: Episode,
 ) -> tuple[Episode, str | None]:
-    """One rollout. Returns (episode, error); ``episode.status`` is 'timeout' on timeout."""
+    """One rollout into ``ep``. Returns (episode, error); ``episode.status`` is 'timeout' on timeout.
+
+    ``ep`` belongs to the caller so that whatever was spent before a crash is still on it."""
     toolset = toolset_factory(ws, cfg)
     agent = OfficeQAAgent(
         client_factory(cfg),
@@ -173,7 +196,6 @@ async def _run_episode(
         window_size=cfg.window_size,
         tool_output_limit=cfg.tool_output_limit,
     )
-    ep = Episode()
     try:
         await asyncio.wait_for(agent.forward(sample.agent_input(manifest), ep), timeout=cfg.task_timeout_s)
         return ep, None
@@ -214,7 +236,7 @@ async def run_one_async(
     t0 = time.monotonic()
     attempts = 0
     episodes: list[Episode] = []
-    retried: list[Episode] = []  # timed-out attempts superseded by a retry; their spend still counts
+    retried: list[Episode] = []  # timed-out / crashed attempts superseded by a retry; their spend still counts
     error: str | None = None
     status = "error"
 
@@ -222,15 +244,16 @@ async def run_one_async(
         while True:
             attempts += 1
             ws = create_workspace(work, sample.uid, corpus, isolate=isolate, fresh=True)
+            ep = Episode()
             try:
-                ep, err = await _run_episode(sample, manifest, ws, cfg, client_factory, toolset_factory)
+                _, err = await _run_episode(sample, manifest, ws, cfg, client_factory, toolset_factory, ep)
             except Exception as exc:  # crash: provider error, tool infra failure, ...
                 logger.warning("uid=%s attempt %d crashed: %s", sample.uid, attempts, exc)
+                ep.status = "error"
                 if budget.take():
+                    retried.append(ep)
                     continue
                 error = f"{type(exc).__name__}: {exc} (retry budget exhausted after {budget.used} retries)"
-                ep = Episode()
-                ep.status = "error"
             else:
                 if ep.status == "timeout":
                     logger.warning("uid=%s attempt %d %s", sample.uid, attempts, err)
@@ -295,6 +318,7 @@ async def run_one_async(
         started_at=started,
         finished_at=time.time(),
         config=cfg.behavior(),
+        corpus_manifest=manifest.fingerprint(),
         retried_attempts=[
             {
                 "status": ep_.status,

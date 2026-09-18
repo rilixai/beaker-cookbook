@@ -214,6 +214,38 @@ def test_exhausted_budget_yields_error_scored_zero(records: list[EvalRecord], co
     assert not res.clean
 
 
+class CrashAfterOneCallFactory:
+    """Each client answers one model call (spending tokens) and crashes on the next."""
+
+    def __call__(self, cfg: RunConfig) -> ScriptedClient:
+        def boom(_messages: list[dict[str, Any]]) -> LLMResponse:
+            raise ConnectionError("provider hung up mid-episode")
+
+        return ScriptedClient([plain("let me think"), boom])
+
+
+def test_crashed_attempts_keep_their_spend(records: list[EvalRecord], corpus: Path, tmp_path: Path) -> None:
+    """A crash after completed model calls must still be billed and appear in the retry provenance."""
+    res = run(
+        run_one_async(
+            records[0],
+            cfg=_cfg(),
+            corpus_root=corpus,
+            work_dir=tmp_path / "w",
+            client_factory=CrashAfterOneCallFactory(),
+            retry_budget=RetryBudget(2),
+            isolate=False,
+        )
+    )
+    assert res.status == "error" and res.attempts == 3 and not res.clean
+    # 3 attempts x 1 completed call each (plain() = 50 prompt / 5 completion tokens, $0.0005).
+    assert res.usage["prompt_tokens"] == 150 and res.usage["completion_tokens"] == 15
+    assert res.cost_usd == pytest.approx(0.0015) and res.steps == 3
+    assert [a["status"] for a in res.retried_attempts] == ["error", "error"]
+    assert all(a["steps"] == 1 and a["cost_usd"] == pytest.approx(0.0005) for a in res.retried_attempts)
+    assert "assistant" in {m["role"] for m in res.trajectory}  # the final attempt's partial trajectory is kept
+
+
 def test_timeout_scores_zero_keeps_partial_trajectory(records: list[EvalRecord], corpus: Path, tmp_path: Path) -> None:
     class SlowClient:
         async def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> LLMResponse:
@@ -373,6 +405,125 @@ def test_evaluate_summary_only_needs_no_corpus(
     assert "correctness" in capsys.readouterr().out
 
 
+def test_evaluate_summary_only_uses_saved_population(
+    records: list[EvalRecord], corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--summary-only`` re-aggregates over the uids the run was launched with, whatever today's flags say."""
+    out = tmp_path / "run"
+    cfg = _cfg(model="scripted/x")
+    for rec in records[:2]:
+        res = run(
+            run_one_async(
+                rec,
+                cfg=cfg,
+                corpus_root=corpus,
+                work_dir=out / "work",
+                client_factory=lambda _c: ScriptedClient([final("9876543.21")]),
+                isolate=False,
+            )
+        )
+        write_result(res, out / "results")
+    saved = {
+        "config": dataclasses.asdict(cfg) | {"tools": list(cfg.tools)},
+        "split": "train",
+        "limit": 2,
+        "uids": [r.uid for r in records[:2]],
+    }
+    (out / "config.json").write_text(json.dumps(saved))
+    monkeypatch.setattr(cli, "load_split", lambda *a, **k: pytest.fail("saved uids make the dataset unnecessary"))
+    monkeypatch.setattr(cli, "ensure_corpus", lambda *a, **k: pytest.fail("summary-only must not touch the corpus"))
+
+    # Default flags (--split test, no --limit) would otherwise change the denominator.
+    assert cli.main(["evaluate", "--output-dir", str(out), "--summary-only"]) == 0
+    summary = json.loads((out / "summary.json").read_text())
+    assert summary["split"] == "train" and summary["n"] == 2 and summary["n_scored"] == 2 and summary["missing"] == []
+    assert summary["correct"] == 1  # records[0] is right, records[1] is not
+
+
+def test_resume_refuses_when_the_cached_corpus_changed(
+    records: list[EvalRecord], corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fetching another representation mid-run changes what the agent can reach; results must not mix."""
+    out = tmp_path / "out"
+    cfg = _cfg(model="scripted/a", corpus="pdfs")
+    parsed_link = corpus / "parsed"
+    parsed_target = parsed_link.resolve()
+    parsed_link.unlink()  # start with pdfs/ only
+    before = build_manifest(corpus, default="pdfs")
+    assert before.fingerprint() == {"pdfs": 3}
+
+    first = run(
+        run_one_async(
+            records[0],
+            cfg=cfg,
+            corpus_root=corpus,
+            work_dir=out / "work",
+            client_factory=lambda _c: ScriptedClient([final("9876543.21")]),
+            isolate=False,
+        )
+    )
+    assert first.corpus_manifest == {"pdfs": 3} and first.compatible_with(cfg, before)
+    write_result(first, out / "results")
+    (out / "config.json").write_text(
+        json.dumps({"config": dataclasses.asdict(cfg) | {"tools": list(cfg.tools)}, "manifest": before.to_json()})
+    )
+
+    parsed_link.symlink_to(parsed_target, target_is_directory=True)  # `officeqa fetch parsed` happened meanwhile
+    after = build_manifest(corpus, default="pdfs")
+    assert after.fingerprint() == {"parsed": 3, "pdfs": 3}
+    assert not first.compatible_with(cfg, after) and first.compatible_with(cfg)
+    existing = read_results(out / "results")
+    assert [r.uid for r in select_to_run(records[:1], existing, cfg=cfg)] == []
+    assert [r.uid for r in select_to_run(records[:1], existing, cfg=cfg, manifest=after)] == [records[0].uid]
+
+    monkeypatch.setattr(cli, "load_split", lambda split, limit=None: records[:limit])
+    monkeypatch.setattr(cli, "ensure_corpus", lambda *a, **k: corpus)
+    monkeypatch.setattr(cli, "run_split", lambda *a, **k: pytest.fail("must refuse before running the agent"))
+    base = ["--split", "train", "--limit", "1", "--output-dir", str(out), "--corpus", "pdfs", "--tools", "fs"]
+    base += ["--model", "scripted/a", "--max-steps", str(cfg.max_steps)]
+    assert cli.main(["evaluate", *base]) == 2
+    assert json.loads((out / "config.json").read_text())["manifest"] == before.to_json()  # provenance untouched
+
+    # Same corpus again: resumes and reuses the clean result without running anything.
+    parsed_link.unlink()
+    assert cli.main(["evaluate", *base]) == 0
+
+
+def test_step_reminder_counts_turns_not_tool_calls(
+    workspace: Workspace, records: list[EvalRecord], corpus: Path
+) -> None:
+    """One assistant turn with several parallel tool calls consumes one step, and the reminder says so."""
+    two_calls = LLMResponse(
+        content=None,
+        tool_calls=[
+            {
+                "id": "c1",
+                "type": "function",
+                "function": {"name": "fs_search", "arguments": json.dumps({"query": "a"})},
+            },
+            {
+                "id": "c2",
+                "type": "function",
+                "function": {"name": "fs_search", "arguments": json.dumps({"query": "b"})},
+            },
+        ],
+        usage=plain("").usage,
+        cost_usd=0.001,
+    )
+    client = ScriptedClient([two_calls, two_calls, final("1")])
+    ep = run(_agent(workspace, client, max_steps=10).forward(_input(records, corpus)))
+    assert ep.status == "answered" and ep.n_steps == 3 and ep.tool_calls == 4
+    reminders = [req[-1]["content"] for req in client.requests]
+    assert (
+        "10 steps remaining" in reminders[0]
+        and "9 steps remaining" in reminders[1]
+        and "8 steps remaining" in reminders[2]
+    )
+    assert (
+        "each of your turns uses one step" in reminders[0] and "tool call or message uses one step" not in reminders[0]
+    )
+
+
 def test_resume_refuses_to_mix_configurations(
     records: list[EvalRecord], corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -445,9 +596,23 @@ def test_run_split_concurrency_and_queue_wait(records: list[EvalRecord], corpus:
     assert sum(1 for r in res if r.queue_wait_s > 0) >= 1  # with concurrency 1 some sample had to wait
 
 
+def test_plurality_vote_groups_scorer_equivalent_answers() -> None:
+    """Casing and numeric formatting the scorer treats as equal must not split a majority."""
+    for seed in map(str, range(20)):
+        assert plurality_vote(["Massachusetts", "massachusetts", "Texas"], seed=seed) == 0
+        assert plurality_vote(["Texas", "Massachusetts", "massachusetts"], seed=seed) == 1
+        assert plurality_vote(["$1,000", "1000", "5"], seed=seed) == 0
+        assert plurality_vote(["5", "1,000.0", "1000"], seed=seed) == 1
+        assert plurality_vote(["12.5%", "12.50%", "13%"], seed=seed) == 0
+    # Genuinely different answers still tie and break randomly but deterministically.
+    outcomes = {plurality_vote(["Texas", "Ohio"], seed=s) for s in map(str, range(50))}
+    assert outcomes == {0, 1}
+    assert plurality_vote(["Texas", "Ohio"], seed="fixed") == plurality_vote(["Texas", "Ohio"], seed="fixed")
+
+
 def test_plurality_vote_and_multi_rollout(records: list[EvalRecord], corpus: Path, tmp_path: Path) -> None:
     assert plurality_vote(["1", "2", "2"], seed="s") == 1
-    assert plurality_vote(["$1,000", "1000", "5"], seed="s") in (0, 1)
+    assert plurality_vote(["$1,000", "1000", "5"], seed="s") == 0
     assert plurality_vote([None, None], seed="s") == 0
     answers = iter(["1", "9876543.21", "9876543.21"])
 

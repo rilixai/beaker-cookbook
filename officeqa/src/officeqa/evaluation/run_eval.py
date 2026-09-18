@@ -18,6 +18,7 @@ from officeqa.data.dataset import EvalRecord
 
 if TYPE_CHECKING:
     from officeqa.config import RunConfig
+    from officeqa.data.manifest import CorpusManifest
     from officeqa.runner import RunResult
 
 
@@ -72,19 +73,21 @@ def select_to_run(
     *,
     rerun: bool = False,
     cfg: RunConfig | None = None,
+    manifest: CorpusManifest | None = None,
 ) -> list[EvalRecord]:
     """Resume policy: reuse questions that completed cleanly, re-run the rest; ``rerun`` forces all.
 
     With ``cfg``, a clean result is only reused when it records the same
-    behavior-affecting configuration (:meth:`RunConfig.behavior`), so a
-    directory never silently mixes models, corpora or tool sets.
+    behavior-affecting configuration (:meth:`RunConfig.behavior`); with ``manifest``,
+    also the same reachable corpus (:meth:`CorpusManifest.fingerprint`). A directory
+    then never silently mixes models, corpora or tool sets.
     """
     if rerun:
         return list(records)
 
     def reusable(uid: str) -> bool:
         r = existing.get(uid)
-        return r is not None and r.clean and (cfg is None or r.compatible_with(cfg))
+        return r is not None and r.clean and (cfg is None or r.compatible_with(cfg, manifest))
 
     return [r for r in records if not reusable(r.uid)]
 

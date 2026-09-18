@@ -69,7 +69,10 @@ def step_reminder(remaining: int) -> str:
             "Reminder: this is your last step. You must respond now with your final answer in the required "
             "<REASONING>...</REASONING><FINAL_ANSWER>...</FINAL_ANSWER> format. Do not call any more tools."
         )
-    return f"Reminder: you have {remaining} steps remaining (each tool call or message uses one step)."
+    return (
+        f"Reminder: you have {remaining} steps remaining "
+        "(each of your turns uses one step, whether it calls one tool, several tools in parallel, or none)."
+    )
 
 
 def user_message(payload_json: str) -> str:

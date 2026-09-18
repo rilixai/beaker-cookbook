@@ -21,6 +21,7 @@ import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
@@ -28,8 +29,8 @@ from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
 from officeqa import config, runner
 from officeqa.config import RunConfig
 from officeqa.data.corpus import IncompleteCorpusError, ensure_corpus, fetch_corpus
-from officeqa.data.dataset import KNOWN_SPLITS, EvalRecord, load_split
-from officeqa.data.manifest import build_manifest
+from officeqa.data.dataset import KNOWN_SPLITS, load_split
+from officeqa.data.manifest import CorpusManifest, build_manifest
 from officeqa.evaluation.run_eval import format_summary, select_to_run, summarize
 from officeqa.runner import RunResult, read_results, run_split, write_result
 
@@ -121,12 +122,17 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
 
 
-def _saved_run_config(out: Path, fallback: RunConfig) -> RunConfig:
-    """Model/corpus/tools of the run stored in ``out``, so a summary describes that run, not today's defaults."""
+def _saved_config_json(out: Path) -> dict[str, Any]:
     path = out / "config.json"
     if not path.is_file():
-        return fallback
-    saved = json.loads(path.read_text(encoding="utf-8")).get("config", {})
+        return {}
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    return saved if isinstance(saved, dict) else {}
+
+
+def _saved_run_config(out: Path, fallback: RunConfig) -> RunConfig:
+    """Model/corpus/tools of the run stored in ``out``, so a summary describes that run, not today's defaults."""
+    saved = _saved_config_json(out).get("config", {})
     if not isinstance(saved, dict):
         return fallback
     return dataclasses.replace(
@@ -140,24 +146,24 @@ def _saved_run_config(out: Path, fallback: RunConfig) -> RunConfig:
 
 def _saved_behavior(out: Path) -> dict[str, object] | None:
     """Behavior-affecting fields of the run already stored in ``out``, or None when there is none."""
-    path = out / "config.json"
-    if not path.is_file():
-        return None
-    saved = json.loads(path.read_text(encoding="utf-8")).get("config")
+    saved = _saved_config_json(out).get("config")
     if not isinstance(saved, dict):
         return None
     current = RunConfig().behavior()
     return {k: saved.get(k, v) for k, v in current.items()}
 
 
-def _check_resume_compatible(out: Path, cfg: RunConfig) -> str | None:
-    """Explain why ``cfg`` cannot resume into ``out``, or None when it can."""
-    saved = _saved_behavior(out)
-    if saved is None:
+def _saved_population(out: Path) -> tuple[str, int | None, list[str]] | None:
+    """``(split, limit, uids)`` the run stored in ``out`` was launched over, or None when unknown."""
+    saved = _saved_config_json(out)
+    uids = saved.get("uids")
+    if not isinstance(uids, list) or not all(isinstance(u, str) for u in uids):
         return None
-    diffs = {k: (saved[k], v) for k, v in cfg.behavior().items() if saved[k] != v}
-    if not diffs:
-        return None
+    limit = saved.get("limit")
+    return str(saved.get("split", "?")), (int(limit) if isinstance(limit, int) else None), list(uids)
+
+
+def _mismatch_message(out: Path, diffs: dict[str, tuple[object, object]]) -> str:
     lines = [f"  {k}: existing={old!r} requested={new!r}" for k, (old, new) in sorted(diffs.items())]
     return (
         f"{out} holds results from a different configuration; resuming would mix them into one score:\n"
@@ -166,10 +172,38 @@ def _check_resume_compatible(out: Path, cfg: RunConfig) -> str | None:
     )
 
 
-def _write_summary(out: Path, records: Sequence[EvalRecord], cfg: RunConfig, *, split: str, wall: float) -> None:
+def _check_resume_compatible(out: Path, cfg: RunConfig) -> str | None:
+    """Explain why ``cfg`` cannot resume into ``out``, or None when it can."""
+    saved = _saved_behavior(out)
+    if saved is None:
+        return None
+    diffs = {k: (saved[k], v) for k, v in cfg.behavior().items() if saved[k] != v}
+    return _mismatch_message(out, diffs) if diffs else None
+
+
+def _check_corpus_compatible(out: Path, manifest: CorpusManifest) -> str | None:
+    """Explain why the corpus now on disk differs from the one the run in ``out`` saw, or None.
+
+    The manifest lists every cached representation, so fetching ``parsed/`` halfway through a
+    ``pdfs`` run would otherwise hand later questions a different corpus under the same config.
+    """
+    saved = _saved_config_json(out).get("manifest")
+    if not isinstance(saved, dict):
+        return None
+    try:
+        before = CorpusManifest.from_json(saved).fingerprint()
+    except (KeyError, TypeError, ValueError):
+        return None
+    now = manifest.fingerprint()
+    if before == now:
+        return None
+    return _mismatch_message(out, {"corpus_manifest": (before, now)})
+
+
+def _write_summary(out: Path, uids: Sequence[str], cfg: RunConfig, *, split: str, wall: float) -> None:
     final = read_results(out / "results")
-    results = [final[r.uid] for r in records if r.uid in final]
-    summary = summarize(results, expected=[r.uid for r in records])
+    results = [final[u] for u in uids if u in final]
+    summary = summarize(results, expected=uids)
     summary["wall_clock_s"] = wall
     summary["split"] = split
     summary["model"] = cfg.model
@@ -189,13 +223,30 @@ def _execute(args: argparse.Namespace, *, rerun: bool, resume: bool, summary_onl
     out: Path = args.output_dir
     results_dir = out / "results"
     out.mkdir(parents=True, exist_ok=True)
-    records = load_split(args.split, limit=args.limit)
 
     if summary_only:
-        # Aggregate what is on disk; needs neither the corpus nor a model key.
-        logger.info("split=%s n=%d to_run=0 reused=%d", args.split, len(records), len(records))
-        _write_summary(out, records, _saved_run_config(out, cfg), split=args.split, wall=0.0)
+        # Aggregate what is on disk over the population the run was launched with; needs
+        # neither the corpus nor a model key (nor the dataset, when config.json names the uids).
+        saved_pop = _saved_population(out)
+        if saved_pop is None:
+            split, uids = args.split, [r.uid for r in load_split(args.split, limit=args.limit)]
+        else:
+            split, limit, uids = saved_pop
+            if (args.split, args.limit) != (split, limit):
+                logger.warning(
+                    "summarizing over the saved population (split=%s limit=%s, %d uids), not --split %s --limit %s",
+                    split,
+                    limit,
+                    len(uids),
+                    args.split,
+                    args.limit,
+                )
+        logger.info("split=%s n=%d to_run=0 reused=%d", split, len(uids), len(uids))
+        _write_summary(out, uids, _saved_run_config(out, cfg), split=split, wall=0.0)
         return 0
+
+    records = load_split(args.split, limit=args.limit)
+    uids = [r.uid for r in records]
 
     if resume and not rerun:
         problem = _check_resume_compatible(out, cfg)
@@ -211,8 +262,14 @@ def _execute(args: argparse.Namespace, *, rerun: bool, resume: bool, summary_onl
         return 2
     manifest = build_manifest(corpus, default=cfg.corpus)
 
+    if resume and not rerun:
+        problem = _check_corpus_compatible(out, manifest)
+        if problem is not None:
+            logger.error("%s", problem)
+            return 2
+
     existing = read_results(results_dir) if resume else {}
-    todo = select_to_run(records, existing, rerun=rerun, cfg=cfg)
+    todo = select_to_run(records, existing, rerun=rerun, cfg=cfg, manifest=manifest)
     logger.info("split=%s n=%d to_run=%d reused=%d", args.split, len(records), len(todo), len(records) - len(todo))
 
     _write_json(
@@ -221,7 +278,7 @@ def _execute(args: argparse.Namespace, *, rerun: bool, resume: bool, summary_onl
             "config": dataclasses.asdict(cfg) | {"tools": list(cfg.tools)},
             "split": args.split,
             "limit": args.limit,
-            "uids": [r.uid for r in records],
+            "uids": uids,
             "dataset_revision": config.OFFICEQA_DATASET_REVISION,
             "manifest": manifest.to_json(),
             "resources": resources,
@@ -255,7 +312,7 @@ def _execute(args: argparse.Namespace, *, rerun: bool, resume: bool, summary_onl
             on_result=on_result,
             isolate=not args.no_isolate,
         )
-    _write_summary(out, records, cfg, split=args.split, wall=time.monotonic() - t0)
+    _write_summary(out, uids, cfg, split=args.split, wall=time.monotonic() - t0)
     return 0
 
 

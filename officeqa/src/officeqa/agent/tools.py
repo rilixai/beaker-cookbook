@@ -22,6 +22,7 @@ question's cwd plus the corpus tree; nothing else is reachable.
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import logging
 import os
@@ -322,6 +323,22 @@ def make_fs_search(workspace: Workspace) -> Tool:
 
 # --- fs_read ----------------------------------------------------------------
 
+_O_NOFOLLOW = os.O_NOFOLLOW if hasattr(os, "O_NOFOLLOW") else 0
+
+
+def read_confined_bytes(resolved: Path) -> bytes:
+    """Read a path that :func:`confine` already validated, without following a symlink
+    that appeared at its final component since (``confine`` resolved every link away, so
+    finding one here means the file was swapped under us)."""
+    try:
+        fd = os.open(resolved, os.O_RDONLY | _O_NOFOLLOW)
+    except OSError as e:
+        if e.errno in (errno.ELOOP, errno.EMLINK):
+            raise PathOutsideWorkspace(f"{str(resolved)!r} changed into a symbolic link while being read") from e
+        raise
+    with os.fdopen(fd, "rb") as fh:
+        return fh.read()
+
 
 def make_fs_read(workspace: Workspace, *, output_limit: int = config.TOOL_OUTPUT_LIMIT) -> Tool:
     async def fs_read(path: str, start: int | None = None, end: int | None = None, head: int | None = None) -> str:
@@ -331,7 +348,12 @@ def make_fs_read(workspace: Workspace, *, output_limit: int = config.TOOL_OUTPUT
             return f"Error: {e}"
         if not target.is_file():
             return f"Error: {path!r} is not a file."
-        raw = await asyncio.to_thread(target.read_bytes)
+        try:
+            raw = await asyncio.to_thread(read_confined_bytes, target)
+        except PathOutsideWorkspace as e:
+            return f"Error: {e}"
+        except OSError as e:
+            return f"Error: cannot read {path!r}: {e.strerror or e}"
         if target.suffix.lower() == ".pdf" or b"\x00" in raw[:4096]:
             return (
                 f"Error: {path!r} is a binary file ({_human(len(raw))}). fs_read only reads text. "

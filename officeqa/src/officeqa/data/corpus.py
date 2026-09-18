@@ -174,13 +174,22 @@ def parent_site_packages() -> list[str]:
     return out
 
 
-def _site_packages_of(python: str) -> Path:
-    out = subprocess.run(
-        [python, "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+def _site_packages_of(py: Path) -> Path | None:
+    """``purelib`` of the interpreter ``py``, or None when it is missing or does not start
+    (an interrupted or out-of-disk ``uv venv`` leaves such a directory behind)."""
+    if not py.is_file():
+        return None
+    try:
+        out = subprocess.run(
+            [str(py), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
     return Path(out.stdout.strip())
 
 
@@ -193,7 +202,11 @@ def _make_venv(venv: Path) -> str:
     ``pip install``s wins and never leaks back).
     """
     py = venv / ("Scripts" if os.name == "nt" else "bin") / ("python.exe" if os.name == "nt" else "python")
-    if not venv.exists():
+    site = _site_packages_of(py) if venv.exists() else None
+    if site is None:
+        if venv.exists():
+            logger.warning("rebuilding incomplete virtualenv %s", venv)
+            shutil.rmtree(venv)
         uv = shutil.which("uv")
         if uv:
             subprocess.run(
@@ -205,9 +218,13 @@ def _make_venv(venv: Path) -> str:
             subprocess.run(
                 [sys.executable, "-m", "venv", "--system-site-packages", str(venv)], check=True, capture_output=True
             )
-        parents = parent_site_packages()
-        if parents:
-            pth = _site_packages_of(str(py)) / PARENT_SITE_PTH
+        site = _site_packages_of(py)
+        if site is None:
+            raise RuntimeError(f"virtualenv at {venv} was created but its interpreter {py} does not start")
+    parents = parent_site_packages()
+    if parents:
+        pth = site / PARENT_SITE_PTH
+        if not pth.is_file():
             pth.write_text("".join(f"{p}\n" for p in parents), encoding="utf-8")
     return str(py)
 

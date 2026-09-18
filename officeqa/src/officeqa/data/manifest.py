@@ -41,6 +41,22 @@ class CorpusManifest:
             "default": self.default,
         }
 
+    @classmethod
+    def from_json(cls, d: dict[str, Any]) -> CorpusManifest:
+        return cls(
+            root=str(d["root"]),
+            representations=tuple(
+                Representation(name=r["name"], path=r["path"], format=r["format"], documents=int(r["documents"]))
+                for r in d["representations"]
+            ),
+            default=str(d["default"]),
+        )
+
+    def fingerprint(self) -> dict[str, int]:
+        """What the agent could reach: ``{representation: documents}``. Two runs whose
+        fingerprints differ saw different corpora even under the same ``--corpus``."""
+        return {r.name: r.documents for r in sorted(self.representations, key=lambda r: r.name)}
+
     def representation(self, name: str) -> Representation:
         for rep in self.representations:
             if rep.name == name:
