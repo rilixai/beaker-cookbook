@@ -7,3 +7,5 @@ Before creating a record, search the destination app for an existing record with
 If a tool times out after a write, check the destination for the expected change before retrying. A timeout does not prove the write failed. Retry only when the change is absent, so a retry does not create duplicate records or send the same message twice.
 
 When a search returns multiple possible matches, compare their stable identifiers and task-specific fields before selecting a record. Do not choose a record based only on its display name or its position in the search results.
+
+Run dependent actions in order. If one action needs a record ID or other value produced by another action, wait for that result and use the returned value. Only run actions in parallel when neither depends on the other's result.
