@@ -61,6 +61,22 @@ the tasks' `zapier_tools`.
 were made. The 200-task `simple` domain
 (`splits/simple.txt`) is train-only and never scored.
 
+### Filtered quickstart dataset
+
+`uv run python .beaker/upload_splits.py` uploads `automationbench-skills-quickstart`
+with **36 train and 18 test cases**: six train and three test cases per domain.
+It skips the 114 cases in [`.beaker/excluded_cases.txt`](.beaker/excluded_cases.txt)
+before selecting the first eligible cases in each frozen split. Replacements
+stay in their original domain and split; selection is deterministic and does
+not use model scores. Upload fails if a domain cannot fill its quota.
+
+The list is the frozen September 22, 2026 rubric/environment audit cohort for
+benchmark commit `4a8e1061254004d9dac807054eed33fad7d1ff14`. It includes confirmed
+grading defects, ambiguous checks, and environment concerns; not every excluded
+case is a confirmed defect. It replaces 13 cases in the previous quickstart
+(9 train, 4 test). The full split files and local `run --split` commands are
+unchanged. Existing hosted datasets change only when the upload script is run.
+
 ## Models
 
 `--model` defaults to `gpt-6-astra` with `--reasoning-effort max`. Routing

@@ -24,6 +24,7 @@ TRAIN_PER_DOMAIN = 6
 TEST_PER_DOMAIN = 3
 DATASET_NAME = "automationbench-skills-quickstart"
 BEAKER_YAML = Path(__file__).resolve().parent / "beaker.yaml"
+EXCLUDED_CASES = Path(__file__).resolve().parent / "excluded_cases.txt"
 
 
 def configured_agent_key() -> str:
@@ -43,11 +44,19 @@ def _user_prompt(sample: Sample) -> str:
 
 
 def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
+    excluded = {
+        name
+        for line in EXCLUDED_CASES.read_text(encoding="utf-8").splitlines()
+        if (name := line.split("#", 1)[0].strip())
+    }
     by_domain: dict[str, list[Sample]] = defaultdict(list)
     for sample in load_split(split):
-        by_domain[sample.domain].append(sample)
+        if sample.task_name not in excluded:
+            by_domain[sample.domain].append(sample)
     rows: list[dict[str, object]] = []
     for domain in PUBLIC_DOMAINS:
+        if len(by_domain[domain]) < per_domain:
+            raise ValueError(f"Not enough eligible {split} cases in {domain}: need {per_domain}")
         for sample in by_domain[domain][:per_domain]:
             rows.append(
                 {
