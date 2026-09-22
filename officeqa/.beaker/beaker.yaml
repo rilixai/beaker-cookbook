@@ -16,3 +16,8 @@ integrations:
       - OPENAI_API_KEY
     environment_base: debian_slim:3.12
 default_integration: officeqa
+# Hosted rollouts run every case in one sandbox process. With the default (64)
+# all 15 cases start at once and starve each other: LLM calls that OpenAI
+# serves in ~3s take 30-60s in-process and single-file greps take 30s+.
+config_defaults:
+  max_concurrency: 4

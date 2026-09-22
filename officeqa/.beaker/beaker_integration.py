@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 HOSTED_CORPUS = "parsed"
 HOSTED_MAX_STEPS = 100
 _CORPUS_LOCK = Lock()
+_CORPUS_ROOT: Path | None = None
 
 
 class Row(BaseModel):
@@ -58,21 +59,27 @@ def _litellm_model(selected_model: str | None) -> str | None:
 def _ensure_hosted_corpus() -> Path:
     """Fetch and verify the lightweight parsed corpus once per evaluator."""
 
+    global _CORPUS_ROOT
+
     from officeqa import config
     from officeqa.data.corpus import IncompleteCorpusError, ensure_corpus, fetch_corpus
 
     with _CORPUS_LOCK:
+        if _CORPUS_ROOT is not None:
+            return _CORPUS_ROOT
         try:
-            return ensure_corpus(
+            root = ensure_corpus(
                 HOSTED_CORPUS,
                 expected_documents=config.EXPECTED_CORPUS_DOCUMENTS,
             )
         except (FileNotFoundError, IncompleteCorpusError):
             fetch_corpus((HOSTED_CORPUS,))
-            return ensure_corpus(
+            root = ensure_corpus(
                 HOSTED_CORPUS,
                 expected_documents=config.EXPECTED_CORPUS_DOCUMENTS,
             )
+        _CORPUS_ROOT = root
+        return root
 
 
 async def run_case(*, case_input: object, runtime: RolloutRuntime) -> CaseResult:
