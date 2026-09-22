@@ -159,7 +159,7 @@ class TestRunner:
         qwen = ModelSpec(name="qwen/qwen3.8-flash", reasoning_effort="default", reasoning_enabled=True)
         assert qwen.sampling_args() == {"extra_body": {"reasoning": {"enabled": True}}}
 
-        native = ModelSpec(name="gpt-6-astra")
+        native = ModelSpec()
         assert not native.is_openrouter()
         assert native.effective_api_key_var() == "OPENAI_API_KEY"
         assert native.sampling_args() == {"reasoning_effort": DEFAULT_REASONING_EFFORT}
