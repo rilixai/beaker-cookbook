@@ -5,3 +5,5 @@ Skill guides are available through the `list_skills` and `read_skill` tools. Bef
 Before creating a record, search the destination app for an existing record with the same task-specific identifier, such as an invoice number, ticket ID, or external reference. If a matching record already satisfies the request, do not create a duplicate. If it needs a change, update it only when the task authorizes that change. Use the returned record ID to confirm the result before reporting completion.
 
 If a tool times out after a write, check the destination for the expected change before retrying. A timeout does not prove the write failed. Retry only when the change is absent, so a retry does not create duplicate records or send the same message twice.
+
+When a search returns multiple possible matches, compare their stable identifiers and task-specific fields before selecting a record. Do not choose a record based only on its display name or its position in the search results.
