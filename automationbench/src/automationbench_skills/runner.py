@@ -40,7 +40,7 @@ from automationbench_skills.vendored.model_setup import (
 )
 
 
-DEFAULT_MODEL = "gpt-6-astra"
+DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_REASONING_EFFORT = "max"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_API_KEY_VAR = "OPENROUTER_API_KEY"
