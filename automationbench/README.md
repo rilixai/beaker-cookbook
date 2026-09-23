@@ -14,12 +14,11 @@ The Python `Integration` in [`.beaker/beaker_integration.py`](.beaker/beaker_int
 declares the editable paths: `skills`, `prompts`, and `src`. Keep that declaration
 in Python; do not duplicate it in `beaker.yaml`.
 
-Hosted runs save the targets from the loaded integration. Later commits can use
-that verified metadata to start playbook generation while the environment builds.
-At run startup, Beaker checks the current integration and regenerates the playbook
-if its targets changed. With no saved metadata, generation starts after the image
-build and can overlap baseline evaluation. No extra onboarding configuration is
-needed for either path.
+Hosted playbook generation waits for the Integration image to finish building,
+then imports the entrypoint to read its targets. Baseline evaluation can run
+alongside generation. Beaker saves the baseline before waiting for the playbook
+to start optimization. No saved target hints or extra onboarding configuration
+are needed.
 
 ## Quick start
 
