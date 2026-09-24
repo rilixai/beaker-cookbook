@@ -85,7 +85,7 @@ only expose an on/off switch.
 ## Reference numbers
 
 Upstream reports strict pass rates (`task_completed_correctly`) of roughly
-40–60% for frontier models on the public set. That is not the AutomationBench-AA
+40–60% for frontier models on the public test set. That is not the AutomationBench-AA
 number, which adds guardrail and hidden-task components and uses a different
 harness.
 
