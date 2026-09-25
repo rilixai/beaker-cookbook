@@ -63,7 +63,7 @@ were made. The 200-task `simple` domain
 
 ## Models
 
-`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort xhigh`. Routing
+`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort medium`. Routing
 follows the benchmark (`vendored/model_setup.py`): `claude-*` goes to
 Anthropic, `gemini-*` to the Gemini interactions API, everything else to OpenAI
 chat-completions/responses. `--reasoning-effort` maps to each API's reasoning
@@ -85,7 +85,7 @@ only expose an on/off switch.
 ## Reference numbers
 
 Upstream reports strict pass rates (`task_completed_correctly`) of roughly
-40–60% for frontier models on the public set. That is not the AutomationBench-AA
+40–60% for frontier models on the public test set. That is not the AutomationBench-AA
 number, which adds guardrail and hidden-task components and uses a different
 harness.
 
