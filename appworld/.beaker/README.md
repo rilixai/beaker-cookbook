@@ -22,8 +22,11 @@ Editable scope: `code_agent.py` and the agent prompts. The integration imports
 the candidate application's runner and uses its prompt directory. Scoring,
 bootstrap code, fixed model configuration, and vendored code are outside scope.
 The default remains `configs/model.toml`; native OpenAI Responses requests use
-Beaker's hosted provider routing when available. Optional model selection accepts
-OpenAI models through the application's existing `ModelProfile` interface.
+Beaker's hosted provider routing when available. Selected models from any provider
+supported by Beaker's inference gateway use its Chat Completions endpoint,
+canonical model name, and run-scoped token. The gateway controls reasoning and
+sampling settings; the integration does not apply OpenAI model-family defaults
+to selected models. This applies to both scenario and task goal completion.
 
 AppWorld requires generated application modules and benchmark data beyond pip
 installation. `appworld_setup.py` reuses local data when present, otherwise
