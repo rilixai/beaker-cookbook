@@ -1,0 +1,16 @@
+diff --git a/automationbench/prompts/system.md b/automationbench/prompts/system.md
+index 3d9b5f8..3fba95a 100644
+--- a/automationbench/prompts/system.md
++++ b/automationbench/prompts/system.md
+@@ -15,3 +15,11 @@ Later or "updated/corrected/replaces" documents supersede earlier ones. Rules fo
+ - Use the exact vocabulary (status labels, tag names, labels) the rules or existing rows use; never invent your own.
+ - "Notify/send/email each X" means one Gmail send per person; a calendar invite or a channel post does not replace it. If a rule routes a case to someone else (VP, manager), send that email too.
+ - Do not act on records a rule excludes, and do not mention them.
++
++## Screen every record before acting (a wrong include costs as much as a miss)
++Before the first write, go record by record and decide in/out, reading ALL columns of the row, not just the ones the task names:
++- Out if Status/Stage is not the live one (inactive, pto, leave, draft, archived, cancelled, tentative, expired, closed, cleared, under review/investigation) or Notes/Comments say hold, do not process/flag/include, pending review, temporary, relocating, refresh in progress, bot traffic, exempt.
++- Out if a cross-tab lookup disqualifies it (VIP/tier exemption, prior-investigation or exception list, blackout date, certification/room rule, unavailable capacity).
++- Out if fields the rule needs are blank; do not guess values or list it as "no data".
++- Compute against the rule's own units and denominators: per-night, per-person, per-unit limits mean divide the total first (total / nights, total / heads); a share's denominator is exactly the population the rule names, after exclusions.
++- Act on and mention only the in-set records; excluded ones get no write, message line, or tag.

