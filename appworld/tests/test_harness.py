@@ -79,8 +79,11 @@ def test_invalid_effort_rejected() -> None:
 def test_example_configs_load() -> None:
     config = RECIPE_DIR / "configs" / "model.toml"
     default = ModelProfile.from_toml(config)
-    assert default.name == "gpt-5.6-sol"
-    assert default.family == "reasoning" and default.reasoning_effort == "medium"
+    assert default.name == "gpt-5.6-luna"
+    assert default.family == "reasoning" and default.reasoning_effort == "low"
+    cli_default = _profile_from_args(_parse_args(["run"]))
+    assert cli_default.name == default.name
+    assert cli_default.settings()["reasoning"].effort == "low"
     standard = ModelProfile.from_toml(config, model="gpt-4.1")
     assert standard.family == "standard" and standard.temperature == 0.0
     with pytest.raises(ValueError):
