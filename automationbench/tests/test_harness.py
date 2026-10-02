@@ -12,7 +12,7 @@ from fake_client import ScriptedClient
 from automationbench_skills import runner as runner_mod
 from automationbench_skills.data import PUBLIC_DOMAINS, load_samples, load_split, task_family
 from automationbench_skills.evaluation.summary import format_summary, summarize
-from automationbench_skills.prompts import load_system_prompt, with_system_prompt
+from automationbench_skills.prompts import load_system_prompt, task_clock, with_system_prompt
 from automationbench_skills.runner import (
     DEFAULT_REASONING_EFFORT,
     OPENROUTER_BASE_URL,
@@ -135,6 +135,33 @@ class TestPrompts:
         assert with_system_prompt("plain", "OURS") == "plain"
         assert with_system_prompt([prompt[1]], "OURS") == [{"role": "system", "content": "OURS"}, prompt[1]]
 
+    def test_clock_appends_to_the_system_message(self) -> None:
+        prompt = [{"role": "system", "content": "BENCHMARK PROMPT"}, {"role": "user", "content": "do the task"}]
+        out = with_system_prompt(prompt, "OURS", clock="2026-03-10T09:00:00Z")
+        assert out[0] == {"role": "system", "content": "OURS\n\nCurrent date and time: 2026-03-10T09:00:00Z"}
+        assert out[1:] == prompt[1:]
+
+    def test_clock_without_a_system_prompt_is_the_whole_system_message(self) -> None:
+        prompt = [{"role": "system", "content": "BENCHMARK PROMPT"}, {"role": "user", "content": "do the task"}]
+        out = with_system_prompt(prompt, None, clock="2026-03-10T09:00:00Z")
+        assert out[0] == {"role": "system", "content": "Current date and time: 2026-03-10T09:00:00Z"}
+        assert out[1:] == prompt[1:]
+
+    def test_no_clock_is_unchanged_behaviour(self) -> None:
+        prompt = [{"role": "system", "content": "BENCHMARK PROMPT"}, {"role": "user", "content": "do the task"}]
+        assert with_system_prompt(prompt, "OURS", clock=None) == [{"role": "system", "content": "OURS"}, prompt[1]]
+        assert with_system_prompt(prompt, None, clock=None) is prompt
+        assert with_system_prompt(prompt, "OURS", clock="") == [{"role": "system", "content": "OURS"}, prompt[1]]
+
+    def test_task_clock_reads_dict_or_json_initial_state(self) -> None:
+        info = {"initial_state": {"meta": {"current_time": "2026-03-10T09:00:00Z"}}}
+        assert task_clock(info) == "2026-03-10T09:00:00Z"
+        assert task_clock({"initial_state": json.dumps(info["initial_state"])}) == "2026-03-10T09:00:00Z"
+        assert task_clock({}) is None
+        assert task_clock({"initial_state": {"meta": {}}}) is None
+        assert task_clock({"initial_state": {}}) is None
+        assert task_clock({"initial_state": "not json"}) is None
+
     def test_load_reads_live_and_tolerates_absence(self, tmp_path: Path) -> None:
         assert load_system_prompt(None) is None
         assert load_system_prompt(tmp_path) is None
@@ -236,8 +263,12 @@ class TestRunner:
         base_system = baseline.calls[0]["prompt"][0]
         system = ours.calls[0]["prompt"][0]
         assert base_system.role == system.role == "system"
-        assert base_system.content == sample.prompt[0]["content"]
-        assert system.content == "READ YOUR SKILLS FIRST"
+        clock = task_clock(sample.info)
+        line = f"Current date and time: {clock}" if clock else None
+        expected_base = line or sample.prompt[0]["content"]
+        expected_ours = f"READ YOUR SKILLS FIRST\n\n{line}" if line else "READ YOUR SKILLS FIRST"
+        assert base_system.content == expected_base
+        assert system.content == expected_ours
         assert ours.calls[0]["prompt"][1:] == baseline.calls[0]["prompt"][1:]
 
     async def test_state_resets_between_rollouts(self) -> None:

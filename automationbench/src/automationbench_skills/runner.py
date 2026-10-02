@@ -30,7 +30,7 @@ from verifiers.types import RolloutInput
 
 from automationbench_skills.clients import CostTrackingChatCompletionsClient
 from automationbench_skills.data.tasks import Sample
-from automationbench_skills.prompts import load_system_prompt, with_system_prompt
+from automationbench_skills.prompts import load_system_prompt, task_clock, with_system_prompt
 from automationbench_skills.skills_tools import SKILL_TOOLS, set_skills_dir
 from automationbench_skills.vendored.model_setup import (
     build_client,
@@ -234,7 +234,7 @@ def get_client(model: ModelSpec) -> Client:
 
 def _rollout_input(sample: Sample, system_prompt: str | None = None) -> RolloutInput:
     return RolloutInput(
-        prompt=with_system_prompt(sample.prompt, system_prompt),
+        prompt=with_system_prompt(sample.prompt, system_prompt, clock=task_clock(sample.info)),
         example_id=sample.index,
         answer=sample.answer,
         info=sample.info,
