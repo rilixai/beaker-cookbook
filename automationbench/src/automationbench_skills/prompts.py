@@ -58,16 +58,22 @@ def with_system_prompt(prompt: Any, system_prompt: str | None, *, clock: str | N
     Does not mutate the input. A prompt without a leading system message gets
     one; plain-string prompts are returned unchanged. ``clock``, when given, is
     appended to the system message as ``Current date and time: <clock>`` after
-    a blank line -- or becomes the whole system message when ``system_prompt``
-    is ``None``.
+    a blank line. With ``system_prompt`` that message replaces the row's own;
+    with ``system_prompt`` ``None`` the row's leading system message is kept
+    and the line appended to it (or a clock-only system message is added when
+    the prompt has none).
     """
-    if clock:
-        line = f"Current date and time: {clock}"
-        system_prompt = f"{system_prompt}\n\n{line}" if system_prompt else line
-    if not system_prompt or not isinstance(prompt, list):
+    if not isinstance(prompt, list) or (not system_prompt and not clock):
         return prompt
+    line = f"Current date and time: {clock}" if clock else None
     messages = [dict(m) for m in prompt]
-    system = {"role": "system", "content": system_prompt}
+    if system_prompt:
+        content = f"{system_prompt}\n\n{line}" if line else system_prompt
+        system = {"role": "system", "content": content}
+        if messages and messages[0].get("role") == "system":
+            return [system, *messages[1:]]
+        return [system, *messages]
     if messages and messages[0].get("role") == "system":
-        return [system, *messages[1:]]
-    return [system, *messages]
+        messages[0] = {**messages[0], "content": f"{messages[0].get('content', '')}\n\n{line}"}
+        return messages
+    return [{"role": "system", "content": line}, *messages]

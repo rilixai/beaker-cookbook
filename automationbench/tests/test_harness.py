@@ -141,11 +141,17 @@ class TestPrompts:
         assert out[0] == {"role": "system", "content": "OURS\n\nCurrent date and time: 2026-03-10T09:00:00Z"}
         assert out[1:] == prompt[1:]
 
-    def test_clock_without_a_system_prompt_is_the_whole_system_message(self) -> None:
+    def test_clock_without_a_system_prompt_keeps_the_rows_system_message(self) -> None:
         prompt = [{"role": "system", "content": "BENCHMARK PROMPT"}, {"role": "user", "content": "do the task"}]
         out = with_system_prompt(prompt, None, clock="2026-03-10T09:00:00Z")
-        assert out[0] == {"role": "system", "content": "Current date and time: 2026-03-10T09:00:00Z"}
+        assert out[0] == {
+            "role": "system",
+            "content": "BENCHMARK PROMPT\n\nCurrent date and time: 2026-03-10T09:00:00Z",
+        }
         assert out[1:] == prompt[1:]
+        assert prompt[0]["content"] == "BENCHMARK PROMPT"
+        out = with_system_prompt([prompt[1]], None, clock="2026-03-10T09:00:00Z")
+        assert out[0] == {"role": "system", "content": "Current date and time: 2026-03-10T09:00:00Z"}
 
     def test_no_clock_is_unchanged_behaviour(self) -> None:
         prompt = [{"role": "system", "content": "BENCHMARK PROMPT"}, {"role": "user", "content": "do the task"}]
@@ -265,7 +271,7 @@ class TestRunner:
         assert base_system.role == system.role == "system"
         clock = task_clock(sample.info)
         line = f"Current date and time: {clock}" if clock else None
-        expected_base = line or sample.prompt[0]["content"]
+        expected_base = f"{sample.prompt[0]['content']}\n\n{line}" if line else sample.prompt[0]["content"]
         expected_ours = f"READ YOUR SKILLS FIRST\n\n{line}" if line else "READ YOUR SKILLS FIRST"
         assert base_system.content == expected_base
         assert system.content == expected_ours
