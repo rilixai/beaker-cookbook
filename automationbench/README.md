@@ -71,7 +71,7 @@ Hosted datasets change only when uploaded.
 
 ## Models
 
-`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort medium`. Routing
+`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort high`. Routing
 follows the benchmark (`vendored/model_setup.py`): `claude-*` goes to
 Anthropic, `gemini-*` to the Gemini interactions API, everything else to OpenAI
 chat-completions/responses. `--reasoning-effort` maps to each API's reasoning
