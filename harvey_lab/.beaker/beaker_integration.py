@@ -255,7 +255,7 @@ def selected_model_factory(runtime: RolloutRuntime[Any]) -> Any:
         reasoning_effort: str,
     ) -> Any:
         del model, temperature, max_tokens, context_window_tokens, reasoning_effort
-        # SDK 0.6.3 supplies no model limits. Use the configured model window.
+        # The SDK target supplies no model limits. Use the configured model window.
         # Stirrup requires a numeric budget locally; omit it on the wire so
         # the gateway chooses the selected model's output cap.
         return LiteLLMClient(
