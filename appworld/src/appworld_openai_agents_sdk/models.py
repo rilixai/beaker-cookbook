@@ -60,7 +60,7 @@ class ModelProfile:
     # The Responses API is the only place the `reasoning` effort setting is
     # honored, and it serves standard models too.
     api_type: Literal["responses", "chat_completions"] = "responses"
-    reasoning_effort: str = "medium"  # reasoning family only
+    reasoning_effort: str = "low"  # reasoning family only
     temperature: float = 0.0  # standard family only
     top_p: float | None = None  # standard family only
     max_output_tokens: int | None = None  # per model request; family default if None

@@ -5,10 +5,14 @@ attaches exactly the right parameters per model family, and that the agent,
 prompt, and example configs are wired up and importable.
 """
 
+import asyncio
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from agents.model_settings import ModelSettings
+from agents.run import RunConfig
+from openai import OpenAIError
 
 from appworld_openai_agents_sdk.cli import _parse_args, _profile_from_args
 from appworld_openai_agents_sdk.models import DEFAULT_MAX_OUTPUT_TOKENS, ModelProfile
@@ -79,8 +83,11 @@ def test_invalid_effort_rejected() -> None:
 def test_example_configs_load() -> None:
     config = RECIPE_DIR / "configs" / "model.toml"
     default = ModelProfile.from_toml(config)
-    assert default.name == "gpt-5.6-sol"
-    assert default.family == "reasoning" and default.reasoning_effort == "medium"
+    assert default.name == "gpt-5.6-luna"
+    assert default.family == "reasoning" and default.reasoning_effort == "low"
+    cli_default = _profile_from_args(_parse_args(["run"]))
+    assert cli_default.name == default.name
+    assert cli_default.settings()["reasoning"].effort == "low"
     standard = ModelProfile.from_toml(config, model="gpt-4.1")
     assert standard.family == "standard" and standard.temperature == 0.0
     with pytest.raises(ValueError):
@@ -92,6 +99,64 @@ def test_agent_wiring() -> None:
 
     assert MAX_STEPS == 50
     assert (PROMPTS_DIR / "react_code_agent" / "instructions.txt").is_file()
+
+
+@pytest.mark.parametrize("raise_errors", [False, True])
+@pytest.mark.parametrize("custom_config", [False, True])
+def test_runner_provider_errors_and_config(
+    monkeypatch: pytest.MonkeyPatch, raise_errors: bool, custom_config: bool
+) -> None:
+    from appworld_openai_agents_sdk import code_agent
+
+    world = MagicMock()
+    world.task_completed.return_value = False
+    appworld = MagicMock()
+    appworld.return_value.__enter__.return_value = world
+    logger = MagicMock()
+    monkeypatch.setattr(code_agent, "AppWorld", appworld)
+    monkeypatch.setattr(code_agent.Task, "load", MagicMock())
+    monkeypatch.setattr(code_agent, "Logger", MagicMock(return_value=logger))
+    monkeypatch.setattr(code_agent, "set_random_seed", MagicMock())
+    monkeypatch.setattr(code_agent, "set_default_openai_api", MagicMock())
+    monkeypatch.setattr(code_agent, "render_instructions", MagicMock(return_value="Instructions"))
+    monkeypatch.setattr(code_agent, "build_agent", MagicMock(return_value=(MagicMock(), {"count": 0})))
+    error = OpenAIError("Provider unavailable")
+    run = AsyncMock(side_effect=error)
+    monkeypatch.setattr(code_agent.Runner, "run", run)
+    config = RunConfig(model="custom-model", tracing_disabled=False) if custom_config else None
+    options = {}
+    if custom_config:
+        options["run_config"] = config
+    if raise_errors:
+        options["raise_provider_errors"] = True
+    experiment = code_agent.run_code_agent_on_tasks(
+        experiment_name="test",
+        task_ids=["task_1", "task_2"],
+        profile=ModelProfile(name="gpt-5.6-luna"),
+        prompt_file_path="unused.txt",
+        appworld_config={},
+        logger_config={},
+        max_steps=1,
+        **options,
+    )
+    if raise_errors:
+        with pytest.raises(OpenAIError) as caught:
+            asyncio.run(experiment)
+        assert caught.value is error
+        assert run.await_count == 1
+        logger.complete_task.assert_not_called()
+    else:
+        asyncio.run(experiment)
+        assert run.await_count == 2
+        assert world.save_state.call_count == 2
+        assert logger.complete_task.call_count == 2
+    for call in run.await_args_list:
+        actual_config = call.kwargs["run_config"]
+        if custom_config:
+            assert actual_config is config
+        else:
+            assert actual_config.tracing_disabled is True
+    assert appworld.return_value.__exit__.call_count == (1 if raise_errors else 2)
 
 
 def test_vendored_files_self_contained() -> None:

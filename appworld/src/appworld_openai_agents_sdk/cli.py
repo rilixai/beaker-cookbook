@@ -62,13 +62,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--model",
         type=str,
         default=None,
-        help="OpenAI model name (with --config: which table to use). Default `gpt-5.6-sol` / the config's `default`.",
+        help="OpenAI model name (with --config: which table to use). Default `gpt-5.6-luna` / the config's `default`.",
     )
     parser.add_argument(
         "--reasoning-effort",
         choices=REASONING_EFFORTS,
         default=None,
-        help="Reasoning effort (reasoning models only). Default `medium`.",
+        help="Reasoning effort (reasoning models only). Default `low`.",
     )
     parser.add_argument(
         "--temperature",
@@ -129,7 +129,7 @@ def _profile_from_args(args: argparse.Namespace) -> ModelProfile:
     if args.config is not None:
         profile = ModelProfile.from_toml(args.config, model=args.model)
     else:
-        profile = ModelProfile(name=args.model or "gpt-5.6-sol")
+        profile = ModelProfile(name=args.model or "gpt-5.6-luna")
     if profile.family == "reasoning" and args.temperature is not None:
         raise SystemExit(
             f"--temperature is not supported by reasoning models like {profile.name!r} (the API rejects it)."
