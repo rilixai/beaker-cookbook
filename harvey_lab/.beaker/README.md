@@ -78,7 +78,8 @@ model, the integration injects Stirrup's native `LiteLLMClient` with
 token limits; selected-model requests omit temperature and the recipe's output
 cap. SDK 0.6.3 exposes no model limits, so this path defaults to a 128,000-token
 context window. Set `HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS` to the selected model's
-actual context capacity before a run. It must be a positive integer. For hosted
+actual context capacity before a run. It must be a positive integer; setup
+rejects invalid values before downloading documents or running any cases. For hosted
 runs, set this optional variable with `beaker agent env set`; a local shell
 variable is not forwarded automatically. For example, after verifying that
 the selected model supports a 1,000,000-token window:

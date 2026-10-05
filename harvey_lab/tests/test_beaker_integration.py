@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib
 import json
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import litellm
 import pytest
-from beaker import RetryableCaseError, RolloutRuntime
+from beaker import RetryableCaseError, RolloutRuntime, SetupRuntime
 from beaker.sdk.inference import InferenceTarget
+from beaker.tracing import local_capture
 from beaker.tracing.core import NoopTrace
-from litellm.litellm_core_utils.logging_worker import GLOBAL_LOGGING_WORKER
+from beaker.tracing.integrations.litellm import registered
 from openai import AsyncOpenAI
 from stirrup.clients import litellm_client
 from stirrup.clients.litellm_client import LiteLLMClient
@@ -108,13 +108,10 @@ async def test_selected_model_request_omits_production_limits(
         async with AsyncOpenAI(api_key="test-key", base_url=target.base_url, http_client=http_client) as api:
             # Keep Stirrup and LiteLLM's real request construction; replace only HTTP transport.
             client._kwargs["client"] = api
-            GLOBAL_LOGGING_WORKER.start()
-            try:
-                await client.generate([UserMessage(content="Hello")], {})
-            finally:
-                await asyncio.sleep(0)
-                await asyncio.wait_for(GLOBAL_LOGGING_WORKER.flush(), timeout=5)
-                await GLOBAL_LOGGING_WORKER.stop()
+            async with local_capture(tmp_path / "trace") as capture:
+                async with registered(capture.trace) as tracing:
+                    await client.generate([UserMessage(content="Hello")], {})
+                    assert await tracing.flush(timeout=5)
     assert len(requests) == 1
     assert requests[0]["model"] == target.model
     assert "max_tokens" not in requests[0]
@@ -123,8 +120,9 @@ async def test_selected_model_request_omits_production_limits(
     assert "reasoning_effort" not in requests[0]
 
 
-@pytest.mark.parametrize("window", ["0", "-1", "invalid", "1.5", ""])
-def test_selected_model_rejects_invalid_context_window(
+@pytest.mark.asyncio
+@pytest.mark.parametrize("window", ["0", "-1", "invalid", "1.5", "", "1M"])
+async def test_context_window_rejected_during_setup_and_execution(
     integration: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, window: str
 ) -> None:
     monkeypatch.setenv("HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS", window)
@@ -133,3 +131,6 @@ def test_selected_model_rejects_invalid_context_window(
     runtime = RolloutRuntime(case_files_dir=tmp_path, trace=NoopTrace(), model=target.model)
     with pytest.raises(ValueError, match="HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS must be a positive integer"):
         integration.selected_model_factory(runtime)
+    with pytest.raises(ValueError, match="HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS must be a positive integer"):
+        async with integration.TaskSetup().prepare_run(runtime=Mock(spec=SetupRuntime)):
+            pytest.fail("Invalid context window must fail before setup yields")

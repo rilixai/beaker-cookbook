@@ -126,6 +126,7 @@ class TaskSetup(RepositoryRunSetup[TaskRow]):
     @asynccontextmanager
     async def prepare_run(self, *, runtime: SetupRuntime) -> AsyncIterator[RepositoryRunSetupResult]:
         del runtime
+        selected_context_window()
         with tempfile.TemporaryDirectory(prefix="harvey-beaker-corpus-") as cache:
             self.cache_dir = Path(cache)
             yield RepositoryRunSetupResult()
@@ -226,11 +227,8 @@ def row_payload(record: HarveyLabRecord) -> tuple[TaskInput, Expected]:
     )
 
 
-def selected_model_factory(runtime: RolloutRuntime[Any]) -> Any:
-    """Use Stirrup's native client and the selected model's Beaker gateway."""
-    from stirrup.clients.litellm_client import LiteLLMClient
-
-    target = inference_target(runtime)
+def selected_context_window() -> int:
+    """Validate the optional model window before setup downloads or case execution."""
     raw_window = os.environ.get(SELECTED_CONTEXT_WINDOW_ENV, str(DEFAULT_SELECTED_CONTEXT_WINDOW))
     try:
         selected_window = int(raw_window)
@@ -238,6 +236,15 @@ def selected_model_factory(runtime: RolloutRuntime[Any]) -> Any:
         raise ValueError(f"{SELECTED_CONTEXT_WINDOW_ENV} must be a positive integer") from exc
     if selected_window <= 0:
         raise ValueError(f"{SELECTED_CONTEXT_WINDOW_ENV} must be a positive integer")
+    return selected_window
+
+
+def selected_model_factory(runtime: RolloutRuntime[Any]) -> Any:
+    """Use Stirrup's native client and the selected model's Beaker gateway."""
+    from stirrup.clients.litellm_client import LiteLLMClient
+
+    selected_window = selected_context_window()
+    target = inference_target(runtime)
 
     def factory(
         model: str,
