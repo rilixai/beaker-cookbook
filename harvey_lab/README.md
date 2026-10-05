@@ -131,6 +131,11 @@ intact is reused, anything else is re-run (`--rerun` forces all) — then writes
 `eval_summary.json` (aggregates + case counts) and `eval_outputs.json` (per
 task). See `--help` for every flag.
 
+## Beaker integration
+
+See [`.beaker/README.md`](.beaker/README.md) for dataset upload, structural
+validation, model routing, and hosted optimization with the current Beaker SDK.
+
 ## Tests
 
 ```bash
