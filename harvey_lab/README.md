@@ -133,8 +133,56 @@ task). See `--help` for every flag.
 
 ## Beaker integration
 
-See [`.beaker/README.md`](.beaker/README.md) for dataset upload, structural
-validation, model routing, and hosted optimization with the current Beaker SDK.
+Run these commands from `harvey_lab/` after `uv sync --group dev --locked`.
+The `harvey-lab` integration in `.beaker/beaker.yaml` uses the existing
+`harvey-lab-agent` Beaker agent and optimizes `src/harvey_lab/agent/` for
+`criterion_pass_rate`; it also reports `all_pass` and per-criterion feedback.
+Setup validates the pinned task instructions and rubric, then stages only
+source documents for candidate execution.
+
+```bash
+# Validate two real tasks without model calls or an upload:
+uv run python .beaker/upload_splits.py --smoke-only --train-limit 1 --test-limit 1
+
+# Upload and validate the default 8 train / 4 test tasks:
+uv run python .beaker/upload_splits.py --name harvey-lab-small
+```
+
+The helper uses temporary JSONL files and prints an immutable `name@revision`.
+Use `--tasks-root /path/to/tasks` to reuse the pinned corpus, `--train-limit`
+and `--test-limit` for other sizes, or `--full` for all 1660 train / 100 test
+tasks. Use a distinct dataset name when changing sizes. The default excludes
+the large diligence data rooms. Smoke checks structure, not agent or judge quality.
+
+To start a hosted run from the pushed integration branch, use the exact dataset
+revision printed by the helper and explicitly select the fixed rubric judge:
+
+```bash
+uv run beaker run trigger --integration-id harvey-lab --agent harvey-lab-agent \
+  --dataset 'DATASET_NAME@REVISION' \
+  --config '{"scorer_model":"openrouter:deepseek/deepseek-v4-flash"}'
+```
+
+Ordinary runs retain the recipe's task model and 1M context window. Selected-model
+runs use the Beaker gateway, omit temperature and output-token limits, and default
+to a 128,000-token history window. Set the optional hosted agent variable
+`HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS` to the selected model's actual capacity
+with `beaker agent env set`; local shell values are not forwarded automatically.
+Setup rejects invalid values before downloads or case execution. Stirrup summarizes
+at 70% of the window, so the default does not retain every task's full documents.
+Use separate runs for models that need different context settings.
+
+Beaker grades four criteria per judge batch, versus eight in the standalone
+harness. Scores across those batching settings are not directly interchangeable.
+Keep the judge and batching fixed across baseline and candidates. Incomplete or
+invalid judge responses are retried; exhausted retries raise an error instead
+of assigning false failures. Candidate LiteLLM calls are traced separately from
+judge calls; separate Stirrup tool spans are not included.
+
+The hosted builder installs this project's `pyproject.toml` automatically and
+supplies the managed Beaker packages. `pip_install_from` is unnecessary, and
+`pip_install` must not include `beaker-sdk`. The configured image also installs
+Pandoc, Poppler, and LibreOffice.
 
 ## Tests
 
