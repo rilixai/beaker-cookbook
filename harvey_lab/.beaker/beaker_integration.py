@@ -234,14 +234,17 @@ def selected_model_factory(runtime: RolloutRuntime[Any]) -> Any:
         timeout: float,
         reasoning_effort: str,
     ) -> Any:
-        del model, reasoning_effort
+        del model, temperature, max_tokens, context_window_tokens, reasoning_effort
+        # SDK 0.6.3 supplies no model limits. Compact history conservatively.
+        # Stirrup requires a numeric budget locally; omit it on the wire so
+        # the gateway chooses the selected model's output cap.
         return LiteLLMClient(
             model=f"openai/{target.model}",
-            max_tokens=max_tokens,
-            context_window_tokens=context_window_tokens,
+            max_tokens=32_768,
+            context_window_tokens=32_768,
             api_key=target.api_key,
             reasoning_effort=None,
-            kwargs={"api_base": target.base_url, "temperature": temperature, "timeout": timeout},
+            kwargs={"api_base": target.base_url, "timeout": timeout, "additional_drop_params": ["max_tokens"]},
         )
 
     return factory
@@ -250,10 +253,17 @@ def selected_model_factory(runtime: RolloutRuntime[Any]) -> Any:
 async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> CaseResult:
     # Import here: each repository candidate supplies its own agent implementation.
     import litellm
+    from tenacity import RetryError
 
     from harvey_lab.agent.agent import HarveyLabAgent
     from harvey_lab.agent.workspace import TaskWorkspace
 
+    transient_errors = (
+        litellm.Timeout,
+        litellm.RateLimitError,
+        litellm.APIConnectionError,
+        litellm.InternalServerError,
+    )
     task = TaskInput.model_validate(case_input)
     with tempfile.TemporaryDirectory(prefix="harvey-beaker-case-") as directory:
         workspace = TaskWorkspace(directory)
@@ -281,13 +291,13 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             async with registered(runtime.trace) as tracing:
                 try:
                     output = await agent.forward(record=record)
-                except (
-                    litellm.Timeout,
-                    litellm.RateLimitError,
-                    litellm.APIConnectionError,
-                    litellm.InternalServerError,
-                ) as exc:
+                except transient_errors as exc:
                     raise RetryableCaseError(str(exc)) from exc
+                except RetryError as exc:
+                    cause = exc.last_attempt.exception()
+                    if isinstance(cause, transient_errors):
+                        raise RetryableCaseError(str(cause)) from exc
+                    raise
                 finally:
                     await tracing.flush()
             stage.output({"finished": output.finished, "abandoned": output.abandoned, "turns": output.total_turns})

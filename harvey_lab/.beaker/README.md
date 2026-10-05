@@ -68,8 +68,12 @@ Without a selected rollout model, Beaker preserves the recipe's default
 OpenRouter client and model. Local runs use the application's provider key;
 supported hosted calls can use Beaker provider routing. When a run selects a
 model, the integration injects Stirrup's native `LiteLLMClient` with
-`inference_target(runtime)`. The gateway controls reasoning effort.
-The recipe's token and context-window settings remain in effect.
+`inference_target(runtime)`. The gateway controls reasoning effort and output
+token limits; selected-model requests omit temperature and the recipe's output
+cap. SDK 0.6.3 exposes no model limits, so Stirrup uses a conservative 32,768-token
+context window for history summarization in this path. Ordinary runs keep the
+recipe's defaults. Exhausted Stirrup retries for transient provider errors are
+reported as retryable cases; other errors retain their original failure.
 
 The rubric judge uses `scoring_inference_target()` in hosted runs so its
 model and usage are separate from candidate execution. Hosted runs must
@@ -88,8 +92,11 @@ Run this only when you intend to start a hosted optimization run. Replace the
 dataset and branch placeholders with the validated revision and pushed branch.
 Keep the scorer model fixed across baseline and candidate evaluations.
 
-The hosted image installs the recipe, the Beaker tracing dependency, `pandoc`,
-`poppler-utils`, and LibreOffice. Beaker stays a development dependency for
+The hosted builder detects `harvey_lab/pyproject.toml` and installs the recipe
+and its runtime dependencies automatically; `pip_install_from` is unnecessary.
+Beaker and tracing come from the platform-managed packages, so `pip_install`
+must not list `beaker-sdk`. The image also installs `pandoc`, `poppler-utils`,
+and LibreOffice. Beaker stays a development dependency for
 local use; the normal `harvey-lab` commands do not import it.
 
 LiteLLM tracing is active only during the candidate agent call, including its
