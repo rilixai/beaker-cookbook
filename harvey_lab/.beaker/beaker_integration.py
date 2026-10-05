@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import shutil
 import tempfile
+import zipfile
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path, PurePosixPath
@@ -141,16 +142,7 @@ class TaskSetup(RepositoryRunSetup[TaskRow]):
             raise ValueError(f"dataset row differs from the pinned task: {row.id}")
         files_dir = runtime.case_files_dir(row.id)
         documents_dir = tasks_root / row.id / "documents"
-        files = []
-        for name in record.documents:
-            relative_path(name)
-            source = documents_dir / name
-            if not source.resolve().is_relative_to(documents_dir.resolve()):
-                raise ValueError(f"document escapes task folder: {name}")
-            target = files_dir / "documents" / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(shutil.copyfile, source, target)
-            files.append(CaseFile(name=f"documents/{name}", path=target))
+        files = await asyncio.to_thread(pack_documents, documents_dir, record.documents, files_dir)
         yield Case(
             id=row.id,
             input=row.input.model_dump(mode="json"),
@@ -158,6 +150,61 @@ class TaskSetup(RepositoryRunSetup[TaskRow]):
             files=tuple(files),
             metadata=row.metadata,
         )
+
+
+def pack_documents(documents_dir: Path, names: Sequence[str], destination: Path) -> tuple[CaseFile, ...]:
+    """Carry large data rooms within Beaker's 128-file / 64-MiB-per-file limits.
+
+    Bound each archive by 32 MiB of source bytes, leaving room for ZIP headers.
+    Fixed timestamps make the archives reproducible across setup attempts.
+    """
+    groups: list[list[tuple[str, Path]]] = []
+    size = 0
+    for name in sorted(names):
+        relative_path(name)
+        source = documents_dir / name
+        if not source.resolve().is_relative_to(documents_dir.resolve()):
+            raise ValueError(f"document escapes task folder: {name}")
+        source_size = source.stat().st_size
+        if source_size > 60 * 1024 * 1024:
+            raise ValueError(f"document is too large for a case archive: {name}")
+        if not groups or size + source_size > 32 * 1024 * 1024:
+            groups.append([])
+            size = 0
+        groups[-1].append((name, source))
+        size += source_size
+    files = []
+    for index, group in enumerate(groups):
+        path = destination / f"documents-{index:03d}.zip"
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for name, source in group:
+                info = zipfile.ZipInfo(name)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                with source.open("rb") as stream, archive.open(info, "w") as output:
+                    shutil.copyfileobj(stream, output)
+        files.append(CaseFile(name=path.name, path=path))
+    return tuple(files)
+
+
+def unpack_documents(case_files_dir: Path, destination: Path) -> tuple[str, ...]:
+    """Restore the original document paths without exposing task.json or labels."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for path in sorted(case_files_dir.glob("documents-*.zip")):
+        with zipfile.ZipFile(path) as archive:
+            for member in archive.infolist():
+                name = relative_path(member.filename)
+                if name in seen or member.is_dir():
+                    raise ValueError(f"invalid or duplicate archived document: {name}")
+                seen.add(name)
+                target = destination / name
+                if not target.resolve().is_relative_to(destination.resolve()):
+                    raise ValueError(f"archived document escapes workspace: {name}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member) as source, target.open("wb") as output:
+                    shutil.copyfileobj(source, output)
+                names.append(name)
+    return tuple(names)
 
 
 def row_payload(record: HarveyLabRecord) -> tuple[TaskInput, Expected]:
@@ -208,23 +255,21 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
     from harvey_lab.agent.workspace import TaskWorkspace
 
     task = TaskInput.model_validate(case_input)
-    documents = runtime.case_files_dir / "documents"
-    record = HarveyLabRecord(
-        task_id=task.task_id,
-        practice_area=task.task_id.split("/", 1)[0],
-        title=task.title,
-        work_type=task.work_type,
-        instructions=task.instructions,
-        deliverables=task.deliverables,
-        criteria=(),
-        documents=tuple(path.relative_to(documents).as_posix() for path in documents.rglob("*") if path.is_file()),
-        raw_task=task.model_dump(mode="json"),
-        task_fingerprint=hashlib.sha256(task.model_dump_json().encode()).hexdigest(),
-    )
     with tempfile.TemporaryDirectory(prefix="harvey-beaker-case-") as directory:
         workspace = TaskWorkspace(directory)
-        if documents.is_dir():
-            await asyncio.to_thread(shutil.copytree, documents, workspace.documents_dir, dirs_exist_ok=True)
+        documents = await asyncio.to_thread(unpack_documents, runtime.case_files_dir, workspace.documents_dir)
+        record = HarveyLabRecord(
+            task_id=task.task_id,
+            practice_area=task.task_id.split("/", 1)[0],
+            title=task.title,
+            work_type=task.work_type,
+            instructions=task.instructions,
+            deliverables=task.deliverables,
+            criteria=(),
+            documents=documents,
+            raw_task=task.model_dump(mode="json"),
+            task_fingerprint=hashlib.sha256(task.model_dump_json().encode()).hexdigest(),
+        )
         agent = HarveyLabAgent(
             config=HarveyLabConfig(),
             task_source=lambda _: workspace,

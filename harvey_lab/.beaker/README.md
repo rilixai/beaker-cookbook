@@ -18,7 +18,9 @@ document extraction, and batched rubric as the standalone recipe.
   with its rubric text, deliverable scope, and judge explanation when provided.
 - Rows contain the actual instructions and requested filenames in `input`,
   and the rubric in `expected`. Setup verifies both against the pinned corpus,
-  then stages only source documents through `CaseFile`. The candidate receives
+  then stages source documents in bounded ZIP archives through `CaseFile`.
+  The archives preserve paths and avoid Beaker's 128-files-per-case limit for
+  diligence data rooms with thousands of files. The candidate receives
   no `task.json` or rubric. It uses the staged documents without fetching data.
 - Predictions are the extracted text of submitted deliverables. Filename
   matching, partial submissions, and rubric batching follow the existing
