@@ -23,9 +23,12 @@ document extraction, and batched rubric as the standalone recipe.
   diligence data rooms with thousands of files. The candidate receives
   no `task.json` or rubric. It uses the staged documents without fetching data.
 - Predictions are the extracted text of submitted deliverables. Filename
-  matching, partial submissions, and rubric batching follow the existing
-  scorer. Empty rubrics are rejected when preparing a dataset. Exhausted
-  judge failures raise an error instead of assigning a misleading zero.
+  matching and partial submissions follow the existing scorer. Judge batches
+  contain at most four criteria. Every response must contain exactly one
+  pass/fail verdict for each requested criterion; incomplete, duplicate,
+  unknown, or invalid verdicts trigger retries. Empty rubrics are rejected
+  when preparing a dataset. Exhausted judge failures raise an error instead
+  of assigning a misleading zero.
 
 ## Dataset and structural validation
 
@@ -42,11 +45,13 @@ downloads use the recipe's normal cache; `GITHUB_TOKEN` is optional if GitHub
 rate limits become a problem. `--tasks-root /path/to/tasks` reuses a checkout
 at the pinned commit.
 
-To upload the default 20 train / 10 test tasks to the selected Beaker target:
+To upload the default 8 train / 4 test tasks to the selected Beaker target:
 
 ```bash
 uv run python .beaker/upload_splits.py
 ```
+
+These prefixes exclude the diligence data rooms with thousands of documents.
 
 Use `--train-limit` and `--test-limit` for other prefix sizes, or `--full`
 for all 1660 train / 100 test tasks. Full preparation downloads the complete

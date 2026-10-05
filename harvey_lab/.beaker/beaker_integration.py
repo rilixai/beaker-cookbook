@@ -296,6 +296,32 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
         return CaseResult(output=dict(output.deliverables), output_kind="text")
 
 
+def complete_judge_reasons(text: str, ids: Sequence[str]) -> dict[str, str]:
+    """Reject missing, duplicate, unknown, or invalid verdicts before aggregation."""
+    payload = _extract_verdicts_payload(text)
+    entries = payload.get("verdicts") if payload else None
+    if not isinstance(entries, list):
+        raise JudgeCallError("Rubric judge did not return a verdict list")
+    wanted = set(ids)
+    seen: set[str] = set()
+    reasons: dict[str, str] = {}
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            raise JudgeCallError("Rubric judge returned a malformed verdict")
+        cid = entry.get("id")
+        if not isinstance(cid, str) or cid not in wanted or cid in seen:
+            raise JudgeCallError("Rubric judge returned an unknown or duplicate criterion ID")
+        verdict = entry.get("verdict")
+        if not isinstance(verdict, str) or verdict.strip().lower() not in {"pass", "fail"}:
+            raise JudgeCallError(f"Rubric judge returned an invalid verdict for {cid}")
+        seen.add(cid)
+        if entry.get("reasoning"):
+            reasons[cid] = str(entry["reasoning"])
+    if seen != wanted:
+        raise JudgeCallError(f"Rubric judge returned {len(seen)}/{len(wanted)} verdicts; retry required")
+    return reasons
+
+
 def grade(task: TaskInput, expected: Expected, deliverables: dict[str, str]) -> CaseScore:
     import litellm
 
@@ -303,29 +329,28 @@ def grade(task: TaskInput, expected: Expected, deliverables: dict[str, str]) -> 
     target = scoring_inference_target()  # Missing hosted scorer configuration must fail.
     reasons: dict[str, str] = {}
 
-    def call_llm(*, model: str, messages: list[dict[str, str]]) -> str:
-        routing = {"api_base": target.base_url, "api_key": target.api_key} if target else {}
-        response = litellm.completion(
-            model=f"openai/{target.model}" if target else model,
-            messages=messages,
-            temperature=0.0,
-            timeout=config.judge_llm_timeout,
-            num_retries=config.judge_num_retries,
-            **routing,
-        )
-        text = str(response.choices[0].message.content or "")
-        payload = _extract_verdicts_payload(text)
-        if payload and isinstance(payload.get("verdicts"), list):
-            for entry in payload["verdicts"]:
-                if isinstance(entry, Mapping) and entry.get("reasoning"):
-                    reasons[str(entry.get("id"))] = str(entry["reasoning"])
-        return text
-
-    judge = build_rubric_judge(config.judge_model, llm=call_llm)
     failures: dict[tuple[str, ...], Exception] = {}
 
     def checked_judge(description: str, criteria: Sequence[Mapping[str, Any]], output: str) -> dict[str, bool]:
         key = tuple(str(criterion["id"]) for criterion in criteria)
+
+        def call_llm(*, model: str, messages: list[dict[str, str]]) -> str:
+            routing = {"api_base": target.base_url, "api_key": target.api_key} if target else {}
+            response = litellm.completion(
+                model=f"openai/{target.model}" if target else model,
+                messages=messages,
+                temperature=0.0,
+                timeout=config.judge_llm_timeout,
+                num_retries=config.judge_num_retries,
+                **routing,
+            )
+            text = str(response.choices[0].message.content or "")
+            # The standalone parser fills omitted criteria with FAIL. Validate
+            # the raw reply first so those defaults never become Beaker scores.
+            reasons.update(complete_judge_reasons(text, key))
+            return text
+
+        judge = build_rubric_judge(config.judge_model, llm=call_llm)
         try:
             verdicts = judge(description, criteria, output)
         except Exception as exc:
@@ -339,7 +364,7 @@ def grade(task: TaskInput, expected: Expected, deliverables: dict[str, str]) -> 
         deliverables=deliverables,
         task_description=f"{task.title}\n\n{task.instructions}".strip(),
         judge=checked_judge,
-        batch_size=config.judge_batch_size,
+        batch_size=4,
     )
     # The standalone harness converts exhausted judge failures to FAIL. Beaker
     # must surface infrastructure failures instead of optimizing against false zeros.
