@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import shutil
 import tempfile
 import zipfile
@@ -47,6 +48,11 @@ from harvey_lab.evaluation.scoring import (
     build_rubric_judge,
     score_rubric,
 )
+
+
+BEAKER_JUDGE_BATCH_SIZE = 4
+SELECTED_CONTEXT_WINDOW_ENV = "HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS"
+DEFAULT_SELECTED_CONTEXT_WINDOW = 128_000
 
 
 def relative_path(value: str) -> str:
@@ -225,6 +231,13 @@ def selected_model_factory(runtime: RolloutRuntime[Any]) -> Any:
     from stirrup.clients.litellm_client import LiteLLMClient
 
     target = inference_target(runtime)
+    raw_window = os.environ.get(SELECTED_CONTEXT_WINDOW_ENV, str(DEFAULT_SELECTED_CONTEXT_WINDOW))
+    try:
+        selected_window = int(raw_window)
+    except ValueError as exc:
+        raise ValueError(f"{SELECTED_CONTEXT_WINDOW_ENV} must be a positive integer") from exc
+    if selected_window <= 0:
+        raise ValueError(f"{SELECTED_CONTEXT_WINDOW_ENV} must be a positive integer")
 
     def factory(
         model: str,
@@ -235,13 +248,13 @@ def selected_model_factory(runtime: RolloutRuntime[Any]) -> Any:
         reasoning_effort: str,
     ) -> Any:
         del model, temperature, max_tokens, context_window_tokens, reasoning_effort
-        # SDK 0.6.3 supplies no model limits. Compact history conservatively.
+        # SDK 0.6.3 supplies no model limits. Use the configured model window.
         # Stirrup requires a numeric budget locally; omit it on the wire so
         # the gateway chooses the selected model's output cap.
         return LiteLLMClient(
             model=f"openai/{target.model}",
-            max_tokens=32_768,
-            context_window_tokens=32_768,
+            max_tokens=min(32_768, selected_window),
+            context_window_tokens=selected_window,
             api_key=target.api_key,
             reasoning_effort=None,
             kwargs={"api_base": target.base_url, "timeout": timeout, "additional_drop_params": ["max_tokens"]},
@@ -335,7 +348,7 @@ def complete_judge_reasons(text: str, ids: Sequence[str]) -> dict[str, str]:
 def grade(task: TaskInput, expected: Expected, deliverables: dict[str, str]) -> CaseScore:
     import litellm
 
-    config = HarveyLabConfig()
+    config = HarveyLabConfig(judge_batch_size=BEAKER_JUDGE_BATCH_SIZE)
     target = scoring_inference_target()  # Missing hosted scorer configuration must fail.
     reasons: dict[str, str] = {}
 
@@ -374,7 +387,7 @@ def grade(task: TaskInput, expected: Expected, deliverables: dict[str, str]) -> 
         deliverables=deliverables,
         task_description=f"{task.title}\n\n{task.instructions}".strip(),
         judge=checked_judge,
-        batch_size=4,
+        batch_size=config.judge_batch_size,
     )
     # The standalone harness converts exhausted judge failures to FAIL. Beaker
     # must surface infrastructure failures instead of optimizing against false zeros.

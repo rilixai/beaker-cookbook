@@ -30,6 +30,12 @@ document extraction, and batched rubric as the standalone recipe.
   when preparing a dataset. Exhausted judge failures raise an error instead
   of assigning a misleading zero.
 
+The Beaker judge uses four criteria per batch (`BEAKER_JUDGE_BATCH_SIZE`),
+while the standalone harness defaults to eight (`HarveyLabConfig.judge_batch_size`).
+This deliberate reduction helps with incomplete judge responses. Batch composition
+can change verdicts, so scores from the two configurations are not directly
+interchangeable. Keep the batch size fixed across a run's baseline and candidates.
+
 ## Dataset and structural validation
 
 Validate two real tasks without uploading a dataset or calling a model:
@@ -70,10 +76,28 @@ supported hosted calls can use Beaker provider routing. When a run selects a
 model, the integration injects Stirrup's native `LiteLLMClient` with
 `inference_target(runtime)`. The gateway controls reasoning effort and output
 token limits; selected-model requests omit temperature and the recipe's output
-cap. SDK 0.6.3 exposes no model limits, so Stirrup uses a conservative 32,768-token
-context window for history summarization in this path. Ordinary runs keep the
-recipe's defaults. Exhausted Stirrup retries for transient provider errors are
-reported as retryable cases; other errors retain their original failure.
+cap. SDK 0.6.3 exposes no model limits, so this path defaults to a 128,000-token
+context window. Set `HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS` to the selected model's
+actual context capacity before a run. It must be a positive integer. For hosted
+runs, set this optional variable with `beaker agent env set`; a local shell
+variable is not forwarded automatically. For example, after verifying that
+the selected model supports a 1,000,000-token window:
+
+```bash
+uv run beaker agent env set HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS \
+  --agent harvey-lab-agent --value 1000000
+```
+
+This setting affects selected-model execution only. Stirrup starts summarizing
+at 70% of the window (89,600 tokens with the default), so 128K does not guarantee
+that a whole task's documents remain in history. Use the actual model capacity
+for comparisons; when comparing models with different capacities, configure
+separate runs for each capacity. The local output budget is capped at the
+configured window and remains omitted from gateway requests.
+
+Ordinary runs keep the recipe's 1M context default. Exhausted Stirrup retries for
+transient provider errors are reported as retryable cases; other errors retain
+their original failure.
 
 The rubric judge uses `scoring_inference_target()` in hosted runs so its
 model and usage are separate from candidate execution. Hosted runs must

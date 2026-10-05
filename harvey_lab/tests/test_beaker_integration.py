@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 from pathlib import Path
@@ -14,6 +15,7 @@ import pytest
 from beaker import RetryableCaseError, RolloutRuntime
 from beaker.sdk.inference import InferenceTarget
 from beaker.tracing.core import NoopTrace
+from litellm.litellm_core_utils.logging_worker import GLOBAL_LOGGING_WORKER
 from openai import AsyncOpenAI
 from stirrup.clients import litellm_client
 from stirrup.clients.litellm_client import LiteLLMClient
@@ -70,9 +72,14 @@ async def test_non_transient_retry_error_is_not_reclassified(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("window", [None, 1_000_000, 16_384])
 async def test_selected_model_request_omits_production_limits(
-    integration: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    integration: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, window: int | None
 ) -> None:
+    if window is None:
+        monkeypatch.delenv("HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS", raising=False)
+    else:
+        monkeypatch.setenv("HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS", str(window))
     target = InferenceTarget(base_url="https://gateway.example/v1", api_key="test-key", model="openai:test-model")
     monkeypatch.setattr(integration, "inference_target", lambda runtime: target)
     requests: list[dict] = []
@@ -95,15 +102,34 @@ async def test_selected_model_request_omits_production_limits(
     factory = integration.selected_model_factory(runtime)
     client = factory("production-model", 0.6, 384_000, 1_000_000, 60.0, "xhigh")
     assert isinstance(client, LiteLLMClient)
-    assert client.context_window_tokens == 32_768
+    assert client.context_window_tokens == (window or 128_000)
+    assert client.max_tokens <= client.context_window_tokens
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
         async with AsyncOpenAI(api_key="test-key", base_url=target.base_url, http_client=http_client) as api:
             # Keep Stirrup and LiteLLM's real request construction; replace only HTTP transport.
             client._kwargs["client"] = api
-            await client.generate([UserMessage(content="Hello")], {})
+            GLOBAL_LOGGING_WORKER.start()
+            try:
+                await client.generate([UserMessage(content="Hello")], {})
+            finally:
+                await asyncio.sleep(0)
+                await asyncio.wait_for(GLOBAL_LOGGING_WORKER.flush(), timeout=5)
+                await GLOBAL_LOGGING_WORKER.stop()
     assert len(requests) == 1
     assert requests[0]["model"] == target.model
     assert "max_tokens" not in requests[0]
     assert "max_completion_tokens" not in requests[0]
     assert "temperature" not in requests[0]
     assert "reasoning_effort" not in requests[0]
+
+
+@pytest.mark.parametrize("window", ["0", "-1", "invalid", "1.5", ""])
+def test_selected_model_rejects_invalid_context_window(
+    integration: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, window: str
+) -> None:
+    monkeypatch.setenv("HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS", window)
+    target = InferenceTarget(base_url="https://gateway.example/v1", api_key="test-key", model="openai:test-model")
+    monkeypatch.setattr(integration, "inference_target", lambda runtime: target)
+    runtime = RolloutRuntime(case_files_dir=tmp_path, trace=NoopTrace(), model=target.model)
+    with pytest.raises(ValueError, match="HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS must be a positive integer"):
+        integration.selected_model_factory(runtime)
