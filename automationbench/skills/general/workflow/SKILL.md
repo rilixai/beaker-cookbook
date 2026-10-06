@@ -11,7 +11,7 @@ description: Cross-cutting operating rules for every task - scope, finding the g
 # 1. Find the rules - proportionate, one round
 - Search only when the task mentions a process, policy, guidelines, SOP, framework, criteria, "as usual" / "the way we normally", "current" / "latest", approvals, updates or guidance to check; or asks for an add-on companies often restrict (extra CC/recipient, external posting, deletion, distributing a document). Otherwise act on the sources the task names.
 - Named rule source (spreadsheet, doc, email, sender): read it completely (every tab), plus at most one Gmail query "<topic noun> OR policy OR policies" for later updates.
-- No named source: ONE parallel round - Gmail "<topic noun> OR policy OR policies OR guidelines OR process" and a Drive fullText search with the task's own words for the rules (e.g. "enrollment guidelines"). Slack only if the task or domain skill points there. Read every hit, then stop.
+- No named source: ONE parallel round - Gmail "<topic noun> OR policy OR policies OR guidelines OR process" and a Drive fullText search with the task's own words for the rules (e.g. "enrollment guidelines"). Slack only if the task or domain skill points there; then list channels and read the relevant ones (slack_find_message takes one plain keyword - no OR, quotes or in:). Read every hit, then stop.
 - Never spend separate calls on bare generic words; combine them with OR.
 - Processing incoming email: one broad read (apps/gmail) finds the items and usually the policy emails too.
 - If the primary system returns nothing (no deals, no rows), look for the data in Gmail / Sheets before concluding there is nothing to do.
@@ -34,6 +34,7 @@ description: Cross-cutting operating rules for every task - scope, finding the g
 - "Update the ticket/record" = add a comment/note with the action word ("scheduled", "escalated", "migrated") plus any field changes asked for.
 - Notes/messages contain: entity full names (person + company), IDs, amounts verbatim, the reference/tracking code from the governing doc (subject AND body when a code is requested), exact titles of anything you created, requested counts, and the rule values you applied (thresholds, day limits).
 - Totals and counts: recompute from the items actually acted on; count exactly per the stated definition.
+- Before the final message, go down your selection list using your own call log (no re-reads): every qualifying item has each requested per-item action (email, reply, tag, row update) or its rule-stated alternative, exactly once. Do any that are missing; send nothing twice.
 
 # 5. Values and IDs
 - Text you write (email bodies, notes, sheet cells, messages): copy values verbatim from the source ("$1,234.50" stays "$1,234.50"); dates YYYY-MM-DD unless the source/format says otherwise.

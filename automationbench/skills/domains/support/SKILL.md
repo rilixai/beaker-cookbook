@@ -9,10 +9,11 @@ Support tasks are driven by the policy/lookup spreadsheet the task names (criter
 - Qualify on the task's primary criteria (status, tag) and the explicit fields the sheet defines (classification/type, order status, Eligible, Flags, side-sheet exclusions). A ticket whose message is a different request type (a return or question is not a refund request) does not qualify.
 - Override rules: "Never/hold" rules block the item; "Always" rules force inclusion even when an exclusion tag is present. Match override values exactly as the rule describes (tag, email domain contains, company name, Flags field).
 - Priority mapping: exact tag/priority match; use the default row when nothing matches exactly.
-- Items that fail are not logged, not replied to and not mentioned, unless the task defines an outcome value for them (e.g. Not Found, Expired, Denied) - then log/reply with that outcome only.
+- Tickets that fail the qualifying criteria get nothing, unless the task defines an outcome value for them (e.g. Not Found, Expired, Denied) - then log/reply with that outcome only.
+- A qualifying ticket whose lookup fails (order number absent or not given) still gets the reply the task asks for on each ticket, saying the order could not be found or asking for the number; it is not logged as a successful lookup.
 
 ## Creating tickets in another system (migration / escalation)
-- First list existing tickets in the target. If one already covers the same customer/issue, add a note to it containing the source ticket ID instead of creating a duplicate.
+- First list existing tickets in the target. If one already covers the same issue (even if raised by a different contact), add a note to it containing the source ticket ID instead of creating a duplicate.
 - Create with subject verbatim, description from the source, mapped priority, and the customer's EMAIL (look it up in the source contacts) so the requester/contact is created.
 - Comment/message on each source ticket with the exact phrase the task gives; log each migrated item in the log sheet.
 
