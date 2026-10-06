@@ -13,7 +13,7 @@ This present recipe runs the benchmark one task at a time (`run_one`). The agent
 ```bash
 cd automationbench
 uv sync --group dev
-export OPENAI_API_KEY=sk-...   # or copy .env.example to .env
+export OPENROUTER_API_KEY=sk-or-...   # or copy .env.example to .env
 
 # Smoke run: 3 test tasks with the seed skills and prompt
 uv run automationbench-skills run --split test --limit 3 --skills-dir skills --prompts-dir prompts
@@ -71,7 +71,7 @@ Hosted datasets change only when uploaded.
 
 ## Models
 
-`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort medium`. Routing
+`--model` defaults to `qwen/qwen3.8-27b` (OpenRouter) with `--reasoning-effort medium`. Routing
 follows the benchmark (`vendored/model_setup.py`): `claude-*` goes to
 Anthropic, `gemini-*` to the Gemini interactions API, everything else to OpenAI
 chat-completions/responses. `--reasoning-effort` maps to each API's reasoning
