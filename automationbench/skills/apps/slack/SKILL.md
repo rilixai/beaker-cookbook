@@ -4,9 +4,8 @@ description: Procedures for the Slack app (post messages, channels, users, searc
 ---
 
 ## Reading
-- slack_find_message matches a plain word or short phrase only. OR, quotes, parentheses, in:#channel, after:/before: make it return "No messages found". It returns a single message. Use one bare keyword per call.
-- To read guidance reliably: slack_list_channels, then slack_list_channel_messages(channel="#name", limit 100) on the relevant channels.
-- slack_search_messages does not exist.
+- Read with slack_list_channels, then slack_list_channel_messages(channel="#name", limit 100) on the relevant channels.
+- slack_find_message returns one message and fails on multi-word, OR, quotes or filters; avoid it. slack_search_messages does not exist.
 
 ## Posting
 - slack_send_channel_message(channel="#name" or channel ID, text). slack_get_conversation(channel="#name") returns the ID if needed.

@@ -3,7 +3,7 @@ name: sales
 description: Procedures and playbooks for sales-domain tasks (CRM records, pipelines, stage changes, lead scoring, deal intake, campaign enrollment, contact updates, outreach).
 ---
 
-Read general/workflow first. Sales tasks almost always hinge on a hidden process doc (stage policy, scoring framework, pricing policy, matching or enrollment guidelines). Find it in Gmail / Sheets / Drive before touching Salesforce.
+Sales tasks usually hinge on a process doc (stage policy, scoring framework, pricing policy, matching or enrollment guidelines) in Gmail or a Drive spreadsheet; find it (general/workflow section 1) before touching Salesforce.
 
 ## Stage advancement
 - List all opportunities of the exact account (query by AccountId; similarly named accounts are other companies).
@@ -23,7 +23,7 @@ Read general/workflow first. Sales tasks almost always hinge on a hidden process
 - Check for an existing opportunity with the same name before creating.
 
 ## Contact matching / updates
-- Match the request to the contact by sender email domain -> account, then name and title. Skip records marked former/departed/do-not-update/historical.
+- One request = one contact updated. Match by sender email domain -> account, then title, then name; skip records marked former/departed/do-not-update/historical. Other update emails in the inbox are not part of the task unless it says "all".
 - When a request is ambiguous across several same-name contacts, the validation rule in the policy decides (e.g. required authority level); record the verification in a Note with any literal strings the task requires.
 
 ## Campaign enrollment
@@ -32,4 +32,4 @@ Read general/workflow first. Sales tasks almost always hinge on a hidden process
 - Check existing CampaignMembers first; the final member set must equal the eligible set (remove anything added by mistake).
 
 ## Outreach email
-- Use gmail_send_email. Include the person's full name, company name and the phrases the task asks for verbatim.
+- Include the person's full name (first + last), company name and the phrases the task asks for verbatim.

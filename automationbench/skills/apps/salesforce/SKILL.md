@@ -16,4 +16,3 @@ description: Procedures for the Salesforce app (records, queries, opportunities,
 - salesforce_contact_update(id, phone, ...). Keep the phone format given in the source.
 - salesforce_note_create(parent_id, title, body): graders check parent_id, title and body substrings - put required literal strings, IDs, codes and amounts in the body.
 - Campaigns: CampaignMember query by CampaignId; salesforce_contact_add_to_campaign(campaign_id, contact_id); remove with salesforce_delete_record(object "CampaignMember", recordId=<member Id>).
-- Do not use salesforce_send_email for outbound mail; use gmail_send_email.

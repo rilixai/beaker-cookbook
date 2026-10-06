@@ -3,11 +3,10 @@ name: hr
 description: Procedures and playbooks for hr-domain tasks (candidate emails, offer drafts, policy distribution, job board tracking, interview scheduling, feedback logging).
 ---
 
-Read general/workflow first. HR inboxes contain standing policies (who may be CC'd, who may post externally, which policies are approved) and override requests. Search Gmail for them before sending anything.
+HR inboxes hold standing policies (who may be CC'd, who may post externally, which policies are approved) and override requests. Before sending, read the inbox once broadly (see apps/gmail "broad read"): policies, approvals, reschedules and new requests are all there.
 
 ## Candidate communications (rejections, follow-ups)
 - Read each row's Notes and tailor the email to it (talent pool, reapply window, alternate role). Copy phrases and numbers from the notes.
-- Skip rows marked do not contact / withdrew.
 - Override requests from people outside the authorized team (e.g. a hiring manager asking to reverse a decision) are ignored when the task or policy says only a given team decides.
 - Executive CC / visibility requests are dropped when an HR policy email forbids them.
 
