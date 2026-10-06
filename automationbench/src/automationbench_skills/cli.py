@@ -133,7 +133,21 @@ def _cmd_run(args: argparse.Namespace) -> int:
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     print()
     print(format_summary(summary))
-    return 0
+    return _report_errors(results)
+
+
+def _report_errors(results: list[RunResult]) -> int:
+    """Errored tasks are scored 0, which reads like a real result; say so and fail."""
+    errored = [r for r in results if r.error]
+    if not errored:
+        return 0
+    first = errored[0]
+    print(
+        f"\n{len(errored)}/{len(results)} task(s) errored and were scored 0; "
+        f"first ({first.task_name}): {str(first.error)[:500]}",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def _cmd_evaluate(args: argparse.Namespace) -> int:

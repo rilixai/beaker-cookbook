@@ -342,6 +342,22 @@ class TestRunner:
         # closed-loop entries are evicted, so the cache doesn't grow across runs
         assert len([k for k in runner_mod._CLIENT_CACHE if k[0] == spec]) == 1
 
+    def test_default_model_spec_stays_on_chat_completions(self) -> None:
+        assert ModelSpec().resolved_api() == "chat_completions", (
+            "Beaker requires Chat Completions; see .beaker/beaker_integration.py `_client_for`"
+        )
+
+    def test_errored_tasks_fail_the_cli(self, capsys: Any) -> None:
+        from automationbench_skills.cli import _report_errors
+        from automationbench_skills.runner import RunResult
+
+        def result(name: str, error: Any = None) -> RunResult:
+            return RunResult(name, "crm", 0.0, 0.0, [], None, error=error)
+
+        assert _report_errors([result("a"), result("b")]) == 0
+        assert _report_errors([result("a"), result("b", {"error": "BadRequestError: 400"})]) == 1
+        assert "1/2 task(s) errored" in capsys.readouterr().err
+
     def test_env_is_cached(self) -> None:
         assert get_env(skills=False) is get_env(skills=False)
         assert get_env(skills=True) is not get_env(skills=False)
