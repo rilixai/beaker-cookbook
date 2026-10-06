@@ -98,9 +98,15 @@ async def score_case(*, case, result, case_files_dir: Path) -> CaseScore:
                 )
     successes = [bool(outcome["success"]) for outcome in tasks.values()]
     sgc = float(all(successes))
+    tgc = sum(successes) / len(successes)
+    combined = 0.8 * tgc + 0.2 * sgc
     return CaseScore(
-        objective=sgc,
-        field_scores={"scenario_goal_completion": sgc, "task_goal_completion": sum(successes) / len(successes)},
+        objective=combined,
+        field_scores={
+            "combined_goal_completion": combined,
+            "scenario_goal_completion": sgc,
+            "task_goal_completion": tgc,
+        },
         checks=tuple(checks),
     )
 

@@ -1,16 +1,16 @@
-# AppWorld Scenario Goal Completion
+# App World
 
-This integration optimizes **Scenario Goal Completion (SGC)**. Each case runs
-all three variants of one scenario. Its objective is 1 only if AppWorld's
-pinned evaluator passes every requirement in every variant; otherwise it is 0.
-Task Goal Completion is reported separately and does not affect the objective.
-Evaluation is deterministic; no judge model is used.
+This integration optimizes a combined goal-completion score. Each case runs all
+three variants of one scenario. The objective weights **Task Goal Completion
+(TGC) at 80%** and **Scenario Goal Completion (SGC) at 20%**. TGC gives partial
+credit for successful variants; SGC is 1 only if AppWorld's pinned evaluator
+passes every requirement in every variant. Evaluation is deterministic; no
+judge model is used.
 
 The quick-start dataset uses the first four scenarios in the official training
 split: three for optimization and one held out. The benchmark test splits are
 unused. `upload_dataset.py` validates real instructions and requirements, stages
-JSONL in a temporary directory, and uploads it to AppWorld Scenario Goal
-Completion. Dataset
+JSONL in a temporary directory, and uploads it to App World. Dataset
 revisions are passed explicitly to smoke and launch rather than saved in YAML.
 
 `uv run python .beaker/upload_dataset.py --full` uploads `appworld-sgc-full`
