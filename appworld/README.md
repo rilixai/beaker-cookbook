@@ -93,10 +93,11 @@ parameters get sent — a model never receives a parameter it doesn't support:
 
 [`configs/model.toml`](configs/model.toml) has one block per model, each
 holding just the parameters that model supports; `--model <name>` picks the
-block (the file's `default` is `gpt-5.6-sol`). Or skip the config and use flags:
+block. Both the file and the CLI default to `gpt-5.6-luna` with low reasoning.
+Or skip the config and use flags:
 
 ```bash
-uv run appworld-openai-agents-sdk run --model gpt-5.6-sol --reasoning-effort high --split dev --max-tasks 3
+uv run appworld-openai-agents-sdk run --model gpt-5.6-luna --reasoning-effort low --split dev --max-tasks 3
 uv run appworld-openai-agents-sdk run --model gpt-4.1 --temperature 0 --split dev --max-tasks 3
 ```
 
