@@ -72,7 +72,9 @@ def main() -> None:
                 "upload",
                 temporary,
                 "--agent",
-                "appworld-task-goal-completion" if args.tgc else "appworld-fresh",
+                "appworld-task-goal-completion"
+                if args.tgc
+                else "appworld-scenario-goal-completion",
                 "--name",
                 "appworld-tgc-full" if args.tgc else "appworld-sgc-full" if args.full else "appworld-sgc-quickstart",
                 "--total-count",

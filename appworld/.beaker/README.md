@@ -1,4 +1,4 @@
-# AppWorld Fresh
+# AppWorld Scenario Goal Completion
 
 This integration optimizes **Scenario Goal Completion (SGC)**. Each case runs
 all three variants of one scenario. Its objective is 1 only if AppWorld's
@@ -9,7 +9,8 @@ Evaluation is deterministic; no judge model is used.
 The quick-start dataset uses the first four scenarios in the official training
 split: three for optimization and one held out. The benchmark test splits are
 unused. `upload_dataset.py` validates real instructions and requirements, stages
-JSONL in a temporary directory, and uploads it to AppWorld Fresh. Dataset
+JSONL in a temporary directory, and uploads it to AppWorld Scenario Goal
+Completion. Dataset
 revisions are passed explicitly to smoke and launch rather than saved in YAML.
 
 `uv run python .beaker/upload_dataset.py --full` uploads `appworld-sgc-full`
