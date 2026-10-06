@@ -38,3 +38,18 @@ and tool traces in Beaker. Scoring runs after the tracing scope closes.
 Run commands from `appworld/` with `uv run beaker`, selecting integration
 `appworld_openai_agents_sdk`. Strict smoke validates structure and labeled data;
 it does not execute the agent or establish benchmark quality.
+
+Parallel evaluation runs each case in a fresh Python subprocess through
+`appworld_subprocess.py` and `appworld_case_worker.py`. AppWorld changes
+process-global clocks, database caches, and defaults, so cases must not share
+an interpreter. Scenario variants remain sequential inside their case; separate
+cases, including repetitions of the same task, can overlap. Each case keeps its
+existing unique experiment directory and uses the candidate checkout's code.
+The pinned benchmark data cache is shared and its setup remains file-locked.
+
+The subprocess runs both the agent and deterministic AppWorld evaluation, then
+returns the existing result format. Beaker's case limit controls concurrency.
+Cancellation kills the worker process group; failures retain a traceback artifact.
+Model/tool spans and large trace artifacts are imported into the parent capture
+before temporary worker files are removed. This bridge uses the SDK's capture
+adoption interfaces, so SDK upgrades should recheck trace import as well as results.
