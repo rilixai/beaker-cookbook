@@ -221,7 +221,9 @@ def _client_for(runtime: RolloutRuntime[Any]) -> tuple[_TracedChatCompletionsCli
         api_key = os.environ.get(model.effective_api_key_var())
     # Same SDK-level retry and timeout settings as the harness's own verifiers client.
     sdk = ClientConfig(api_key_var=model.effective_api_key_var())
-    client = AsyncOpenAI(api_key=api_key, base_url=model.effective_base_url(), max_retries=sdk.max_retries, timeout=sdk.timeout)
+    client = AsyncOpenAI(
+        api_key=api_key, base_url=model.effective_base_url(), max_retries=sdk.max_retries, timeout=sdk.timeout
+    )
     return _TracedChatCompletionsClient(client), model
 
 
