@@ -5,9 +5,8 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from uuid import uuid4
 
-from appworld_setup import PROJECT, prepare_appworld
+from appworld_setup import prepare_appworld
 from beaker import (
     Case,
     CaseResult,
@@ -16,41 +15,9 @@ from beaker import (
     Integration,
     RepositoryRunSetup,
     RepositoryRunSetupResult,
-    inference_target,
     repository,
 )
-from beaker.tracing.integrations import openai_agents
 from pydantic import BaseModel, Field, model_validator
-
-from appworld_openai_agents_sdk.models import ModelProfile
-
-
-class _GatewayModelProfile(ModelProfile):
-    """Leave provider-specific generation settings to the inference gateway."""
-
-    def settings(self) -> dict:
-        return {"tool_choice": "auto"}
-
-
-@asynccontextmanager
-async def _model_config(runtime):
-    from agents import OpenAIChatCompletionsModel
-    from agents.run import RunConfig
-    from openai import AsyncOpenAI
-
-    if not runtime.model:
-        yield ModelProfile.from_toml(PROJECT / "configs/model.toml"), RunConfig(tracing_disabled=False)
-        return
-
-    target = inference_target(runtime)
-    async with AsyncOpenAI(api_key=target.api_key, base_url=target.base_url) as client:
-        yield (
-            _GatewayModelProfile(name=target.model, api_type="chat_completions"),
-            RunConfig(
-                model=OpenAIChatCompletionsModel(model=target.model, openai_client=client),
-                tracing_disabled=False,
-            ),
-        )
 
 
 class TaskInput(BaseModel):
@@ -107,49 +74,9 @@ class Setup(RepositoryRunSetup[Row]):
 
 
 async def run_case(*, case_input, runtime) -> CaseResult:
-    prepare_appworld()
-    from agents import set_trace_processors, set_tracing_disabled
-    from agents.tracing import get_trace_provider
-    from appworld import AppWorld, evaluate_task
-    from appworld.apps.lib.models.db import CachedDBHandler
+    from appworld_subprocess import run_isolated_case
 
-    from appworld_openai_agents_sdk.code_agent import run_code_agent_on_tasks
-    from appworld_openai_agents_sdk.runner import MAX_STEPS, PROMPTS_DIR, RANDOM_SEED
-
-    task_ids = [task["task_id"] for task in case_input["tasks"]]
-    experiment = f"beaker-{uuid4().hex}"
-    # The application disables SDK telemetry by default. Enable it only in this
-    # isolated evaluation, and keep traces in Beaker rather than OpenAI export.
-    provider = get_trace_provider()
-    processors = list(provider._multi_processor._processors)
-    disabled = provider._disabled
-    try:
-        set_trace_processors([])
-        set_tracing_disabled(False)
-        async with _model_config(runtime) as (profile, run_config):
-            with openai_agents.registered(runtime.trace):
-                await run_code_agent_on_tasks(
-                    experiment_name=experiment,
-                    task_ids=task_ids,
-                    profile=profile,
-                    prompt_file_path=str(PROMPTS_DIR / "react_code_agent/instructions.txt"),
-                    appworld_config={"random_seed": RANDOM_SEED},
-                    logger_config={"color": False, "verbose": False},
-                    max_steps=MAX_STEPS,
-                    run_config=run_config,
-                    raise_provider_errors=True,
-                )
-    finally:
-        set_trace_processors(processors)
-        set_tracing_disabled(disabled)
-        AppWorld.close_all()
-    results = {}
-    for task_id in task_ids:
-        try:
-            results[task_id] = evaluate_task(task_id, experiment, save_report=False).to_dict()
-        finally:
-            CachedDBHandler.reset()
-    return CaseResult(output={"tasks": results}, output_kind="record")
+    return await run_isolated_case(case_input=case_input, runtime=runtime)
 
 
 async def score_case(*, case, result, case_files_dir: Path) -> CaseScore:

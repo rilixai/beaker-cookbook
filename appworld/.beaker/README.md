@@ -52,5 +52,20 @@ There is no partial credit. It reuses the SGC integration's runner and tracing.
 `uv run python .beaker/upload_dataset.py --tgc` uploads `appworld-tgc-full`:
 90 training cases and 57 evaluation cases from the official dev split.
 Use `uv run beaker --config-file .beaker/tgc.yaml` for this agent's commands.
-The earlier execution timeout remains undiagnosed; task-level grouping alone
-is not evidence that it is fixed.
+
+## Parallel execution for both agents
+
+Parallel evaluation runs each case in a fresh Python subprocess through
+`appworld_subprocess.py` and `appworld_case_worker.py`. AppWorld changes
+process-global clocks, database caches, and defaults, so cases must not share
+an interpreter. Scenario variants remain sequential inside their case; separate
+cases, including repetitions of the same task, can overlap. Each case keeps its
+existing unique experiment directory and uses the candidate checkout's code.
+The pinned benchmark data cache is shared and its setup remains file-locked.
+
+The subprocess runs both the agent and deterministic AppWorld evaluation, then
+returns the existing result format. Beaker's case limit controls concurrency.
+Cancellation kills the worker process group; failures retain a traceback artifact.
+Model/tool spans and large trace artifacts are imported into the parent capture
+before temporary worker files are removed. This bridge uses the SDK's capture
+adoption interfaces, so SDK upgrades should recheck trace import as well as results.
