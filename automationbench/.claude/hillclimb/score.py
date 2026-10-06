@@ -10,7 +10,9 @@ variants = sys.argv[1:] or sorted(p.name for p in FLOW.iterdir() if (p / "result
 base = None
 print(f"{'variant':10} {'n':>4} {'test score':>16} {'train score':>16} {'test pass':>9} {'test pc':>8} {'tr pass':>8} {'tr pc':>6} {'Mtok in':>8} {'tools':>6} {'skills':>6} {'errs':>4}")
 for v in variants:
-    rows = [json.loads(l) for l in (FLOW / v / "results.jsonl").read_text().splitlines()]
+    allrows = [json.loads(l) for l in (FLOW / v / "results.jsonl").read_text().splitlines()]
+    # pre-registered: provider policy flags (400 invalid_prompt) are serving errors, not scored
+    rows = [r for r in allrows if "invalid_prompt" not in (r.get("error") or "")]
     errs = (FLOW / v / "errors.jsonl")
     nerr = len(errs.read_text().splitlines()) if errs.exists() else 0
     per = defaultdict(lambda: defaultdict(list))
@@ -26,4 +28,4 @@ for v in variants:
     ts, tci = agg("test", "score"); rs, rci = agg("train", "score")
     tin = sum(r["usage"].get("input_tokens", 0) for r in rows) / 1e6
     tools = sum(r["tool_calls"] for r in rows) / len(rows); sk = sum(r["skill_calls"] for r in rows) / len(rows)
-    print(f"{v:10} {len(rows):>4} {ts:7.3f} ±{tci:.3f}     {rs:7.3f} ±{rci:.3f}     {agg('test','pass')[0]:9.3f} {agg('test','partial_credit')[0]:8.3f} {agg('train','pass')[0]:8.3f} {agg('train','partial_credit')[0]:6.3f} {tin:8.1f} {tools:6.1f} {sk:6.1f} {nerr:>4}")
+    print(f"{v:10} {len(rows):>4} {ts:7.3f} ±{tci:.3f}     {rs:7.3f} ±{rci:.3f}     {agg('test','pass')[0]:9.3f} {agg('test','partial_credit')[0]:8.3f} {agg('train','pass')[0]:8.3f} {agg('train','partial_credit')[0]:6.3f} {tin:8.1f} {tools:6.1f} {sk:6.1f} {nerr + len(allrows) - len(rows):>4}")
