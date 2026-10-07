@@ -75,8 +75,8 @@ Hosted datasets change only when uploaded.
 follows the benchmark (`vendored/model_setup.py`): `claude-*` goes to
 Anthropic, `gemini-*` to the Gemini interactions API. Other names served
 directly by OpenAI (no `--base-url` or `OPENAI_BASE_URL`) go to the Responses
-API, because OpenAI rejects function tools on chat completions for reasoning
-models; a gateway stays on chat completions. `--api` overrides the choice.
+API, because OpenAI rejects function tools on chat completions for gpt-5.4+
+models unless `reasoning_effort` is `"none"`; a gateway stays on chat completions. `--api` overrides the choice.
 `--reasoning-effort` maps to each API's reasoning setting. For a gateway:
 
 ```bash

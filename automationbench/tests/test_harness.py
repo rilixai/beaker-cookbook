@@ -369,7 +369,7 @@ class TestRunner:
         monkeypatch.setenv("OPENAI_BASE_URL", "https://gw.example/v1")
         assert _default_api("gpt-5.6-luna", None, "auto") == "auto"
 
-    def test_errored_tasks_fail_the_cli(self, capsys: Any) -> None:
+    def test_cli_reports_errors_and_fails_when_all_errored(self, capsys: Any) -> None:
         from automationbench_skills.cli import _report_errors
         from automationbench_skills.runner import RunResult
 
@@ -377,8 +377,9 @@ class TestRunner:
             return RunResult(name, "crm", 0.0, 0.0, [], None, error=error)
 
         assert _report_errors([result("a"), result("b")]) == 0
-        assert _report_errors([result("a"), result("b", {"error": "BadRequestError: 400"})]) == 1
+        assert _report_errors([result("a"), result("b", {"error": "BadRequestError: 400"})]) == 0
         assert "1/2 task(s) errored" in capsys.readouterr().err
+        assert _report_errors([result("a", "BadRequestError: 400"), result("b", "BadRequestError: 400")]) == 1
 
     def test_env_is_cached(self) -> None:
         assert get_env(skills=False) is get_env(skills=False)
