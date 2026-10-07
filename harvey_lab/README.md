@@ -141,18 +141,41 @@ Setup validates the pinned task instructions and rubric, then stages only
 source documents for candidate execution.
 
 ```bash
+# Inspect the default selection and practice-area counts without downloading tasks:
+uv run python .beaker/upload_splits.py --dry-run
+
 # Validate two real tasks without model calls or an upload:
 uv run python .beaker/upload_splits.py --smoke-only --train-limit 1 --test-limit 1
 
-# Upload and validate the default 8 train / 4 test tasks:
-uv run python .beaker/upload_splits.py --name harvey-lab-small
+# Upload and validate 100 train / all 100 test tasks:
+uv run python .beaker/upload_splits.py --train-limit 100 --seed 0 --name harvey-lab-stratified-100
 ```
 
 The helper uses temporary JSONL files and prints an immutable `name@revision`.
+Uploads always keep the frozen 100-task test set unchanged. Training tasks are
+sampled without replacement from the frozen 1660-task training pool. For each
+of the 26 practice areas, the helper allocates `train_limit * test_area_count / 100`
+slots, rounds down, then assigns remaining slots to the largest fractional
+remainders (ties use alphabetical area order). It samples uniformly within each
+area with `--seed` (default 0). Input list order does not affect the sample.
+At the default 100 training tasks, every area has exactly the same count as test;
+at other sizes each quota differs from its proportional target by less than one
+task. Small samples can omit rare areas. If an area has too few training tasks,
+selection fails before downloads instead of changing the quotas.
+
+`--dry-run` prints the selected IDs, seed, and per-area counts and shares. The
+uploaded manifest records the same information. Use one seed and dataset revision
+across comparisons; do not select the seed using evaluation scores. Matching
+practice areas does not guarantee matching document sizes, work types, difficulty,
+or independent document families. The default includes diligence tasks and can
+require large downloads.
+
 Use `--tasks-root /path/to/tasks` to reuse the pinned corpus, `--train-limit`
-and `--test-limit` for other sizes, or `--full` for all 1660 train / 100 test
-tasks. Use a distinct dataset name when changing sizes. The default excludes
-the large diligence data rooms. Smoke checks structure, not agent or judge quality.
+for another training size, or `--full` to bypass sampling and use all 1660 train /
+100 test tasks (their proportions are not identical). Use a distinct dataset name
+when changing the sample. `--test-limit` is allowed only with `--smoke-only` for
+small structural checks; these checks are not representative evaluations. Smoke
+checks structure, not agent or judge quality.
 
 To start a hosted run from the pushed integration branch, use the exact dataset
 revision printed by the helper and explicitly select the fixed rubric judge:
