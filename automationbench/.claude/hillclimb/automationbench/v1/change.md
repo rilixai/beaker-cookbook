@@ -1,0 +1,5 @@
+# v1: fill empty skills with operational procedures
+Hypothesis: seed skills are one-line stubs, so the agent acts without operating procedures.
+Train analysis (baseline, 70 valid rows): biggest losses are (A) acting without finding the governing written policy (~12 cases; agent rarely searches Gmail), (B) narrow/date-filtered searches missing inputs, (C) wrong authority judgments (following CRM descriptions, drafts, self-declared "final" messages), (D) record-selection errors (substring tag matches, invented exclusions), (E) incomplete writes (missing comment/code/full name), (F) tool/ID mechanics, (G) skipping the alternate action for excluded items.
+Change: new skills/general/workflow (cross-cutting rules), filled 6 domain + 7 app skills, added 10 app skills (asana, basecamp, monday, freshdesk, zoho_desk, hubspot, gorgias, twitter, google_calendar, quickbooks); system.md tells agent to read general/workflow too.
+Regression risks: turn budget on already-long cases; "policy beats ad-hoc request" could drop requested actions; dedupe-before-create could skip creates.
