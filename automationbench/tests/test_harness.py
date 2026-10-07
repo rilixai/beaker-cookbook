@@ -356,6 +356,30 @@ class TestRunner:
             {"reasoning_effort": "medium"},
         )
 
+    async def test_beaker_no_model_uses_traced_anthropic_client(self, monkeypatch: Any) -> None:
+        import sys
+        from types import SimpleNamespace
+
+        from automationbench.clients import StreamingAnthropicClient
+
+        sys.path.insert(0, str(RECIPE_ROOT / ".beaker"))
+        import beaker_integration
+        from beaker_integration import _client_for, _TracedAnthropicClient
+
+        monkeypatch.setattr(
+            beaker_integration,
+            "default_model_spec",
+            lambda: ModelSpec(name="claude-sonnet-5-5", api="anthropic", reasoning_effort="max"),
+        )
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        client, model = _client_for(SimpleNamespace(model=None))
+        try:
+            assert isinstance(client, _TracedAnthropicClient)
+            assert isinstance(client, StreamingAnthropicClient)
+            assert model.name == "claude-sonnet-5-5"
+        finally:
+            await client.close()
+
     def test_cli_api_routing(self, monkeypatch: Any) -> None:
         from automationbench_skills.cli import _default_api
 
@@ -423,6 +447,56 @@ class TestRunner:
         captures = list((tmp_path / "captures").glob("*.otlp.jsonl"))
         assert len(captures) == 1
         assert project(parse_jsonl(captures[0].read_bytes()), artifacts=()).tool_counts == projection["tool_counts"]
+
+    async def test_traced_anthropic_client_records_model_call(self, tmp_path: Path, monkeypatch: Any) -> None:
+        import sys
+
+        from anthropic import AsyncAnthropic
+        from anthropic.types import Message, TextBlock, Usage
+        from automationbench.clients import StreamingAnthropicClient
+        from beaker.tracing import local_capture
+
+        sys.path.insert(0, str(RECIPE_ROOT / ".beaker"))
+        from beaker_integration import _TracedAnthropicClient
+
+        async def fake_get_native_response(
+            self: Any, prompt: Any, model: str, sampling_args: Any, tools: Any = None, **kwargs: Any
+        ) -> Message:
+            del self, prompt, model, sampling_args, tools, kwargs
+            return Message(
+                id="msg_test",
+                type="message",
+                role="assistant",
+                model="claude-sonnet-5-5",
+                content=[TextBlock(type="text", text="ok")],
+                stop_reason="end_turn",
+                stop_sequence=None,
+                usage=Usage(input_tokens=11, output_tokens=7),
+            )
+
+        monkeypatch.setattr(StreamingAnthropicClient, "get_native_response", fake_get_native_response)
+        client = _TracedAnthropicClient(AsyncAnthropic(api_key="test-key"))
+        try:
+            with local_capture(tmp_path, case_id="case", candidate_id="cand", strict_evidence=False) as capture:
+                await client.get_native_response(
+                    prompt=[{"role": "user", "content": "hi"}],
+                    model="claude-sonnet-5-5",
+                    sampling_args={},
+                    system="SYS",
+                )
+        finally:
+            await client.close()
+        assert capture.receipt is not None
+        projection = capture.receipt.to_dict()["projection"]
+        assert len(projection["model_calls"]) == 1
+        call = projection["model_calls"][0]
+        assert call["provider"] == "anthropic"
+        assert call["model"] == "claude-sonnet-5-5"
+        assert call["usage"]["input_tokens"] == 11
+        assert call["usage"]["output_tokens"] == 7
+        assert call["usage"]["total_tokens"] == 18
+        assert '"role": "system"' in json.dumps(call["messages"])
+        assert "SYS" in json.dumps(call["messages"])
 
     async def test_run_split_concurrency(self, monkeypatch: Any) -> None:
         samples = load_split("test")[:3]
