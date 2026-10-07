@@ -230,7 +230,7 @@ def default_model_spec() -> ModelSpec:
     app's (and CLI's) default model never changes what Beaker optimizes. Chat
     Completions and Anthropic Messages requests are both traced.
     """
-    return ModelSpec(name="claude-sonnet-5-5", api="anthropic", reasoning_effort="max")
+    return ModelSpec(name="claude-sonnet-5-5", api="anthropic", reasoning_effort="xhigh")
 
 
 def _client_for(runtime: RolloutRuntime[Any]) -> tuple[Client, ModelSpec]:
