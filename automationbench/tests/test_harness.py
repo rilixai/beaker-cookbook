@@ -342,6 +342,45 @@ class TestRunner:
         # closed-loop entries are evicted, so the cache doesn't grow across runs
         assert len([k for k in runner_mod._CLIENT_CACHE if k[0] == spec]) == 1
 
+    def test_beaker_single_model_spec_is_pinned(self) -> None:
+        import sys
+
+        sys.path.insert(0, str(RECIPE_ROOT / ".beaker"))
+        from beaker_integration import default_model_spec
+
+        # Independent of ModelSpec's defaults, so the CLI default can change freely.
+        spec = default_model_spec()
+        assert (spec.name, spec.resolved_api(), spec.sampling_args()) == (
+            "gpt-5.6-luna",
+            "chat_completions",
+            {"reasoning_effort": "medium"},
+        )
+
+    def test_cli_api_routing(self, monkeypatch: Any) -> None:
+        from automationbench_skills.cli import _default_api
+
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        assert _default_api("gpt-5.6-luna", None, "auto") == "responses"
+        assert _default_api("gpt-5.6-luna", None, "chat_completions") == "chat_completions"
+        assert _default_api("gpt-5.6-luna", "https://gw.example/v1", "auto") == "auto"
+        assert _default_api("claude-opus-5-5", None, "auto") == "auto"
+        assert _default_api("gemini-3-pro", None, "auto") == "auto"
+        assert _default_api("openai/gpt-5.6-luna", None, "auto") == "auto"
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://gw.example/v1")
+        assert _default_api("gpt-5.6-luna", None, "auto") == "auto"
+
+    def test_cli_reports_errors_and_fails_when_all_errored(self, capsys: Any) -> None:
+        from automationbench_skills.cli import _report_errors
+        from automationbench_skills.runner import RunResult
+
+        def result(name: str, error: Any = None) -> RunResult:
+            return RunResult(name, "crm", 0.0, 0.0, [], None, error=error)
+
+        assert _report_errors([result("a"), result("b")]) == 0
+        assert _report_errors([result("a"), result("b", {"error": "BadRequestError: 400"})]) == 0
+        assert "1/2 task(s) errored" in capsys.readouterr().err
+        assert _report_errors([result("a", "BadRequestError: 400"), result("b", "BadRequestError: 400")]) == 1
+
     def test_env_is_cached(self) -> None:
         assert get_env(skills=False) is get_env(skills=False)
         assert get_env(skills=True) is not get_env(skills=False)
