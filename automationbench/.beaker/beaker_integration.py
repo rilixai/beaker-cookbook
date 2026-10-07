@@ -224,13 +224,13 @@ def _sample_for(case_input: JsonValue) -> Sample:
 
 
 def default_model_spec() -> ModelSpec:
-    """The model a run without a model choice evaluates, through Beaker's provider proxy.
+    """The model a run without a model choice evaluates through Beaker's Anthropic Messages proxy route.
 
     Pinned here rather than taken from ``ModelSpec()`` so that changing the
     app's (and CLI's) default model never changes what Beaker optimizes. Chat
     Completions and Anthropic Messages requests are both traced.
     """
-    return ModelSpec(name="gpt-5.6-luna", api="chat_completions", reasoning_effort="medium")
+    return ModelSpec(name="claude-sonnet-5-5", api="anthropic", reasoning_effort="max")
 
 
 def _client_for(runtime: RolloutRuntime[Any]) -> tuple[Client, ModelSpec]:
