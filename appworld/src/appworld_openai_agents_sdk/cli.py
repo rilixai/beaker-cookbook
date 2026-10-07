@@ -12,7 +12,7 @@ Subcommands:
   TGC/SGC (Task / Scenario Goal Completion).
 
 The model is chosen with ``--config <toml>`` (see ``configs/``) or ``--model``.
-Whether a model is a reasoning model (GPT-5 / o-series) or a standard one is
+Whether a model is a reasoning model (GPT-5/6 / o-series) or a standard one is
 inferred from its name; ``--reasoning-effort`` / ``--temperature`` each apply
 only to their kind of model and error out if given to the other.
 """
@@ -62,7 +62,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--model",
         type=str,
         default=None,
-        help="OpenAI model name (with --config: which table to use). Default `gpt-5.6-luna` / the config's `default`.",
+        help="OpenAI model name (with --config: which table to use). Default `gpt-6-astra` / the config's `default`.",
     )
     parser.add_argument(
         "--reasoning-effort",
@@ -129,7 +129,7 @@ def _profile_from_args(args: argparse.Namespace) -> ModelProfile:
     if args.config is not None:
         profile = ModelProfile.from_toml(args.config, model=args.model)
     else:
-        profile = ModelProfile(name=args.model or "gpt-5.6-luna")
+        profile = ModelProfile(name=args.model or "gpt-6-astra")
     if profile.family == "reasoning" and args.temperature is not None:
         raise SystemExit(
             f"--temperature is not supported by reasoning models like {profile.name!r} (the API rejects it)."

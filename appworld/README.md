@@ -13,7 +13,7 @@ agent gets one tool, `execute_python`, backed by AppWorld's own Python
 environment, where the apps are callable as `apis.<app>.<api>(...)`. Nothing
 is pre-selected for it — it discovers the APIs it needs at runtime through the
 `api_docs` app, like the AppWorld paper's ReAct baselines. A small model layer
-on top lets you point it at any OpenAI model — reasoning (GPT-5 family) or not
+on top lets you point it at any OpenAI model — reasoning (GPT-5/6 family) or not
 (GPT-4.1/4o) — by changing a flag or a TOML file.
 
 ## Quick start (< 5 minutes)
@@ -80,12 +80,12 @@ withheld ground truth.
 
 ## Switching models
 
-Whether a model is a reasoning model is detected from its name (GPT-5 /
+Whether a model is a reasoning model is detected from its name (GPT-5/6 /
 o-series → reasoning, everything else → standard), and that decides which
 parameters get sent — a model never receives a parameter it doesn't support:
 
-- **reasoning** (GPT-5 family: `gpt-5.6-sol`, `gpt-5.6-terra`,
-  `gpt-5.6-luna`, ...): sends
+- **reasoning** (GPT-5/6 family: `gpt-5.6-sol`, `gpt-5.6-terra`,
+  `gpt-6-astra`, ...): sends
   `reasoning = {"effort": none|minimal|low|medium|high|xhigh|max}`; never
   sends `temperature`/`top_p`/`seed` (the API rejects them with a 400).
 - **standard** (`gpt-4.1`, `gpt-4o`, ...): sends `temperature`/`top_p` as
@@ -93,11 +93,11 @@ parameters get sent — a model never receives a parameter it doesn't support:
 
 [`configs/model.toml`](configs/model.toml) has one block per model, each
 holding just the parameters that model supports; `--model <name>` picks the
-block. Both the file and the CLI default to `gpt-5.6-luna` with low reasoning.
+block. Both the file and the CLI default to `gpt-6-astra` with low reasoning.
 Or skip the config and use flags:
 
 ```bash
-uv run appworld-openai-agents-sdk run --model gpt-5.6-luna --reasoning-effort low --split dev --max-tasks 3
+uv run appworld-openai-agents-sdk run --model gpt-6-astra --reasoning-effort low --split dev --max-tasks 3
 uv run appworld-openai-agents-sdk run --model gpt-4.1 --temperature 0 --split dev --max-tasks 3
 ```
 
