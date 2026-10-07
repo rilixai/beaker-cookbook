@@ -198,6 +198,8 @@ uv run beaker run trigger --integration-id harvey-lab --agent harvey-lab-agent \
 ```
 
 Ordinary runs start with GPT-6 Luna at medium reasoning and a 1M context window.
+Task requests omit temperature because Luna does not support it. Use the standalone
+`--task-temperature` override only with a model that accepts temperature.
 The hosted judge comes from the selected integration's YAML, independently of the
 standalone judge default. Launch-time judge overrides and `config_defaults.scorer_model`
 are rejected. To change judges, update the integration YAML and push it before

@@ -248,7 +248,7 @@ def selected_model_factory(runtime: RolloutRuntime[Any]) -> Any:
 
     def factory(
         model: str,
-        temperature: float,
+        temperature: float | None,
         max_tokens: int,
         context_window_tokens: int,
         timeout: float,

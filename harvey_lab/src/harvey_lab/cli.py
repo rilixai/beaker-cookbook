@@ -112,14 +112,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--task-temperature",
         type=float,
         default=defaults.task_temperature,
-        help="Sampling temperature for the agent model.",
+        help="Sampling temperature for models that support it; omitted by default for Luna.",
     )
     parser.add_argument(
         "--task-reasoning-effort",
         type=str,
         default=defaults.task_reasoning_effort,
         choices=("none", "minimal", "low", "medium", "high", "xhigh"),
-        help="Reasoning budget for a thinking task model (default xhigh = DeepSeek V4 Pro max reasoning); use none for non-reasoning models.",
+        help="Reasoning budget for a thinking task model (default medium for Luna); use none for non-reasoning models.",
     )
     parser.add_argument(
         "--max-output-tokens",

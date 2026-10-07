@@ -1321,7 +1321,7 @@ def test_default_config_targets_luna_and_glm_flash() -> None:
     config = HarveyLabConfig()
     assert config.task_model == "openai/gpt-6-luna"
     assert config.task_reasoning_effort == "medium"
-    assert config.task_temperature == 1.0
+    assert config.task_temperature is None
     assert config.max_output_tokens == 128_000
     assert config.context_window_tokens == 1_000_000
     assert config.judge_model == DEFAULT_JUDGE_MODEL == "openrouter/z-ai/glm-5.3-flash"
@@ -1329,6 +1329,7 @@ def test_default_config_targets_luna_and_glm_flash() -> None:
     args = cli_mod._parse_args(["run"])
     assert args.task_model == config.task_model
     assert args.task_reasoning_effort == config.task_reasoning_effort
+    assert cli_mod._config_from_args(args).task_temperature is None
     assert cli_mod._config_from_args(args).judge_reasoning_effort == "high"
     low_args = cli_mod._parse_args(["run", "--judge-reasoning-effort", "low"])
     assert cli_mod._config_from_args(low_args).judge_reasoning_effort == "low"
@@ -1358,6 +1359,7 @@ def test_judge_forwards_reasoning_effort(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_default_model_factory_threads_reasoning_effort() -> None:
     client = _default_model_factory("openrouter/deepseek/deepseek-v4-pro", 0.0, 16_384, 262_144, 120.0, "xhigh")
     assert client._reasoning_effort == "xhigh"
+    assert client._kwargs["temperature"] == 0.0
     # A reasoning effort opts the param through litellm's model-support gate so a
     # newly released model (not yet in litellm's reasoning map) doesn't raise
     # UnsupportedParamsError on OpenRouter.
@@ -1368,3 +1370,17 @@ def test_default_model_factory_threads_reasoning_effort() -> None:
         disabled = _default_model_factory("openrouter/openai/gpt-4.1-mini", 0.0, 16_384, 262_144, 120.0, sentinel)
         assert disabled._reasoning_effort is None
         assert "allowed_openai_params" not in disabled._kwargs
+
+
+def test_luna_client_omits_unsupported_temperature() -> None:
+    config = HarveyLabConfig()
+    client = _default_model_factory(
+        config.task_model,
+        config.task_temperature,
+        config.max_output_tokens,
+        config.context_window_tokens,
+        config.task_llm_timeout,
+        config.task_reasoning_effort,
+    )
+    assert "temperature" not in client._kwargs
+    assert client._reasoning_effort == "medium"

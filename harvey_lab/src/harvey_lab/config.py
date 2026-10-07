@@ -31,7 +31,8 @@ class HarveyLabConfig:
     # The inner legal agent (driven through Stirrup). LiteLLM model spec.
     # Standalone runs use OPENAI_API_KEY; hosted runs use Beaker provider routing.
     task_model: str = "openai/gpt-6-luna"
-    task_temperature: float = 1.0
+    # Luna does not support temperature; omit it unless a model override needs it.
+    task_temperature: float | None = None
     # Reasoning budget for a thinking-capable task model, passed through to
     # LiteLLM's ``reasoning_effort``. Use Luna's default medium effort. Set to
     # ``none`` (or empty) to omit the parameter for a non-reasoning model.
