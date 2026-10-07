@@ -180,18 +180,28 @@ when changing the sample. `--test-limit` is allowed only with `--smoke-only` for
 small structural checks; these checks are not representative evaluations. Smoke
 checks structure, not agent or judge quality.
 
+The integration declares its required hosted judge in `.beaker/beaker.yaml`:
+
+```yaml
+requires_scorer_model: true
+scorer_model: openrouter:z-ai/glm-5.3-flash
+```
+
+These fields belong under `integrations.harvey-lab`. Beaker records the judge
+in the immutable integration build and checks provider credentials before launch.
 To start a hosted run from the pushed integration branch, use the exact dataset
-revision printed by the helper and explicitly select the fixed rubric judge:
+revision printed by the helper:
 
 ```bash
 uv run beaker run trigger --integration-id harvey-lab --agent harvey-lab-agent \
-  --dataset 'DATASET_NAME@REVISION' \
-  --config '{"scorer_model":"openrouter:z-ai/glm-5.3-flash"}'
+  --dataset 'DATASET_NAME@REVISION'
 ```
 
 Ordinary runs start with GPT-6 Luna at medium reasoning and a 1M context window.
-The hosted judge must be selected explicitly with `scorer_model` as above; the
-standalone judge default does not configure the hosted scorer. Use a fresh baseline
+The hosted judge comes from the selected integration's YAML, independently of the
+standalone judge default. Launch-time judge overrides and `config_defaults.scorer_model`
+are rejected. To change judges, update the integration YAML and push it before
+launching from that branch so Beaker builds the new configuration. Use a fresh baseline
 on both splits when changing judges; scores are not directly comparable with the
 earlier DeepSeek-judged runs. Before a full optimization, evaluate a few training
 cases to check judge output and latency. GLM's Beaker catalog default is max reasoning,
