@@ -201,6 +201,16 @@ def _sample_for(case_input: JsonValue) -> Sample:
     return sample
 
 
+def default_model_spec() -> ModelSpec:
+    """The model a run without a model choice evaluates, through Beaker's provider proxy.
+
+    Pinned here rather than taken from ``ModelSpec()`` so that changing the
+    app's (and CLI's) default model never changes what Beaker optimizes, and
+    always on Chat Completions, the API ``_TracedChatCompletionsClient`` traces.
+    """
+    return ModelSpec(name="gpt-5.6-luna", api="chat_completions", reasoning_effort="medium")
+
+
 def _client_for(runtime: RolloutRuntime[Any]) -> tuple[_TracedChatCompletionsClient, ModelSpec]:
     """The model the run selected, through Beaker's inference gateway; else the app's own defaults.
 
@@ -215,9 +225,7 @@ def _client_for(runtime: RolloutRuntime[Any]) -> tuple[_TracedChatCompletionsCli
         model = ModelSpec(name=target.model, base_url=target.base_url, api="chat_completions", reasoning_effort=None)
         api_key: str | None = target.api_key
     else:
-        model = ModelSpec()
-        if model.resolved_api() != "chat_completions":
-            raise RuntimeError(f"Beaker evaluation expects a Chat Completions model; got {model.resolved_api()!r}.")
+        model = default_model_spec()
         api_key = os.environ.get(model.effective_api_key_var())
     # Same SDK-level retry and timeout settings as the harness's own verifiers client.
     sdk = ClientConfig(api_key_var=model.effective_api_key_var())

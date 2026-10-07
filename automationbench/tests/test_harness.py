@@ -342,10 +342,32 @@ class TestRunner:
         # closed-loop entries are evicted, so the cache doesn't grow across runs
         assert len([k for k in runner_mod._CLIENT_CACHE if k[0] == spec]) == 1
 
-    def test_default_model_spec_stays_on_chat_completions(self) -> None:
-        assert ModelSpec().resolved_api() == "chat_completions", (
-            "Beaker requires Chat Completions; see .beaker/beaker_integration.py `_client_for`"
+    def test_beaker_single_model_spec_is_pinned(self) -> None:
+        import sys
+
+        sys.path.insert(0, str(RECIPE_ROOT / ".beaker"))
+        from beaker_integration import default_model_spec
+
+        # Independent of ModelSpec's defaults, so the CLI default can change freely.
+        spec = default_model_spec()
+        assert (spec.name, spec.resolved_api(), spec.sampling_args()) == (
+            "gpt-5.6-luna",
+            "chat_completions",
+            {"reasoning_effort": "medium"},
         )
+
+    def test_cli_api_routing(self, monkeypatch: Any) -> None:
+        from automationbench_skills.cli import _default_api
+
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        assert _default_api("gpt-5.6-luna", None, "auto") == "responses"
+        assert _default_api("gpt-5.6-luna", None, "chat_completions") == "chat_completions"
+        assert _default_api("gpt-5.6-luna", "https://gw.example/v1", "auto") == "auto"
+        assert _default_api("claude-opus-5-5", None, "auto") == "auto"
+        assert _default_api("gemini-3-pro", None, "auto") == "auto"
+        assert _default_api("openai/gpt-5.6-luna", None, "auto") == "auto"
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://gw.example/v1")
+        assert _default_api("gpt-5.6-luna", None, "auto") == "auto"
 
     def test_errored_tasks_fail_the_cli(self, capsys: Any) -> None:
         from automationbench_skills.cli import _report_errors
