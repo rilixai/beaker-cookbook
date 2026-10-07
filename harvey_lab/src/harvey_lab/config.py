@@ -29,37 +29,28 @@ class HarveyLabConfig:
     """Model + budget configuration for one Harvey LAB run."""
 
     # The inner legal agent (driven through Stirrup). LiteLLM model spec.
-    # Routed through OpenRouter so a single ``OPENROUTER_API_KEY`` covers both
-    # the agent and the judge; override with a direct ``deepseek/…`` (+ that
-    # provider's key) if you'd rather call the provider straight.
-    task_model: str = "openrouter/deepseek/deepseek-v4-pro"
-    task_temperature: float = 0.6
+    # Standalone runs use OPENAI_API_KEY; hosted runs use Beaker provider routing.
+    task_model: str = "openai/gpt-6-luna"
+    task_temperature: float = 1.0
     # Reasoning budget for a thinking-capable task model, passed through to
-    # LiteLLM's ``reasoning_effort``. ``xhigh`` is the top tier the Stirrup
-    # LiteLLM client exposes (``none``/``minimal``/``low``/``medium``/``high``/
-    # ``xhigh``) and runs DeepSeek V4 Pro at max reasoning. Set to ``none`` (or
-    # empty) if you swap in a non-reasoning model.
-    task_reasoning_effort: str = "xhigh"
+    # LiteLLM's ``reasoning_effort``. Use Luna's default medium effort. Set to
+    # ``none`` (or empty) to omit the parameter for a non-reasoning model.
+    task_reasoning_effort: str = "medium"
     # Per-call completion-token cap handed to the Stirrup client (litellm's
-    # ``max_tokens``). For reasoning models this should be the maximum output
-    # allowed by the model creator (AA's LAB-AA protocol). DeepSeek V4 Pro/Flash
-    # support up to 384,000 output tokens within their 1M context window. Use a
-    # non-reasoning model if you want a smaller cap (16,384 per AA protocol).
-    max_output_tokens: int = 384_000
+    # ``max_tokens``). GPT-6 Luna supports up to 128,000 output tokens.
+    max_output_tokens: int = 128_000
     # The model's total context window (tokens). Stirrup 0.2 uses this — not
     # the output cap above — to decide when conversation history is summarized.
-    # DeepSeek V4 Pro/Flash have a 1M context window; set this to the task
-    # model's real window when swapping models (e.g. 262_144 for Qwen3.7 Max).
+    # Use 1M of Luna's 1,050,000-token context window. Adjust this budget when
+    # swapping to a model with a smaller window.
     context_window_tokens: int = 1_000_000
 
     # The rubric judge. Graded in BATCHES of ``judge_batch_size`` criteria per
     # LLM call rather than one call per criterion — batched verification is an
     # order of magnitude cheaper at LAB's scale (tasks carry ~60 criteria).
-    # DeepSeek v4 Flash is a cheap open verifier that stays near frontier
-    # graders on LAB. See:
-    #   https://www.langchain.com/blog/designing-efficient-verifiers-for-legal-agents
-    #   https://www.appliedcompute.com/case-studies/harvey  (GPT-5 Mini, 4/call)
-    judge_model: str = "openrouter/deepseek/deepseek-v4-flash"
+    # Keep the judge fixed across baseline and candidates. Scores from different
+    # judges are not directly comparable.
+    judge_model: str = "openrouter/z-ai/glm-5.3-flash"
     judge_batch_size: int = 8
 
     # Cap on the Stirrup agent's tool-use loop per task. LAB-AA gives agents

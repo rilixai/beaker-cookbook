@@ -48,7 +48,7 @@ ALL_PASS_FIELD = "all_pass"
 ALL_PASS_RATE_FIELD = "all_pass_rate"
 CRITERION_PASS_RATE_FIELD = "criterion_pass_rate"
 
-DEFAULT_JUDGE_MODEL = "openrouter/deepseek/deepseek-v4-flash"
+DEFAULT_JUDGE_MODEL = "openrouter/z-ai/glm-5.3-flash"
 DEFAULT_JUDGE_BATCH_SIZE = 8
 DEFAULT_JUDGE_TIMEOUT_S = 120.0
 # LAB-AA retries API failures aggressively rather than letting a transient

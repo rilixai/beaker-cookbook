@@ -42,6 +42,7 @@ from harvey_lab.evaluation.run_eval import evaluate_agent_on_records, evaluate_o
 from harvey_lab.evaluation.scoring import (
     ALL_PASS_FIELD,
     CRITERION_PASS_RATE_FIELD,
+    DEFAULT_JUDGE_MODEL,
     JudgeCallError,
     _parse_batch_verdicts,
     _scope_deliverables,
@@ -1316,12 +1317,17 @@ def test_evaluate_agent_contains_errors_and_excludes_unscoreable(tasks_root: Pat
     assert report.all_pass_rate == pytest.approx(5 / 6)
 
 
-def test_default_config_targets_deepseek_v4_pro_max_reasoning() -> None:
+def test_default_config_targets_luna_and_glm_flash() -> None:
     config = HarveyLabConfig()
-    assert config.task_model == "openrouter/deepseek/deepseek-v4-pro"
-    # xhigh is the top tier the Stirrup LiteLLM client exposes (max reasoning).
-    assert config.task_reasoning_effort == "xhigh"
-    assert cli_mod._parse_args(["run"]).task_reasoning_effort == "xhigh"
+    assert config.task_model == "openai/gpt-6-luna"
+    assert config.task_reasoning_effort == "medium"
+    assert config.task_temperature == 1.0
+    assert config.max_output_tokens == 128_000
+    assert config.context_window_tokens == 1_000_000
+    assert config.judge_model == DEFAULT_JUDGE_MODEL == "openrouter/z-ai/glm-5.3-flash"
+    args = cli_mod._parse_args(["run"])
+    assert args.task_model == config.task_model
+    assert args.task_reasoning_effort == config.task_reasoning_effort
 
 
 def test_default_model_factory_threads_reasoning_effort() -> None:
