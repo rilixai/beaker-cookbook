@@ -53,7 +53,7 @@ cli.py       `harvey-lab` console command; config.py: every model/budget knob
 Each task ships a rubric of ~60 atomic PASS/FAIL criteria, each with a written
 `match_criteria` standard and the deliverable(s) it applies to. A second LLM
 acts as a **judge** (`evaluation/scoring.py`, default
-`openrouter/z-ai/glm-5.3-flash`): it reads only the deliverable(s) a
+`openrouter/z-ai/glm-5.3-flash` at `--judge-reasoning-effort high`): it reads only the deliverable(s) a
 criterion names — the text extracted from it, as LAB-AA grades text only — and
 returns PASS/FAIL. Criteria sharing a deliverable scope are graded in
 **batches** of `--judge-batch-size` (default 8) rather than one call per
@@ -204,8 +204,10 @@ are rejected. To change judges, update the integration YAML and push it before
 launching from that branch so Beaker builds the new configuration. Use a fresh baseline
 on both splits when changing judges; scores are not directly comparable with the
 earlier DeepSeek-judged runs. Before a full optimization, evaluate a few training
-cases to check judge output and latency. GLM's Beaker catalog default is max reasoning,
-so its Flash name alone does not guarantee faster grading.
+cases to check judge output and latency. The judge explicitly requests high reasoning,
+the middle of GLM's supported low/high/max levels, instead of inheriting Beaker's
+max default. Luna remains at medium. The standalone CLI can override judge effort
+with `--judge-reasoning-effort`; hosted grading uses `HarveyLabConfig.judge_reasoning_effort`.
 
 Selected-model runs use the Beaker gateway, omit temperature and output-token limits, and default
 to a 1,000,000-token history window. Set the optional hosted agent variable

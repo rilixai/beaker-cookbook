@@ -370,6 +370,8 @@ def grade(task: TaskInput, expected: Expected, deliverables: dict[str, str]) -> 
                 model=f"openai/{target.model}" if target else model,
                 messages=messages,
                 temperature=0.0,
+                reasoning_effort=config.judge_reasoning_effort,
+                allowed_openai_params=["reasoning_effort"],
                 timeout=config.judge_llm_timeout,
                 num_retries=config.judge_num_retries,
                 **routing,

@@ -1325,9 +1325,34 @@ def test_default_config_targets_luna_and_glm_flash() -> None:
     assert config.max_output_tokens == 128_000
     assert config.context_window_tokens == 1_000_000
     assert config.judge_model == DEFAULT_JUDGE_MODEL == "openrouter/z-ai/glm-5.3-flash"
+    assert config.judge_reasoning_effort == "high"
     args = cli_mod._parse_args(["run"])
     assert args.task_model == config.task_model
     assert args.task_reasoning_effort == config.task_reasoning_effort
+    assert cli_mod._config_from_args(args).judge_reasoning_effort == "high"
+    low_args = cli_mod._parse_args(["run", "--judge-reasoning-effort", "low"])
+    assert cli_mod._config_from_args(low_args).judge_reasoning_effort == "low"
+
+
+def test_judge_forwards_reasoning_effort(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    requests: list[dict[str, Any]] = []
+
+    def completion(**kwargs: Any) -> Any:
+        requests.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"verdicts":[{"id":"C1","verdict":"pass"}]}'))]
+        )
+
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion))
+    for effort in ("high", "low"):
+        judge = build_rubric_judge(reasoning_effort=effort)
+        assert judge("Task", [{"id": "C1", "match_criteria": "States the fee"}], "The fee is $50.") == {"C1": True}
+        assert requests[-1]["reasoning_effort"] == effort
+        # The provider catalog can know a model before LiteLLM recognizes its reasoning support.
+        assert requests[-1]["allowed_openai_params"] == ["reasoning_effort"]
 
 
 def test_default_model_factory_threads_reasoning_effort() -> None:

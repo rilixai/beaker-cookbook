@@ -183,6 +183,7 @@ def build_rubric_judge(
     model: str = DEFAULT_JUDGE_MODEL,
     llm: Callable[..., Any] | None = None,
     *,
+    reasoning_effort: str = "high",
     timeout: float = DEFAULT_JUDGE_TIMEOUT_S,
     num_retries: int = DEFAULT_JUDGE_NUM_RETRIES,
 ) -> BatchJudge:
@@ -212,6 +213,8 @@ def build_rubric_judge(
             model=model,
             messages=messages,
             temperature=0.0,
+            reasoning_effort=reasoning_effort,
+            allowed_openai_params=["reasoning_effort"],
             timeout=timeout,
             num_retries=num_retries,
         )

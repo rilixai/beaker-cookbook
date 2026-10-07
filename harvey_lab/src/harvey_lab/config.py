@@ -51,6 +51,8 @@ class HarveyLabConfig:
     # Keep the judge fixed across baseline and candidates. Scores from different
     # judges are not directly comparable.
     judge_model: str = "openrouter/z-ai/glm-5.3-flash"
+    # GLM supports low/high/max; high is its middle level, below the hosted max default.
+    judge_reasoning_effort: str = "high"
     judge_batch_size: int = 8
 
     # Cap on the Stirrup agent's tool-use loop per task. LAB-AA gives agents
