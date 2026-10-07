@@ -71,7 +71,7 @@ Hosted datasets change only when uploaded.
 
 ## Models
 
-`--model` defaults to `claude-sonnet-5-5` with `--reasoning-effort xhigh`. Routing
+`--model` defaults to `claude-sonnet-5-5` with `--reasoning-effort high`. Routing
 follows the benchmark (`vendored/model_setup.py`): `claude-*` goes to
 Anthropic, `gemini-*` to the Gemini interactions API. Other names served
 directly by OpenAI (no `--base-url` or `OPENAI_BASE_URL`) go to the Responses
