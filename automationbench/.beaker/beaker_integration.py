@@ -68,7 +68,7 @@ from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
 from verifiers.types import ClientConfig
 from world_diff import ServiceDiffs, clip, service_for
 
-from automationbench_skills.clients import CostTrackingChatCompletionsClient
+from automationbench_skills.clients import DEFAULT_MODEL_REQUEST_TIMEOUT, CostTrackingChatCompletionsClient
 from automationbench_skills.data.tasks import Sample, load_samples
 from automationbench_skills.prompts import load_system_prompt
 from automationbench_skills.runner import (
@@ -256,11 +256,9 @@ def _client_for(runtime: RolloutRuntime[Any]) -> tuple[Client, ModelSpec]:
         )
         return _TracedAnthropicClient(client), model
     client = AsyncOpenAI(
-        api_key=api_key, base_url=model.effective_base_url(), max_retries=0, timeout=model.model_request_timeout
+        api_key=api_key, base_url=model.effective_base_url(), max_retries=0, timeout=DEFAULT_MODEL_REQUEST_TIMEOUT
     )
-    return _TracedChatCompletionsClient(
-        client, max_attempts=model.max_model_attempts, request_timeout=model.model_request_timeout
-    ), model
+    return _TracedChatCompletionsClient(client), model
 
 
 def _rollout_error(raw: Any) -> BaseException | None:

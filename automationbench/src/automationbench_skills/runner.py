@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import os
 import time
 from dataclasses import dataclass, field
@@ -30,12 +29,9 @@ from verifiers.legacy.types import ClientConfig
 from verifiers.types import RolloutInput
 
 from automationbench_skills.clients import (
-    DEFAULT_MAX_MODEL_ATTEMPTS,
     DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MODEL_REQUEST_TIMEOUT,
-    BoundedResponsesClient,
     CostTrackingChatCompletionsClient,
-    inference_context,
 )
 from automationbench_skills.data.tasks import Sample
 from automationbench_skills.prompts import load_system_prompt, task_clock, with_system_prompt
@@ -74,22 +70,6 @@ class ModelSpec:
     reasoning_effort: str | None = DEFAULT_REASONING_EFFORT
     reasoning_enabled: bool | None = None
     extra_body: str | None = None  # raw JSON merged into every request body
-    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
-    max_model_attempts: int = DEFAULT_MAX_MODEL_ATTEMPTS
-    model_request_timeout: float = DEFAULT_MODEL_REQUEST_TIMEOUT
-    parallel_tool_calls: bool | None = None  # optional experiment for chat/responses
-    search_top_k: int | None = None  # optional experiment for tool discovery
-
-    def __post_init__(self) -> None:
-        if (
-            self.max_output_tokens <= 0
-            or self.max_model_attempts <= 0
-            or self.model_request_timeout <= 0
-            or not math.isfinite(self.model_request_timeout)
-        ):
-            raise ValueError("Output limit, model attempts, and model request timeout must be positive")
-        if self.search_top_k is not None and self.search_top_k <= 0:
-            raise ValueError("search_top_k must be positive")
 
     def is_openrouter(self) -> bool:
         return "openrouter.ai" in (self.base_url or "") or (self.base_url is None and "/" in self.name)
@@ -124,9 +104,8 @@ class ModelSpec:
             args = {"extra_body": extra_body} if extra_body else {}
         else:
             args = build_sampling_args(self.name, self.resolved_api(), effort, self.extra_body) or {}
-        if self.resolved_api() in {"chat_completions", "responses"}:
-            # Use the transport's actual cap key: upstream Responses drops chat keys.
-            cap = self.max_output_tokens
+        if self.resolved_api() == "chat_completions":
+            cap = DEFAULT_MAX_OUTPUT_TOKENS
             extra = args.get("extra_body") or {}
             for key in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
                 for container in (args, extra):
@@ -135,11 +114,7 @@ class ModelSpec:
                         if not isinstance(requested, int) or isinstance(requested, bool) or requested <= 0:
                             raise ValueError(f"{key} must be a positive integer")
                         cap = min(cap, requested)
-            key = "max_output_tokens" if self.resolved_api() == "responses" else "max_completion_tokens"
-            args[key] = cap
-            if self.parallel_tool_calls is not None:
-                extra.pop("parallel_tool_calls", None)
-                args["parallel_tool_calls"] = self.parallel_tool_calls
+            args["max_completion_tokens"] = cap
         return args
 
 
@@ -178,7 +153,7 @@ class RunResult:
         }
 
 
-_ENV_CACHE: dict[tuple[str, bool, int, float | None, int | None], Any] = {}
+_ENV_CACHE: dict[tuple[str, bool, int, float | None], Any] = {}
 _CLIENT_CACHE: dict[tuple[ModelSpec, Any], Client] = {}
 
 
@@ -187,7 +162,6 @@ def get_env(
     skills: bool = True,
     max_steps: int = DEFAULT_MAX_STEPS,
     timeout: float | None = None,
-    search_top_k: int | None = None,
 ) -> Any:
     """Build (once) and return the shared AutomationBenchEnv.
 
@@ -206,7 +180,7 @@ def get_env(
             "toolset='limited_zapier' filters tools to each task's declared list at "
             "setup_state, which drops the skill tools. Use toolset='zapier' (default)."
         )
-    key = (toolset, skills, max_steps, timeout, search_top_k)
+    key = (toolset, skills, max_steps, timeout)
     if key not in _ENV_CACHE:
         import json
 
@@ -239,7 +213,6 @@ def get_env(
             max_turns=max_steps,
             toolset=toolset,
             timeout_seconds=timeout,
-            search_top_k=search_top_k,
         )
         # One ``tool_call`` span per tool execution, under whichever Beaker
         # capture is active at call time; the hidden ``world`` arg stays out.
@@ -264,20 +237,15 @@ def get_client(model: ModelSpec) -> Client:
         key_var = model.effective_api_key_var()
         if not os.environ.get(key_var):
             raise ValueError(f"No API key found. Set the {key_var} environment variable.")
-        if resolved in {"chat_completions", "responses"}:
-            client_class = (
-                CostTrackingChatCompletionsClient if resolved == "chat_completions" else BoundedResponsesClient
-            )
-            _CLIENT_CACHE[key] = client_class(
+        if resolved == "chat_completions":
+            _CLIENT_CACHE[key] = CostTrackingChatCompletionsClient(
                 ClientConfig(
                     api_key_var=key_var,
                     api_base_url=model.effective_base_url() or "https://api.openai.com/v1",
                     extra_headers={},
                     max_retries=0,
-                    timeout=model.model_request_timeout,
-                ),
-                max_attempts=model.max_model_attempts,
-                request_timeout=model.model_request_timeout,
+                    timeout=DEFAULT_MODEL_REQUEST_TIMEOUT,
+                )
             )
         else:
             _CLIENT_CACHE[key] = build_client(resolved, key_var, model.effective_base_url())
@@ -328,7 +296,6 @@ async def run_rollout_raw(
     toolset: str = "zapier",
     max_steps: int = DEFAULT_MAX_STEPS,
     timeout: float | None = None,
-    case_id: str | None = None,
 ) -> dict[str, Any]:
     """Run ONE agent rollout with ``client`` and return verifiers' raw output.
 
@@ -337,13 +304,7 @@ async def run_rollout_raw(
     arguments and the outer watchdog are set up identically for both. Raises
     ``TimeoutError`` when the rollout outlives ``timeout`` plus its grace.
     """
-    env = get_env(
-        toolset=toolset,
-        skills=skills_dir is not None,
-        max_steps=max_steps,
-        timeout=timeout,
-        search_top_k=model.search_top_k,
-    )
+    env = get_env(toolset=toolset, skills=skills_dir is not None, max_steps=max_steps, timeout=timeout)
     set_skills_dir(skills_dir)
     sampling_args = model.sampling_args()
     rollout = env.run_rollout(
@@ -353,8 +314,7 @@ async def run_rollout_raw(
         sampling_args or {},
         state_columns=STATE_COLUMNS,
     )
-    with inference_context(case_id or sample.task_name, sample.task_name):
-        output = await (asyncio.wait_for(rollout, timeout + TIMEOUT_GRACE_SECONDS) if timeout else rollout)
+    output = await (asyncio.wait_for(rollout, timeout + TIMEOUT_GRACE_SECONDS) if timeout else rollout)
     return dict(output)
 
 
