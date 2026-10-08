@@ -24,7 +24,11 @@ from verifiers.errors import ModelError
 DEFAULT_MAX_REASONING_TOKENS = 24_576
 DEFAULT_MAX_ANSWER_TOKENS = 8_192
 DEFAULT_MAX_MODEL_ATTEMPTS = 3
+# Each attempt times out on its own, and the whole turn, retries and backoff
+# included, has a longer deadline. The hosted gateway gives up on a non-streamed
+# reply at 280 seconds, so a retry still fits after it.
 DEFAULT_MODEL_REQUEST_TIMEOUT = 300.0
+DEFAULT_MODEL_TURN_TIMEOUT = 600.0
 
 
 class CostTrackingChatCompletionsClient(OpenAIChatCompletionsClient):
@@ -35,13 +39,15 @@ class CostTrackingChatCompletionsClient(OpenAIChatCompletionsClient):
         *args: Any,
         max_attempts: int = DEFAULT_MAX_MODEL_ATTEMPTS,
         request_timeout: float = DEFAULT_MODEL_REQUEST_TIMEOUT,
+        turn_timeout: float = DEFAULT_MODEL_TURN_TIMEOUT,
         **kwargs: Any,
     ) -> None:
-        if max_attempts <= 0 or request_timeout <= 0 or not math.isfinite(request_timeout):
-            raise ValueError("Model attempts and request timeout must be positive and finite")
+        if max_attempts <= 0 or any(t <= 0 or not math.isfinite(t) for t in (request_timeout, turn_timeout)):
+            raise ValueError("Model attempts and timeouts must be positive and finite")
         super().__init__(*args, **kwargs)
         self.max_attempts = max_attempts
         self.request_timeout = request_timeout
+        self.turn_timeout = turn_timeout
         self._client = self.client.with_options(max_retries=0, timeout=request_timeout)
 
     async def to_native_prompt(self, messages: Any) -> Any:
@@ -54,7 +60,7 @@ class CostTrackingChatCompletionsClient(OpenAIChatCompletionsClient):
 
     async def get_native_response(self, *args: Any, **kwargs: Any) -> Any:
         state = kwargs.get("state")
-        async with asyncio.timeout(self.request_timeout):
+        async with asyncio.timeout(self.turn_timeout):
             for attempt in range(self.max_attempts):
                 try:
                     started = time.monotonic()

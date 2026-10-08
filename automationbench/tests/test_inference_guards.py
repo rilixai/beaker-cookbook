@@ -101,7 +101,7 @@ async def test_deadline_cancels_a_stalled_request_or_backoff(backoff: bool) -> N
             cancelled.set()
         return httpx.Response(200, json=_reply())
 
-    client = _client(handler, request_timeout=0.03)
+    client = _client(handler, turn_timeout=0.03)
     started = time.monotonic()
     try:
         with pytest.raises(TimeoutError):
@@ -228,6 +228,7 @@ async def test_hosted_client_creation_uses_the_limits(monkeypatch: Any, selected
     try:
         assert client.client.max_retries == 0
         assert client.client.timeout == 300
+        assert client.turn_timeout == 600
         await client.get_native_response([], model.name, model.sampling_args())
     finally:
         await client.close()
@@ -239,10 +240,11 @@ def test_native_clients_keep_their_existing_sampling_settings() -> None:
     assert "max_completion_tokens" not in ModelSpec(name="claude-sonnet-5-5", api="anthropic").sampling_args()
 
 
+@pytest.mark.parametrize("field", ["request_timeout", "turn_timeout"])
 @pytest.mark.parametrize("value", [0, -1, float("nan"), float("inf")])
-def test_invalid_deadline_cannot_disable_the_guard(value: float) -> None:
+def test_invalid_deadline_cannot_disable_the_guard(field: str, value: float) -> None:
     with pytest.raises(ValueError):
-        CostTrackingChatCompletionsClient(None, request_timeout=value)
+        CostTrackingChatCompletionsClient(None, **{field: value})
 
 
 @pytest.mark.parametrize(
@@ -303,3 +305,30 @@ async def test_an_answer_cut_off_at_the_cap_is_returned() -> None:
     finally:
         await client.close()
     assert (response.choices[0].finish_reason, response.choices[0].message.content) == ("length", "partial answer")
+
+
+@pytest.mark.parametrize(("turn_timeout", "recovers"), [(1.0, True), (0.35, False)])
+async def test_a_retry_after_a_slow_failure_needs_room_in_the_turn(turn_timeout: float, recovers: bool) -> None:
+    # Scaled down: a first attempt that fails late, as at the gateway's 280-second
+    # timeout, then a retry that takes a while too.
+    requests = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            await asyncio.sleep(0.3)
+            return httpx.Response(503, json={"error": {"message": "timed out"}}, headers={"retry-after": "0"})
+        await asyncio.sleep(0.2)
+        return httpx.Response(200, json=_reply())
+
+    client = _client(handler, turn_timeout=turn_timeout)
+    try:
+        if recovers:
+            response = await client.get_native_response([], "gpt-5.6-luna", {})
+            assert response.choices[0].message.content == "done"
+        else:
+            with pytest.raises(TimeoutError):
+                await client.get_native_response([], "gpt-5.6-luna", {})
+    finally:
+        await client.close()
+    assert len(requests) == 2
