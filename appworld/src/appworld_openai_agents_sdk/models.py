@@ -2,7 +2,7 @@
 
 Each model belongs to a family — ``reasoning`` or ``standard`` — which decides
 which sampling parameters are attached. The family is inferred from the model
-name (GPT-5 / o-series → reasoning, everything else → standard), so sweeping
+name (GPT-5/6 / o-series → reasoning, everything else → standard), so sweeping
 models is just a name change; an explicit ``family`` override remains available
 for names the inference does not know about:
 
@@ -29,7 +29,7 @@ from openai.types.shared import Reasoning
 ModelFamily = Literal["reasoning", "standard"]
 
 # Model-name prefixes that identify OpenAI reasoning models.
-_REASONING_NAME_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+_REASONING_NAME_PREFIXES = ("gpt-5", "gpt-6", "o1", "o3", "o4")
 
 
 def infer_family(model_name: str) -> ModelFamily:
