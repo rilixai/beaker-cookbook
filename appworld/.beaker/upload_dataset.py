@@ -22,7 +22,7 @@ def main() -> None:
     if args.tgc:
         args.full = True
     cli = ["beaker", "--config-file", ".beaker/tgc.yaml"] if args.tgc else ["beaker"]
-    integration_id = "appworld_tgc" if args.tgc else "appworld_openai_agents_sdk"
+    integration_id = "appworld_tgc" if args.tgc else "app_world"
     root = prepare_appworld()
     splits = {}
     for source_split in ("train", "dev") if args.full else ("train",):

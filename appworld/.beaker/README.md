@@ -40,7 +40,7 @@ its normal defaults. Evaluation runs surface provider errors and retain model
 and tool traces in Beaker. Scoring runs after the tracing scope closes.
 
 Run commands from `appworld/` with `uv run beaker`, selecting integration
-`appworld_openai_agents_sdk`. Strict smoke validates structure and labeled data;
+`app_world`. Strict smoke validates structure and labeled data;
 it does not execute the agent or establish benchmark quality.
 
 ## Task Goal Completion agent
