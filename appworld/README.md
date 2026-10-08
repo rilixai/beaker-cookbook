@@ -93,11 +93,11 @@ parameters get sent — a model never receives a parameter it doesn't support:
 
 [`configs/model.toml`](configs/model.toml) has one block per model, each
 holding just the parameters that model supports; `--model <name>` picks the
-block. Both the file and the CLI default to `gpt-6-astra` with low reasoning.
+block. Both the file and the CLI default to `gpt-6-astra` with xhigh reasoning.
 Or skip the config and use flags:
 
 ```bash
-uv run appworld-openai-agents-sdk run --model gpt-6-astra --reasoning-effort low --split dev --max-tasks 3
+uv run appworld-openai-agents-sdk run --model gpt-6-astra --reasoning-effort xhigh --split dev --max-tasks 3
 uv run appworld-openai-agents-sdk run --model gpt-4.1 --temperature 0 --split dev --max-tasks 3
 ```
 
