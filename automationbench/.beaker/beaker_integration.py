@@ -39,7 +39,7 @@ from typing import Any
 
 import verifiers as vf
 from anthropic import AsyncAnthropic
-from automationbench.clients import RetryingOpenAIChatCompletionsClient, StreamingAnthropicClient
+from automationbench.clients import StreamingAnthropicClient
 from automationbench.domains import get_combined_dataset
 from automationbench.rubric import partial_credit
 from automationbench.rubric.registry import AssertionRegistry
@@ -68,6 +68,7 @@ from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
 from verifiers.types import ClientConfig
 from world_diff import ServiceDiffs, clip, service_for
 
+from automationbench_skills.clients import CostTrackingChatCompletionsClient
 from automationbench_skills.data.tasks import Sample, load_samples
 from automationbench_skills.prompts import load_system_prompt
 from automationbench_skills.runner import (
@@ -130,7 +131,7 @@ class TaskSetup(RepositoryRunSetup[TaskRow]):
 class _SpanPerRequest(OpenAIChatCompletionsClient):
     """One Beaker ``model_call`` span per provider request.
 
-    Sits below ``RetryingOpenAIChatCompletionsClient`` in the MRO so its retry
+    Sits below ``CostTrackingChatCompletionsClient`` in the MRO so its retry
     loop calls into here on every attempt: a retried request (empty response,
     5xx, dropped connection) gets its own span with its own usage or error,
     instead of only the final attempt being recorded.
@@ -150,7 +151,7 @@ class _SpanPerRequest(OpenAIChatCompletionsClient):
             return response
 
 
-class _TracedChatCompletionsClient(RetryingOpenAIChatCompletionsClient, _SpanPerRequest):
+class _TracedChatCompletionsClient(CostTrackingChatCompletionsClient, _SpanPerRequest):
     """Same client the harness already accepts, with Beaker spans on each request.
 
     verifiers drives the agent loop itself and takes the client object as a
@@ -248,7 +249,6 @@ def _client_for(runtime: RolloutRuntime[Any]) -> tuple[Client, ModelSpec]:
     else:
         model = default_model_spec()
         api_key = os.environ.get(model.effective_api_key_var())
-    # Same SDK-level retry and timeout settings as the harness's own verifiers client.
     sdk = ClientConfig(api_key_var=model.effective_api_key_var())
     if not runtime.model and model.resolved_api() == "anthropic":
         client = AsyncAnthropic(
@@ -256,9 +256,11 @@ def _client_for(runtime: RolloutRuntime[Any]) -> tuple[Client, ModelSpec]:
         )
         return _TracedAnthropicClient(client), model
     client = AsyncOpenAI(
-        api_key=api_key, base_url=model.effective_base_url(), max_retries=sdk.max_retries, timeout=sdk.timeout
+        api_key=api_key, base_url=model.effective_base_url(), max_retries=0, timeout=model.model_request_timeout
     )
-    return _TracedChatCompletionsClient(client), model
+    return _TracedChatCompletionsClient(
+        client, max_attempts=model.max_model_attempts, request_timeout=model.model_request_timeout
+    ), model
 
 
 def _rollout_error(raw: Any) -> BaseException | None:

@@ -92,6 +92,49 @@ A `vendor/model` name (e.g. `z-ai/glm-5.3-flash`) routes to OpenRouter using
 `OPENROUTER_API_KEY`; `--reasoning-enabled` toggles reasoning for models that
 only expose an on/off switch.
 
+## Inference limits and diagnostics
+
+OpenAI-compatible Chat Completions and native OpenAI Responses calls default to
+**16,384 output tokens**, **three total attempts per model turn**, and a
+**300-second deadline** covering requests and retry backoff. SDK retries are
+disabled so they cannot multiply that attempt budget. These defaults apply to
+the CLI and the hosted Beaker client, including runs with a selected model.
+Native Anthropic and Gemini clients retain their upstream settings.
+
+Configure the CLI with `--max-output-tokens`, `--max-model-attempts`, and
+`--model-request-timeout`, or the corresponding `ModelSpec` fields
+`max_output_tokens`, `max_model_attempts`, and `model_request_timeout`. Chat calls
+send `max_completion_tokens`; Responses calls send `max_output_tokens`. A lower
+cap supplied in `extra_body` is honored, while a higher one cannot bypass the
+configured cap. A cap covers hidden output and reasoning as well as visible text;
+check truncation and task accuracy when changing it.
+
+Every attempt prints a content-free `automationbench_model_attempt` JSON record
+when it starts and when a response, error, retry, or deadline occurs. Records
+include case/task and rollout identities, a model-turn ID, cap, attempt number,
+elapsed time, and request/response IDs and usage when available. Prompts,
+tool arguments, credentials, and response text are not printed by these logs.
+
+Before any tools in a returned batch can run, the client verifies that every
+`execute_tool.arguments` string contains one complete JSON object. Invalid JSON,
+trailing garbage, and non-object values get at most one format-recovery retry,
+within the same attempt/time budget. Persistent malformed arguments raise a tool
+parse error so partial world state can still be scored. Valid Unicode is retained.
+Rejected replies remain counted in usage/cost and in hosted per-request traces.
+
+Two experiments are available without changing their existing defaults:
+
+```bash
+uv run automationbench-skills run --split test --limit 3 \
+  --no-parallel-tool-calls --search-top-k 5
+```
+
+The equivalent `ModelSpec` options are `parallel_tool_calls=False` and
+`search_top_k=5`. Serial calls consume more turns, and a smaller search result set
+may hide a useful tool. Compare accuracy, turn counts, and latency with the same
+settings for baseline and candidate evaluations. Rebuild the Integration image
+from the updated cookbook commit before starting hosted evaluations.
+
 ## Reference numbers
 
 Upstream reports strict pass rates (`task_completed_correctly`) of roughly

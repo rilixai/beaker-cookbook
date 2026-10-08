@@ -13,6 +13,11 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from automationbench_skills.clients import (
+    DEFAULT_MAX_MODEL_ATTEMPTS,
+    DEFAULT_MAX_OUTPUT_TOKENS,
+    DEFAULT_MODEL_REQUEST_TIMEOUT,
+)
 from automationbench_skills.evaluation.summary import format_summary, summarize
 from automationbench_skills.runner import (
     DEFAULT_MAX_STEPS,
@@ -49,6 +54,25 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--toolset", choices=["zapier", "api"], default="zapier")
     p.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
     p.add_argument("--max-concurrent", type=int, default=8)
+    p.add_argument(
+        "--max-output-tokens", type=int, default=DEFAULT_MAX_OUTPUT_TOKENS, help="Chat/Responses output cap"
+    )
+    p.add_argument(
+        "--max-model-attempts", type=int, default=DEFAULT_MAX_MODEL_ATTEMPTS, help="Chat/Responses attempts per turn"
+    )
+    p.add_argument(
+        "--model-request-timeout",
+        type=float,
+        default=DEFAULT_MODEL_REQUEST_TIMEOUT,
+        help="Chat/Responses turn deadline including retries (seconds)",
+    )
+    p.add_argument(
+        "--parallel-tool-calls",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Optional chat/Responses experiment; provider default when omitted",
+    )
+    p.add_argument("--search-top-k", type=int, default=None, help="Optional cap on tool-search results")
     p.add_argument(
         "--task-timeout",
         type=float,
@@ -110,6 +134,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
         api=api,
         reasoning_effort=args.reasoning_effort,
         reasoning_enabled=args.reasoning_enabled,
+        max_output_tokens=args.max_output_tokens,
+        max_model_attempts=args.max_model_attempts,
+        model_request_timeout=args.model_request_timeout,
+        parallel_tool_calls=args.parallel_tool_calls,
+        search_top_k=args.search_top_k,
     )
     (output_dir / "config.json").write_text(
         json.dumps(
@@ -121,6 +150,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 "api": model.api,
                 "reasoning_effort": model.reasoning_effort,
                 "reasoning_enabled": model.reasoning_enabled,
+                "max_output_tokens": model.max_output_tokens,
+                "max_model_attempts": model.max_model_attempts,
+                "model_request_timeout": model.model_request_timeout,
+                "parallel_tool_calls": model.parallel_tool_calls,
+                "search_top_k": model.search_top_k,
                 "toolset": args.toolset,
                 "max_steps": args.max_steps,
                 "skills_dir": str(skills_dir) if skills_dir else None,
