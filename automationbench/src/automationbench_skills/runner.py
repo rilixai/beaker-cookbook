@@ -109,7 +109,7 @@ class ModelSpec:
             extra = args.get("extra_body") or {}
             # Reasoning shares the completion cap. An explicit reasoning budget
             # (OpenRouter's reasoning.max_tokens) sets the allowance; otherwise the
-            # default leaves room for the reasoning seen in hosted runs.
+            # default allowance applies.
             requested_reasoning = extra.get("reasoning")
             budget = requested_reasoning.get("max_tokens") if isinstance(requested_reasoning, dict) else None
             if budget is not None and (not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0):

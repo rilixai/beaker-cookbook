@@ -309,8 +309,7 @@ async def test_an_answer_cut_off_at_the_cap_is_returned() -> None:
 
 @pytest.mark.parametrize(("turn_timeout", "recovers"), [(1.0, True), (0.35, False)])
 async def test_a_retry_after_a_slow_failure_needs_room_in_the_turn(turn_timeout: float, recovers: bool) -> None:
-    # Scaled down: a first attempt that fails late, as at the gateway's 280-second
-    # timeout, then a retry that takes a while too.
+    # Scaled down: a first attempt that fails late, then a retry that takes a while too.
     requests = []
 
     async def handler(request: httpx.Request) -> httpx.Response:

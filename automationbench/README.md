@@ -97,10 +97,9 @@ only expose an on/off switch.
 OpenAI-compatible Chat Completions calls use **32,768 output tokens** (a 24,576-token
 reasoning allowance plus 8,192 for the answer), at most **three attempts per model
 turn**, a **300-second timeout per attempt**, and a **600-second deadline** for the
-whole turn, covering every attempt and the backoff between them. The hosted gateway
-gives up on a non-streamed reply at 280 seconds, so a retry still fits after it.
-SDK retries are disabled. These limits apply to the hosted
-Beaker gateway and local runs using `--api chat_completions`. Direct OpenAI CLI
+whole turn, covering every attempt and the backoff between them. SDK retries are
+disabled. These limits apply to the hosted Beaker gateway and local runs using
+`--api chat_completions`. Direct OpenAI CLI
 runs select native Responses by default; Responses, Anthropic, and Gemini clients
 retain their upstream behavior.
 
