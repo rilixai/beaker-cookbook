@@ -204,16 +204,16 @@ class TestRunner:
         assert openrouter.effective_api_key_var() == "OPENROUTER_API_KEY"
         assert openrouter.sampling_args() == {
             "extra_body": {"reasoning": {"effort": "max"}},
-            "max_completion_tokens": 16384,
+            "max_completion_tokens": 32768,
         }
 
         qwen = ModelSpec(name="qwen/qwen3.8-flash", reasoning_effort="default", reasoning_enabled=True)
-        assert qwen.sampling_args() == {"extra_body": {"reasoning": {"enabled": True}}, "max_completion_tokens": 16384}
+        assert qwen.sampling_args() == {"extra_body": {"reasoning": {"enabled": True}}, "max_completion_tokens": 32768}
 
         native = ModelSpec(name="gpt-6-astra")
         assert not native.is_openrouter()
         assert native.effective_api_key_var() == "OPENAI_API_KEY"
-        assert native.sampling_args() == {"reasoning_effort": DEFAULT_REASONING_EFFORT, "max_completion_tokens": 16384}
+        assert native.sampling_args() == {"reasoning_effort": DEFAULT_REASONING_EFFORT, "max_completion_tokens": 32768}
 
         explicit = ModelSpec(name="z-ai/glm-5.3-flash", api_key_var="CUSTOM_API_KEY")
         assert explicit.effective_api_key_var() == "CUSTOM_API_KEY"
@@ -356,7 +356,7 @@ class TestRunner:
         assert (spec.name, spec.resolved_api(), spec.sampling_args()) == (
             "gpt-5.6-luna",
             "chat_completions",
-            {"reasoning_effort": "medium", "max_completion_tokens": 16384},
+            {"reasoning_effort": "medium", "max_completion_tokens": 32768},
         )
 
     async def test_beaker_no_model_uses_traced_anthropic_client(self, monkeypatch: Any) -> None:

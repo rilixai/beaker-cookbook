@@ -18,7 +18,11 @@ from verifiers.clients.openai_chat_completions_client import parse_reasoning_con
 from verifiers.errors import ModelError
 
 
-DEFAULT_MAX_OUTPUT_TOKENS = 16_384
+# Reasoning counts toward the completion cap on most providers, so the cap is a
+# reasoning allowance plus room to answer. In hosted runs, answers stayed under
+# 3k tokens while reasoning reached about 26k.
+DEFAULT_MAX_REASONING_TOKENS = 24_576
+DEFAULT_MAX_ANSWER_TOKENS = 8_192
 DEFAULT_MAX_MODEL_ATTEMPTS = 3
 DEFAULT_MODEL_REQUEST_TIMEOUT = 300.0
 
@@ -70,7 +74,13 @@ class CostTrackingChatCompletionsClient(OpenAIChatCompletionsClient):
                 # unchanged to the environment's existing parser and execution loop.
                 choices = getattr(response, "choices", None)
                 if choices:
-                    message = choices[0].message
+                    choice = choices[0]
+                    message = choice.message
+                    if choice.finish_reason == "length" and not (message.content or message.tool_calls):
+                        # Reasoning used the whole cap. Retrying the same request
+                        # would stop in the same place, and returning it would end
+                        # the rollout as if the agent had finished.
+                        raise ModelError("the model's reasoning used the whole output cap without answering")
                     if not (message.content or message.tool_calls or parse_reasoning_content(message)):
                         if attempt < self.max_attempts - 1:
                             if state is not None:

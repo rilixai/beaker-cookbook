@@ -29,7 +29,8 @@ from verifiers.legacy.types import ClientConfig
 from verifiers.types import RolloutInput
 
 from automationbench_skills.clients import (
-    DEFAULT_MAX_OUTPUT_TOKENS,
+    DEFAULT_MAX_ANSWER_TOKENS,
+    DEFAULT_MAX_REASONING_TOKENS,
     DEFAULT_MODEL_REQUEST_TIMEOUT,
     CostTrackingChatCompletionsClient,
 )
@@ -105,8 +106,15 @@ class ModelSpec:
         else:
             args = build_sampling_args(self.name, self.resolved_api(), effort, self.extra_body) or {}
         if self.resolved_api() == "chat_completions":
-            cap = DEFAULT_MAX_OUTPUT_TOKENS
             extra = args.get("extra_body") or {}
+            # Reasoning shares the completion cap. An explicit reasoning budget
+            # (OpenRouter's reasoning.max_tokens) sets the allowance; otherwise the
+            # default leaves room for the reasoning seen in hosted runs.
+            requested_reasoning = extra.get("reasoning")
+            budget = requested_reasoning.get("max_tokens") if isinstance(requested_reasoning, dict) else None
+            if budget is not None and (not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0):
+                raise ValueError("reasoning.max_tokens must be a positive integer")
+            cap = (budget or DEFAULT_MAX_REASONING_TOKENS) + DEFAULT_MAX_ANSWER_TOKENS
             for key in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
                 for container in (args, extra):
                     requested = container.pop(key, None)

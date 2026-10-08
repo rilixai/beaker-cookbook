@@ -94,17 +94,23 @@ only expose an on/off switch.
 
 ## Chat Completions limits
 
-OpenAI-compatible Chat Completions calls use **16,384 output tokens**, at most
-**three attempts per model turn**, and a **300-second deadline** covering requests
-and retry backoff. SDK retries are disabled. These limits apply to the hosted
+OpenAI-compatible Chat Completions calls use **32,768 output tokens** (a 24,576-token
+reasoning allowance plus 8,192 for the answer), at most **three attempts per model
+turn**, and a **300-second deadline** covering requests and retry backoff. SDK retries are disabled. These limits apply to the hosted
 Beaker gateway and local runs using `--api chat_completions`. Direct OpenAI CLI
 runs select native Responses by default; Responses, Anthropic, and Gemini clients
 retain their upstream behavior.
 
 The defaults are named constants in `src/automationbench_skills/clients.py`.
-A lower output cap in `extra_body` is honored; a higher cap cannot exceed the
-recipe default. The output cap can truncate a legitimate response, so compare
-task accuracy and truncation when changing it. Hosted model requests retain
+Reasoning counts toward the completion cap on most providers, so a reasoning
+budget in `extra_body` (OpenRouter's `{"reasoning": {"max_tokens": N}}`) sets the
+cap to that budget plus the answer allowance; where the provider honors the
+budget, a call stops reasoning and still answers. A lower output cap in
+`extra_body` is honored; a higher one cannot exceed the cap above. A call whose
+reasoning uses the whole cap without answering fails with a model error rather
+than ending the rollout as if the agent had finished, and is not retried, since
+the same request would stop in the same place. The cap can still truncate a
+legitimate response, so compare task accuracy and truncation when changing it. Hosted model requests retain
 per-attempt traces, and returned responses retain usage/cost accounting.
 Tool arguments pass unchanged to the existing environment parser; this client
 adds no batch validation or format-recovery instructions. Rebuild the Integration

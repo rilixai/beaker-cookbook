@@ -59,7 +59,7 @@ async def test_output_cap_reaches_the_wire(extra_body: str | None) -> None:
     finally:
         await client.close()
     (body,) = captured
-    assert body["max_completion_tokens"] == (1024 if extra_body and "1024" in extra_body else 16384)
+    assert body["max_completion_tokens"] == (1024 if extra_body and "1024" in extra_body else 32768)
     assert "max_tokens" not in body
     assert "max_output_tokens" not in body
     assert "parallel_tool_calls" not in body
@@ -231,7 +231,7 @@ async def test_hosted_client_creation_uses_the_limits(monkeypatch: Any, selected
         await client.get_native_response([], model.name, model.sampling_args())
     finally:
         await client.close()
-    assert captured[0]["max_completion_tokens"] == 16384
+    assert captured[0]["max_completion_tokens"] == 32768
 
 
 def test_native_clients_keep_their_existing_sampling_settings() -> None:
@@ -243,3 +243,63 @@ def test_native_clients_keep_their_existing_sampling_settings() -> None:
 def test_invalid_deadline_cannot_disable_the_guard(value: float) -> None:
     with pytest.raises(ValueError):
         CostTrackingChatCompletionsClient(None, request_timeout=value)
+
+
+@pytest.mark.parametrize(
+    ("extra_body", "cap"),
+    [
+        (None, 32768),
+        ('{"reasoning": {"max_tokens": 12000}}', 20192),
+        ('{"reasoning": {"max_tokens": 12000}, "max_tokens": 4096}', 4096),
+    ],
+)
+def test_a_reasoning_budget_sets_the_cap_with_room_to_answer(extra_body: str | None, cap: int) -> None:
+    args = ModelSpec(api="chat_completions", extra_body=extra_body).sampling_args()
+    assert args["max_completion_tokens"] == cap
+    if extra_body and "reasoning" in extra_body:
+        assert args["extra_body"]["reasoning"] == {"max_tokens": 12000}
+
+
+@pytest.mark.parametrize("budget", ["0", "-1", "true", '"12000"'])
+def test_an_invalid_reasoning_budget_is_rejected(budget: str) -> None:
+    with pytest.raises(ValueError, match="reasoning.max_tokens"):
+        ModelSpec(api="chat_completions", extra_body=f'{{"reasoning": {{"max_tokens": {budget}}}}}').sampling_args()
+
+
+def _stopped_at_the_cap(content: str | None) -> dict[str, Any]:
+    reply = _reply()
+    reply["choices"][0]["message"] = {"role": "assistant", "content": content, "reasoning_content": "thinking"}
+    reply["choices"][0]["finish_reason"] = "length"
+    return reply
+
+
+async def test_reasoning_that_fills_the_cap_fails_without_a_retry() -> None:
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=_stopped_at_the_cap(None))
+
+    client = _client(handler)
+    state: dict[str, Any] = {}
+    try:
+        with pytest.raises(ModelError, match="whole output cap"):
+            await client.get_native_response([], "gpt-5.6-luna", {}, state=state)
+    finally:
+        await client.close()
+    assert len(requests) == 1
+    # The call was paid for, so its cost stays accounted.
+    assert state["_perf"]["model_calls"] == 1
+    assert state["_perf"]["cost_usd"] == pytest.approx(0.01)
+
+
+async def test_an_answer_cut_off_at_the_cap_is_returned() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_stopped_at_the_cap("partial answer"))
+
+    client = _client(handler)
+    try:
+        response = await client.get_native_response([], "gpt-5.6-luna", {})
+    finally:
+        await client.close()
+    assert (response.choices[0].finish_reason, response.choices[0].message.content) == ("length", "partial answer")
