@@ -105,15 +105,19 @@ retain their upstream behavior.
 
 The defaults are named constants in `src/automationbench_skills/clients.py`.
 Reasoning counts toward the completion cap on most providers, so a reasoning
-budget in `extra_body` (OpenRouter's `{"reasoning": {"max_tokens": N}}`) sets the
-cap to that budget plus the answer allowance; where the provider honors the
-budget, a call stops reasoning and still answers. A lower output cap in
+budget in `ModelSpec.extra_body` (OpenRouter's `{"reasoning": {"max_tokens": N}}`)
+sets the cap to that budget plus the answer allowance; where the provider honors
+the budget, a call stops reasoning and still answers. The CLI does not expose
+`extra_body`, and a budget applies only to runs that call OpenRouter directly:
+hosted runs send none, and the Beaker gateway accepts `reasoning.effort`,
+`enabled`, and `exclude` but rejects a token budget. A lower output cap in
 `extra_body` is honored; a higher one cannot exceed the cap above. A call whose
 reasoning uses the whole cap without answering fails with a model error rather
 than ending the rollout as if the agent had finished, and is not retried, since
 the same request would stop in the same place. The cap can still truncate a
-legitimate response, so compare task accuracy and truncation when changing it. Hosted model requests retain
-per-attempt traces, and returned responses retain usage/cost accounting.
+legitimate response, so compare task accuracy and truncation when changing it.
+Hosted model requests retain per-attempt traces, and returned responses retain
+usage/cost accounting.
 Tool arguments pass unchanged to the existing environment parser; this client
 adds no batch validation or format-recovery instructions. Rebuild the Integration
 image from the updated cookbook commit before starting hosted evaluations.
