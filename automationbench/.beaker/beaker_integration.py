@@ -316,10 +316,11 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
         result_error = _rollout_error(output.get("error"))
         end_state = output.get("_end_state")
         # verifiers swallows rollout exceptions into ``state["error"]`` and
-        # still grades the untouched world. A model/provider/infra failure
-        # means the agent never got to act, so the case did not run; an
-        # agent-side failure (bad tool call, overlong prompt) is the
-        # candidate's fault and keeps its earned score.
+        # still grades the world as the agent left it. A model, provider, or
+        # infrastructure failure, even one partway through the rollout, is not
+        # the candidate's fault, so the case is re-run rather than scored on
+        # what the agent did before it; an agent-side failure (bad tool call,
+        # overlong prompt) is the candidate's fault and keeps its earned score.
         if isinstance(result_error, vf.ModelError | vf.InfraError):
             message = f"{type(result_error).__name__}: {result_error}"
             stage.output({"error": message})

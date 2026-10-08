@@ -84,17 +84,29 @@ class CostTrackingChatCompletionsClient(OpenAIChatCompletionsClient):
                         # Reasoning used the whole cap. Retrying the same request
                         # would stop in the same place, and returning it would end
                         # the rollout as if the agent had finished.
+                        _count_discarded_usage(state, response)
                         raise ModelError("the model's reasoning used the whole output cap without answering")
                     if not (message.content or message.tool_calls or parse_reasoning_content(message)):
                         if attempt < self.max_attempts - 1:
-                            if state is not None:
-                                usage = state.setdefault("_usage", {"input_tokens": 0, "output_tokens": 0})
-                                usage["input_tokens"] += response.usage.prompt_tokens if response.usage else 0
-                                usage["output_tokens"] += response.usage.completion_tokens if response.usage else 0
+                            _count_discarded_usage(state, response)
                             await asyncio.sleep(2**attempt)
                             continue
                 return response
         raise RuntimeError("Model attempt budget exhausted")
+
+
+def _count_discarded_usage(state: Any, native_response: Any) -> None:
+    """Add the tokens of a reply the rollout never receives to ``state["_usage"]``.
+
+    The environment counts a reply's tokens when the rollout receives it, so a
+    reply this client retries past or rejects is counted here instead.
+    """
+    if state is None:
+        return
+    usage = getattr(native_response, "usage", None)
+    totals = state.setdefault("_usage", {"input_tokens": 0, "output_tokens": 0})
+    totals["input_tokens"] += (getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
+    totals["output_tokens"] += (getattr(usage, "completion_tokens", 0) or 0) if usage else 0
 
 
 def record_cost(state: Any, native_response: Any) -> None:

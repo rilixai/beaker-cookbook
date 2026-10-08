@@ -290,9 +290,11 @@ async def test_reasoning_that_fills_the_cap_fails_without_a_retry() -> None:
     finally:
         await client.close()
     assert len(requests) == 1
-    # The call was paid for, so its cost stays accounted.
+    # The call was paid for, and the rollout never receives it, so its cost and
+    # tokens are counted here.
     assert state["_perf"]["model_calls"] == 1
     assert state["_perf"]["cost_usd"] == pytest.approx(0.01)
+    assert state["_usage"] == {"input_tokens": 11, "output_tokens": 7}
 
 
 async def test_an_answer_cut_off_at_the_cap_is_returned() -> None:
