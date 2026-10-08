@@ -23,8 +23,9 @@ a before/after diff of the targeted app's records as ``predicted`` (see
 replaying the trace.
 
 Model calls are traced by subclassing the verifiers client (see
-``_TracedChatCompletionsClient``); the verifiers rollout is what talks to the
-model, so there is no framework integration to enable here.
+``_TracedChatCompletionsClient`` and ``_TracedAnthropicClient``); the verifiers
+rollout is what talks to the model, so there is no framework integration to
+enable here.
 """
 
 from __future__ import annotations
@@ -37,7 +38,8 @@ from pathlib import Path
 from typing import Any
 
 import verifiers as vf
-from automationbench.clients import RetryingOpenAIChatCompletionsClient
+from anthropic import AsyncAnthropic
+from automationbench.clients import RetryingOpenAIChatCompletionsClient, StreamingAnthropicClient
 from automationbench.domains import get_combined_dataset
 from automationbench.rubric import partial_credit
 from automationbench.rubric.registry import AssertionRegistry
@@ -61,7 +63,7 @@ from beaker.sdk.utils import to_json_safe
 from beaker.tracing import current_trace
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, field_validator
-from verifiers.clients import OpenAIChatCompletionsClient
+from verifiers.clients import Client, OpenAIChatCompletionsClient
 from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
 from verifiers.types import ClientConfig
 from world_diff import ServiceDiffs, clip, service_for
@@ -79,7 +81,7 @@ from automationbench_skills.runner import (
 # Hill-climb mostly on assertion partial credit, with strict task completion
 # as a smaller term so fully-correct runs are preferred.
 FIELD_WEIGHTS = {"partial_credit": 0.8, "task_completed_correctly": 0.2}
-DEFAULT_TIMEOUT_SECONDS = 1200.0
+DEFAULT_TIMEOUT_SECONDS = 2400.0
 # The scored benchmark domains (``upload_splits.py`` draws from the same set).
 _PUBLIC_DOMAINS = ("sales", "marketing", "operations", "support", "finance", "hr")
 
@@ -162,6 +164,25 @@ class _TracedChatCompletionsClient(RetryingOpenAIChatCompletionsClient, _SpanPer
     """
 
 
+class _TracedAnthropicClient(StreamingAnthropicClient):
+    """Trace each Messages request, including the streaming client's retries."""
+
+    async def get_native_response(
+        self, prompt: Any, model: str, sampling_args: Any, tools: Any = None, **kwargs: Any
+    ) -> Any:
+        system = kwargs.get("system")
+        input_messages = [{"role": "system", "content": system}, *prompt] if system else prompt
+        with current_trace().model_call(
+            operation="messages",
+            provider="anthropic",
+            model=str(model),
+            input_messages=input_messages,
+        ) as call:
+            response = await super().get_native_response(prompt, model, sampling_args, tools, **kwargs)
+            call.output(to_json_safe(response))
+            return response
+
+
 @cache
 def _samples_by_name() -> dict[str, Sample]:
     return {sample.task_name: sample for sample in load_samples()}
@@ -205,13 +226,13 @@ def default_model_spec() -> ModelSpec:
     """The model a run without a model choice evaluates, through Beaker's provider proxy.
 
     Pinned here rather than taken from ``ModelSpec()`` so that changing the
-    app's (and CLI's) default model never changes what Beaker optimizes, and
-    always on Chat Completions, the API ``_TracedChatCompletionsClient`` traces.
+    app's (and CLI's) default model never changes what Beaker optimizes. Chat
+    Completions and Anthropic Messages requests are both traced.
     """
     return ModelSpec(name="gpt-5.6-luna", api="chat_completions", reasoning_effort="medium")
 
 
-def _client_for(runtime: RolloutRuntime[Any]) -> tuple[_TracedChatCompletionsClient, ModelSpec]:
+def _client_for(runtime: RolloutRuntime[Any]) -> tuple[Client, ModelSpec]:
     """The model the run selected, through Beaker's inference gateway; else the app's own defaults.
 
     A run started with a model choice (model-swap runs) resolves to a gateway
@@ -229,6 +250,11 @@ def _client_for(runtime: RolloutRuntime[Any]) -> tuple[_TracedChatCompletionsCli
         api_key = os.environ.get(model.effective_api_key_var())
     # Same SDK-level retry and timeout settings as the harness's own verifiers client.
     sdk = ClientConfig(api_key_var=model.effective_api_key_var())
+    if not runtime.model and model.resolved_api() == "anthropic":
+        client = AsyncAnthropic(
+            api_key=api_key, base_url=model.effective_base_url(), max_retries=sdk.max_retries, timeout=sdk.timeout
+        )
+        return _TracedAnthropicClient(client), model
     client = AsyncOpenAI(
         api_key=api_key, base_url=model.effective_base_url(), max_retries=sdk.max_retries, timeout=sdk.timeout
     )
@@ -309,7 +335,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
 
         error = None if result_error is None else f"{type(result_error).__name__}: {result_error}"
         # The scorer needs the error and the end state; the model/tool turns are
-        # already in the trace via ``_TracedChatCompletionsClient``.
+        # already in the trace via the traced Chat Completions or Anthropic client.
         stage.output({"error": error, "messages": len(completion)})
         return CaseResult(
             output=None,
