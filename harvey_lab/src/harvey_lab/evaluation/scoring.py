@@ -48,7 +48,7 @@ ALL_PASS_FIELD = "all_pass"
 ALL_PASS_RATE_FIELD = "all_pass_rate"
 CRITERION_PASS_RATE_FIELD = "criterion_pass_rate"
 
-DEFAULT_JUDGE_MODEL = "openrouter/deepseek/deepseek-v4-flash"
+DEFAULT_JUDGE_MODEL = "openrouter/z-ai/glm-5.3-flash"
 DEFAULT_JUDGE_BATCH_SIZE = 8
 DEFAULT_JUDGE_TIMEOUT_S = 120.0
 # LAB-AA retries API failures aggressively rather than letting a transient
@@ -183,6 +183,7 @@ def build_rubric_judge(
     model: str = DEFAULT_JUDGE_MODEL,
     llm: Callable[..., Any] | None = None,
     *,
+    reasoning_effort: str = "high",
     timeout: float = DEFAULT_JUDGE_TIMEOUT_S,
     num_retries: int = DEFAULT_JUDGE_NUM_RETRIES,
 ) -> BatchJudge:
@@ -212,6 +213,8 @@ def build_rubric_judge(
             model=model,
             messages=messages,
             temperature=0.0,
+            reasoning_effort=reasoning_effort,
+            allowed_openai_params=["reasoning_effort"],
             timeout=timeout,
             num_retries=num_retries,
         )
