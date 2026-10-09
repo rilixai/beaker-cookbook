@@ -1,132 +1,112 @@
 # AppWorld
 
-[AppWorld](https://github.com/StonyBrookNLP/appworld) is a benchmark where an
-agent operates a simulated world of 9 apps and 457 APIs to complete everyday
-tasks (send money, order things, manage playlists) for a supervisor. Every
-task is scored by real evaluation code, not string matching. It received the ACL
-2024 Best Resource Paper award ([arXiv:2407.18901](https://arxiv.org/abs/2407.18901)).
+[AppWorld](https://github.com/StonyBrookNLP/appworld) ([paper](https://arxiv.org/abs/2407.18901), ACL 2024 Best Resource Paper) is a benchmark where an agent operates a simulated world of 9 apps and 457 APIs to complete everyday tasks (send money, order things, manage playlists) for a supervisor. Each task is scored by deterministic evaluation code that checks the final state of the world, not by string matching or a judge model.
 
-This recipe is a ReAct-style code agent built on the
-[OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) (the
-open-source agent framework — not a hosted OpenAI agent product): the
-agent gets one tool, `execute_python`, backed by AppWorld's own Python
-environment, where the apps are callable as `apis.<app>.<api>(...)`. Nothing
-is pre-selected for it — it discovers the APIs it needs at runtime through the
-`api_docs` app, like the AppWorld paper's ReAct baselines. A small model layer
-on top lets you point it at any OpenAI model — reasoning (GPT-5/6 family) or not
-(GPT-4.1/4o) — by changing a flag or a TOML file.
+This recipe is a ReAct-style code agent built on the [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/). It has one tool, `execute_python`, backed by AppWorld's Python environment, where the apps are callable as `apis.<app>.<api>(...)`. Nothing is pre-selected: the agent discovers APIs at runtime through the `api_docs` app, like the paper's ReAct baselines. The agent's system prompt lives in `prompts/`. Beaker improves the agent by editing `code_agent.py` and `prompts/`.
 
-## Quick start (< 5 minutes)
+> **The Beaker integration is already present in this recipe.** `.beaker/` holds working configs and integrations; there is nothing to write before pointing Beaker at it.
 
-You need Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and
-[Git LFS](https://git-lfs.com/) (`apt-get install git-lfs && git lfs install`).
-Git LFS must come first: the pinned `appworld` dependency ships its databases
-as LFS objects, and `appworld install` fails without them. From this folder:
+## Quick start
+
+You need Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and [Git LFS](https://git-lfs.com/) (`apt-get install git-lfs && git lfs install`). Git LFS must come first: `appworld install` fails without the LFS objects.
 
 ```bash
-export UV_GIT_LFS=1                 # uv skips LFS smudge by default; without this the
-                                    # appworld databases arrive as pointer files
-uv sync --group dev                 # install (appworld + openai-agents, pinned)
-uv run appworld install             # AppWorld's one-time self-setup
-uv run appworld download data       # benchmark data, all splits (~few hundred MB)
-export OPENAI_API_KEY=sk-...        # or: cp .env.example .env and fill it in
+cd appworld
+export UV_GIT_LFS=1                 # without this the appworld databases arrive as pointer files
+uv sync --group dev
+uv run appworld install             # AppWorld's one-time setup
+uv run appworld download data       # benchmark data, all splits (a few hundred MB)
+export OPENAI_API_KEY=sk-...        # or copy .env.example to .env
 
-# Smoke run: 3 dev tasks (add --model gpt-4.1 etc. to pick another block of configs/model.toml)
+# Smoke run: 3 dev tasks
 uv run appworld-openai-agents-sdk run --config configs/model.toml --split dev --max-tasks 3
 
-# Score it (prints TGC/SGC):
+# Score it (prints TGC and SGC)
 uv run appworld-openai-agents-sdk evaluate --config configs/model.toml --split dev --max-tasks 3
 ```
 
-The 3-task smoke run takes a minute or two and costs well under $1, depending
-on the model and reasoning effort. The real baselines are `--split test_normal` (168 tasks) and
-`--split test_challenge` (417 tasks) — expect hours and tens of dollars per
-full split.
+The smoke run takes a minute or two and costs well under $1. Full splits take hours and tens of dollars.
 
-## What actually runs
+Per task: AppWorld opens a fresh world, the agent submits Python chunks and reads the output, and the task ends when the agent calls `apis.supervisor.complete_task(...)` or runs out of steps (`--max-steps`, default 50). Predictions are written to `experiments/outputs/<experiment-name>/`.
 
-Per task:
+## Tasks, scenarios, and splits
 
-1. **A fresh AppWorld world is opened** for the task, with an in-process
-   Python interpreter where the apps are callable as `apis.<app>.<api>(...)`.
-   Variables persist across steps.
-2. **The agent loop runs on the Agents SDK**: an `Agent` with instructions
-   adapted from upstream's ReAct prompt (task, supervisor identity, app
-   descriptions, one worked demo) and a single `execute_python` tool. Each
-   turn the model submits a code chunk; the printed output (or traceback)
-   comes back as the observation. No API list is pre-filled — the agent looks
-   things up with `apis.api_docs.show_api_descriptions(...)` etc. as it goes.
-3. **A task ends** when the agent runs `apis.supervisor.complete_task(...)`
-   in code, or when the 50-step budget (`--max-steps`) runs out.
-4. **Predictions are written** under `./experiments/outputs/<experiment-name>/`
-   in the format `appworld evaluate` expects. `evaluate` prints **TGC**
-   (Task Goal Completion) and **SGC** (Scenario Goal Completion).
+- **Task**: one instruction with its own pass/fail evaluation, e.g. "add the songs from my last playlist to a new playlist called X". Task IDs look like `82e2fac_1`.
+- **Scenario**: a group of 3 variants of the same underlying problem (`82e2fac_1`, `82e2fac_2`, `82e2fac_3`). The ID prefix is the scenario ID.
 
-## Data and splits
+| Split | Tasks | Scenarios | Used for |
+|---|---|---|---|
+| `train` | 90 | 30 | optimization |
+| `dev` | 57 | 19 | evaluation |
+| `test_normal` | 168 | 56 | not used by Beaker; baseline runs only |
+| `test_challenge` | 417 | 139 | not used by Beaker; baseline runs only |
 
-`appworld download data` fetches everything locally. All four splits run and score locally; the evaluation
-programs are public even for the test sets (only setup programs and reference
-solutions are withheld):
+All splits run and score locally. Don't tune or do error analysis on the test splits.
 
-| Split | Tasks | Use |
+## Metrics
+
+- **TGC** (Task Goal Completion): the fraction of tasks that pass. A task passes only if every one of its requirements passes.
+- **SGC** (Scenario Goal Completion): the fraction of scenarios where all 3 variants pass.
+
+## Beaker integrations
+
+Two agents, differing in what one Beaker case is and how it is scored. Both run from `appworld/` with `uv run beaker`.
+
+| | Scenario agent | Task agent |
 |---|---|---|
-| `dev` | 57 | default smoke/validation slice (full ground truth) |
-| `test_normal` | 168 | main baseline |
-| `test_challenge` | 417 | main baseline (harder) |
-| `train` | 90 | training/demos |
+| Integration | `app_world` (`.beaker/beaker.yaml`) | `appworld_tgc` (`.beaker/tgc.yaml`) |
+| Case | 1 scenario (3 tasks) | 1 task |
+| Objective | `0.8 * TGC + 0.2 * SGC` | 1 if the task passes, else 0 |
+| Full dataset | `appworld-sgc-full`: 30 train + 19 dev cases | `appworld-tgc-full`: 90 train + 57 dev cases |
+| Upload | `uv run python .beaker/upload_dataset.py --full` | `uv run python .beaker/upload_dataset.py --tgc` |
+| CLI | `uv run beaker` | `uv run beaker --config-file .beaker/tgc.yaml` |
 
-Don't tune or do error analysis on the test splits, and never show the agent
-withheld ground truth.
+Both draw on the same 147 train and dev tasks. The scenario objective gives a graded signal: TGC rewards partial progress, while SGC alone would be zero whenever any variant fails.
 
-## Switching models
+`upload_dataset.py` without a flag uploads a quick-start set (`appworld-sgc-quickstart`): the first 4 train scenarios, 3 for optimization and 1 held out. Hosted datasets change only when uploaded, so pass the dataset revision explicitly to smoke and launch.
 
-Whether a model is a reasoning model is detected from its name (GPT-5/6 /
-o-series → reasoning, everything else → standard), and that decides which
-parameters get sent — a model never receives a parameter it doesn't support:
+Each evaluator requirement becomes a pass/fail check grouped by task ID, so the optimizer sees which requirements failed.
 
-- **reasoning** (GPT-5/6 family: `gpt-5.6-sol`, `gpt-5.6-terra`,
-  `gpt-6-luna`, ...): sends
-  `reasoning = {"effort": none|minimal|low|medium|high|xhigh|max}`; never
-  sends `temperature`/`top_p`/`seed` (the API rejects them with a 400).
-- **standard** (`gpt-4.1`, `gpt-4o`, ...): sends `temperature`/`top_p` as
-  usual; never sends a `reasoning` field.
+**Editable scope:** `code_agent.py` and `prompts/`. Scoring, bootstrap code, model config, and vendored code are fixed.
 
-[`configs/model.toml`](configs/model.toml) has one block per model, each
-holding just the parameters that model supports; `--model <name>` picks the
-block. Both the file and the CLI default to `gpt-6-luna` with low reasoning.
-Or skip the config and use flags:
+**Execution:** each case runs in a fresh subprocess (`appworld_subprocess.py`, `appworld_case_worker.py`), because AppWorld mutates process-global state and cases cannot share an interpreter. Variants within a scenario run sequentially; separate cases run in parallel up to Beaker's concurrency limit. `appworld_setup.py` reuses local benchmark data or downloads the pinned assets, verifying checksums.
+
+## Models
+
+`configs/model.toml` has one block per model; `--model <name>` picks one. The default is `gpt-6-luna` with low reasoning. Or use flags:
 
 ```bash
 uv run appworld-openai-agents-sdk run --model gpt-6-luna --reasoning-effort low --split dev --max-tasks 3
 uv run appworld-openai-agents-sdk run --model gpt-4.1 --temperature 0 --split dev --max-tasks 3
 ```
 
-(`--reasoning-effort` only works with reasoning models and `--temperature`
-only with standard ones — passing one to the wrong kind of model is an error.)
+Reasoning models (GPT-5/6, o-series) take `--reasoning-effort` and never receive `temperature`/`top_p`/`seed`. Standard models (GPT-4.1, GPT-4o) take `--temperature`/`--top-p` and never receive `reasoning`. Passing the wrong flag for a model is an error. `--max-output-tokens` defaults to 65,536 for reasoning models (reasoning tokens count toward it) and 16,384 otherwise.
 
-`--max-output-tokens` caps output tokens per request. **Reasoning tokens
-count toward that cap**, so reasoning models default to a much larger one
-(65,536 vs 16,384) to avoid truncated trajectories. There is no per-task
-cost cap — watch the smoke run before scaling up.
+In hosted Beaker runs, models route through Beaker's inference gateway, which controls reasoning and sampling settings.
 
-> **Determinism note:** reasoning models accept no `temperature`/`seed`, so
-> runs are non-deterministic. For a citable number, run the eval N times and
-> report mean TGC/SGC ± variance.
+Reasoning models are non-deterministic, so for a citable number run the evaluation several times and report mean ± variance.
 
 ## Code map
 
 | Path | What it holds |
 |---|---|
-| `src/appworld_openai_agents_sdk/cli.py` | `run` / `evaluate` subcommands and all flags |
-| `src/appworld_openai_agents_sdk/models.py` | the model layer (`ModelProfile`, reasoning vs standard) |
-| `src/appworld_openai_agents_sdk/code_agent.py` | the agent: `execute_python` tool + Agents SDK loop |
-| `src/appworld_openai_agents_sdk/runner.py` | entry point (max_steps=50, random_seed=100) |
-| `src/appworld_openai_agents_sdk/prompts/react_code_agent/` | agent instructions, adapted from upstream's ReAct prompt (Apache-2.0) |
-| `src/appworld_openai_agents_sdk/vendored/` | upstream logging helpers, verbatim modulo imports (Apache-2.0) |
-| `configs/` | the example model config |
+| `src/appworld_openai_agents_sdk/cli.py` | `run` / `evaluate` subcommands and flags |
+| `src/appworld_openai_agents_sdk/models.py` | model layer (reasoning vs standard) |
+| `src/appworld_openai_agents_sdk/code_agent.py` | the agent: `execute_python` tool and Agents SDK loop |
+| `src/appworld_openai_agents_sdk/runner.py` | entry point |
+| `src/appworld_openai_agents_sdk/prompts/` | agent instructions, adapted from upstream's ReAct prompt |
+| `src/appworld_openai_agents_sdk/vendored/` | upstream logging helpers (Apache-2.0) |
+| `configs/` | example model config |
+| `.beaker/` | Beaker configs, integrations, and dataset upload |
 
-## Next steps (not implemented yet)
+## Development
 
-- **Agent-owned `skills/` folder.** A future `skills/` directory of learned
-  playbooks/experience would be appended to the agent's instructions when the
-  system prompt is assembled. Deliberately left out of this baseline.
+```bash
+uv run ruff check && uv run ruff format --check
+uv run python -m mypy
+uv run pytest -q
+```
+
+## Attribution
+
+Parts of this recipe are vendored from AppWorld (Apache-2.0). See [ATTRIBUTION.md](ATTRIBUTION.md) and [LICENSE](LICENSE).
