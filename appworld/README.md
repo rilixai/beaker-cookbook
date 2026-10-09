@@ -70,6 +70,53 @@ Each evaluator requirement becomes a pass/fail check grouped by task ID, so the 
 **Editable scope:** `code_agent.py` and `prompts/`. Scoring, bootstrap code, model config, and vendored code are fixed. Integration internals are in [`.beaker/README.md`](.beaker/README.md).
 
 
+## Beaker optimization results
+
+Beaker independently optimized eight models on the full scenario dataset. Each
+row compares the starting agent with that model's selected optimized agent on
+held-out scenarios.
+
+| Model | Starting score | Optimized score | Gain (percentage points) | Optimized cost / scenario |
+|---|---:|---:|---:|---:|
+| Gemini 3.8 Flash | 95.1% | **100.0%** | +4.9 | $0.448 |
+| DeepSeek V4.1 Flash | 86.3% | 96.3% | +10.0 | $0.118 |
+| MiMo-V2.6-Flash | 78.9% | 96.1% | +17.2 | $0.027 |
+| Claude Haiku 5.5 | 66.0% | 96.1% | +30.2 | $0.033 |
+| GPT-6 Luna | 92.3% | 93.5% | +1.2 | $0.011 |
+| Kimi K3 | 83.5% | 93.2% | +9.6 | $0.414 |
+| GLM 5.3 Flash | 36.0% | 89.3% | +53.3 | $0.033 |
+| Gemini 3.5 Flash Lite | 44.9% | 87.7% | +42.8 | $0.070 |
+
+The original GPT-6 Astra setup with high reasoning scored **100% at $0.624 per
+scenario**. Beaker improved Gemini 3.8 Flash from **95.1% to 100%**, matching
+Astra's score at **28.2% lower inference cost**. MiMo improved from **78.9% to
+96.1%** at **$0.027 per scenario**, delivering a score within 3.9 percentage
+points of Astra at **95.7% lower inference cost**.
+
+The improvements came from concrete changes to agent behavior, including:
+
+- Separating collection filters from item filters when selecting songs or other
+  items within collections.
+- Returning computed numeric answers as native numbers without extra formatting.
+- Omitting unsolicited completion answers for requests that only require an action.
+
+**How these scores were measured:** optimization used 30 training scenarios
+(90 tasks); evaluation used 19 held-out scenarios (57 tasks) from AppWorld's
+`dev` split. Scores are the combined objective, `0.8 × TGC + 0.2 × SGC`, described
+[above](#metrics). Gemini 3.8 Flash was evaluated once per scenario; the other
+models were evaluated twice, with scores averaged across repetitions. These are
+recorded demo results; small differences can reflect model variability. Cost is
+average model inference spend per scenario evaluation, including all three task
+variants, and excludes the cost of optimization. Kimi K3 and Gemini 3.5 Flash
+Lite used earlier integration builds and optimization playbooks.
+
+**Try it yourself:** follow the [quick start](#quick-start), then use the scenario
+integration and upload the full dataset with
+`uv run python .beaker/upload_dataset.py --full`, as described in
+[Beaker integrations](#beaker-integrations). The default quick-start dataset
+checks the optimization workflow on a small set; these results use the full
+dataset.
+
 ## Models
 
 `configs/model.toml` has one block per model; `--model <name>` picks one. The default is `gpt-6-luna` with low reasoning. Or use flags:

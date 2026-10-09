@@ -16,15 +16,34 @@ and enterprise automation) with a local eval you can run in minutes. Clone one, 
 baseline, then point Beaker at it and see what the first round of experiments
 finds.
 
+## AppWorld: better agents, lower costs
+
+Beaker improved the held-out scores of **all eight models** in our AppWorld
+demo by editing agent code and prompts. The evaluator stayed fixed.
+
+Our reference agent, **GPT-6 Astra with high reasoning**, scored **100%** at
+**$0.624 per scenario**. After optimization, cheaper models closed the gap:
+
+- **Gemini 3.8 Flash matched Astra's score.** Its score rose from **95.1% to
+  100%**, at **28.2% lower inference cost** ($0.448 per scenario).
+- **MiMo-V2.6-Flash approached Astra's score at a fraction of the cost.** Its
+  score rose from **78.9% to 96.1%**, at **95.7% lower inference cost**
+  ($0.027 per scenario).
+
+Measured on 19 held-out AppWorld dev scenarios, each containing three tasks.
+Cost reductions are relative to the Astra reference agent and cover inference.
+
+[Explore all eight models, evaluation details, and the recipe →](appworld/README.md#beaker-optimization-results)
+
 ## Recipes
 
 | Recipe | Status | What it is | Keys |
 |---|---|---|---|
+| [`appworld/`](appworld/) | Stable | AppWorld: an agent that drives simulated apps by writing code. Built on the OpenAI Agents SDK, scored with TGC/SGC. | `OPENAI_API_KEY` |
 | [`harvey_lab/`](harvey_lab/) | Stable | A junior-lawyer agent on Harvey's Legal Agent Benchmark: reads a case folder, writes the deliverables, gets graded criterion by criterion by an LLM judge. | `OPENROUTER_API_KEY` (optional `GITHUB_TOKEN` to fetch the corpus) |
 | [`automationbench/`](automationbench/) | Stable | Zapier AutomationBench: a tool-calling agent on `verifiers` that can read a `skills/` folder — edit the skills, rerun, watch the score move. | `OPENAI_API_KEY` (or Anthropic / Gemini, see its README) |
 | [`hotpotqa/`](hotpotqa/) | WIP | Multi-hop QA over Wikipedia. A PydanticAI agent with two tools, `retrieve_k` and `summarize`. | `OPENAI_API_KEY` |
 | [`apex_agents/`](apex_agents/) | WIP | APEX-Agents: professional knowledge-work tasks. A ReAct agent with a toolbelt, graded against a rubric by an LLM judge. | `HF_TOKEN` (gated dataset), `OPENAI_API_KEY` (agent), `GOOGLE_API_KEY` (Gemini judge) |
-| [`appworld/`](appworld/) | WIP | AppWorld: an agent that drives simulated apps by writing code. Built on the OpenAI Agents SDK, scored with TGC/SGC. | `OPENAI_API_KEY` |
 
 WIP recipes run, but the agent, splits, and scores may still change.
 

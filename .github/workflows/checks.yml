@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  UV_PYTHON: "3.14.8"
+
 jobs:
   # Lint, format, type-check, and verify each recipe builds cleanly. Each
   # recipe is its own standalone uv project (its own pyproject + uv.lock), so
@@ -34,7 +37,7 @@ jobs:
           version: "latest"
 
       - name: Install Python
-        run: uv python install
+        run: uv python install "$UV_PYTHON"
 
       # ``--locked`` fails the job if this recipe's uv.lock is stale vs its
       # pyproject — catches "forgot to ``uv lock`` after editing pyproject"
@@ -79,7 +82,7 @@ jobs:
           version: "latest"
 
       - name: Install Python
-        run: uv python install
+        run: uv python install "$UV_PYTHON"
 
       - name: uv sync (locked)
         run: uv sync --group dev --locked
