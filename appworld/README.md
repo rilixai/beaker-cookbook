@@ -63,13 +63,15 @@ Two agents, differing in what one Beaker case is and how it is scored. Both run 
 
 Both draw on the same 147 train and dev tasks. The scenario objective gives a graded signal: TGC rewards partial progress, while SGC alone would be zero whenever any variant fails.
 
-`upload_dataset.py` without a flag uploads a quick-start set (`appworld-sgc-quickstart`): the first 4 train scenarios, 3 for optimization and 1 held out. Hosted datasets change only when uploaded, so pass the dataset revision explicitly to smoke and launch.
+`upload_dataset.py` without a flag uploads a quick-start set (`appworld-sgc-quickstart`): the first 4 train scenarios, 3 for optimization and 1 held out. Hosted datasets change only when uploaded, so pass the dataset revision explicitly to smoke and launch. Uploading `--full` replaces the earlier revision under the same name; existing runs keep their original immutable revisions. Strict smoke validates structure and labeled data only; it does not execute the agent or establish benchmark quality.
 
 Each evaluator requirement becomes a pass/fail check grouped by task ID, so the optimizer sees which requirements failed.
 
 **Editable scope:** `code_agent.py` and `prompts/`. Scoring, bootstrap code, model config, and vendored code are fixed.
 
-**Execution:** each case runs in a fresh subprocess (`appworld_subprocess.py`, `appworld_case_worker.py`), because AppWorld mutates process-global state and cases cannot share an interpreter. Variants within a scenario run sequentially; separate cases run in parallel up to Beaker's concurrency limit. `appworld_setup.py` reuses local benchmark data or downloads the pinned assets, verifying checksums.
+**Execution:** each case runs in a fresh subprocess (`appworld_subprocess.py`, `appworld_case_worker.py`), because AppWorld mutates process-global state and cases cannot share an interpreter. Variants within a scenario run sequentially; separate cases run in parallel up to Beaker's concurrency limit. `appworld_setup.py` reuses local benchmark data or downloads the pinned assets, verifying checksums. Cancellation kills the worker process group, and failures keep a traceback artifact.
+
+**Tracing:** Beaker wraps candidate execution (not scoring) in the OpenAI Agents tracing adapter, so model and tool traces are kept and provider errors surface in evaluation runs. Worker traces are imported into the parent capture through the Beaker SDK's capture-adoption interfaces, so after an SDK upgrade, recheck trace import as well as results.
 
 ## Models
 
