@@ -1,72 +1,8 @@
-# App World
+# AppWorld Beaker notes
 
-This integration optimizes a combined goal-completion score. Each case runs all
-three variants of one scenario. The objective weights **Task Goal Completion
-(TGC) at 80%** and **Scenario Goal Completion (SGC) at 20%**. TGC gives partial
-credit for successful variants; SGC is 1 only if AppWorld's pinned evaluator
-passes every requirement in every variant. Evaluation is deterministic; no
-judge model is used.
+Setup, datasets, and objectives are in the [main README](../README.md#beaker-integrations). Internals:
 
-The quick-start dataset uses the first four scenarios in the official training
-split: three for optimization and one held out. The benchmark test splits are
-unused. `upload_dataset.py` validates real instructions and requirements, stages
-JSONL in a temporary directory, and uploads it to App World. Dataset
-revisions are passed explicitly to smoke and launch rather than saved in YAML.
-
-`uv run python .beaker/upload_dataset.py --full` uploads `appworld-sgc-full`
-with all 90 official training tasks (30 scenarios) for optimization and all
-57 dev tasks (19 scenarios) for evaluation. Each scenario remains one Beaker
-case. The full dataset replaces the earlier training-only revision under that
-name; existing runs retain their original immutable dataset revisions.
-
-Editable scope: `code_agent.py` and the agent prompts. The integration imports
-the candidate application's runner and uses its prompt directory. Scoring,
-bootstrap code, fixed model configuration, and vendored code are outside scope.
-The default remains `configs/model.toml`; native OpenAI Responses requests use
-Beaker's hosted provider routing when available. Selected models from any provider
-supported by Beaker's inference gateway use its Chat Completions endpoint,
-canonical model name, and run-scoped token. The gateway controls reasoning and
-sampling settings; the integration does not apply OpenAI model-family defaults
-to selected models. This applies to both scenario and task goal completion.
-
-AppWorld requires generated application modules and benchmark data beyond pip
-installation. `appworld_setup.py` reuses local data when present, otherwise
-prepares the pinned public assets in a temporary cache. It verifies the apps
-bundle SHA-256 and dataset version. It does not unpack upstream tests.
-
-Beaker uses the OpenAI Agents tracing adapter around candidate execution only.
-The runner's optional `run_config` and `raise_provider_errors` arguments preserve
-its normal defaults. Evaluation runs surface provider errors and retain model
-and tool traces in Beaker. Scoring runs after the tracing scope closes.
-
-Run commands from `appworld/` with `uv run beaker`, selecting integration
-`app_world`. Strict smoke validates structure and labeled data;
-it does not execute the agent or establish benchmark quality.
-
-## Task Goal Completion agent
-
-`AppWorld Task Goal Completion` uses `.beaker/tgc.yaml` and integration
-`appworld_tgc`. Each case is one task. Its objective is 1 only when the official
-AppWorld evaluator passes every requirement for that task, otherwise 0.
-There is no partial credit. It reuses the SGC integration's runner and tracing.
-
-`uv run python .beaker/upload_dataset.py --tgc` uploads `appworld-tgc-full`:
-90 training cases and 57 evaluation cases from the official dev split.
-Use `uv run beaker --config-file .beaker/tgc.yaml` for this agent's commands.
-
-## Parallel execution for both agents
-
-Parallel evaluation runs each case in a fresh Python subprocess through
-`appworld_subprocess.py` and `appworld_case_worker.py`. AppWorld changes
-process-global clocks, database caches, and defaults, so cases must not share
-an interpreter. Scenario variants remain sequential inside their case; separate
-cases, including repetitions of the same task, can overlap. Each case keeps its
-existing unique experiment directory and uses the candidate checkout's code.
-The pinned benchmark data cache is shared and its setup remains file-locked.
-
-The subprocess runs both the agent and deterministic AppWorld evaluation, then
-returns the existing result format. Beaker's case limit controls concurrency.
-Cancellation kills the worker process group; failures retain a traceback artifact.
-Model/tool spans and large trace artifacts are imported into the parent capture
-before temporary worker files are removed. This bridge uses the SDK's capture
-adoption interfaces, so SDK upgrades should recheck trace import as well as results.
+- **Smoke:** strict smoke checks structure and labeled data only; it does not run the agent.
+- **Isolation:** each case runs in a fresh subprocess (`appworld_subprocess.py`, `appworld_case_worker.py`) because AppWorld mutates process-global state. Variants in a scenario run sequentially; cases run in parallel. Cancellation kills the worker process group; failures keep a traceback artifact.
+- **Setup:** `appworld_setup.py` reuses local data or downloads the pinned assets, verifying checksums.
+- **Tracing:** Beaker traces candidate execution, not scoring, and provider errors surface in evaluation runs. Worker traces are imported through the Beaker SDK's capture-adoption interfaces, so after an SDK upgrade recheck trace import as well as results.
