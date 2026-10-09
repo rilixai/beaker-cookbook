@@ -113,8 +113,10 @@ hosted runs send none, and the Beaker gateway accepts `reasoning.effort`,
 `enabled`, and `exclude` but rejects a token budget. A lower output cap in
 `extra_body` is honored; a higher one cannot exceed the cap above. A call whose
 reasoning uses the whole cap without answering fails with a model error rather
-than ending the rollout as if the agent had finished, and is not retried, since
-the same request would stop in the same place. The cap can still truncate a
+than ending the rollout as if the agent had finished. The client does not retry
+that call, since the same request would stop in the same place, but a hosted run
+re-runs the whole case after any model error, up to the run's case retry limit; a
+local run scores the world as the agent left it. The cap can still truncate a
 legitimate response, so compare task accuracy and truncation when changing it.
 Hosted model requests retain per-attempt traces, and returned responses retain
 usage/cost accounting.
