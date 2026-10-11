@@ -74,18 +74,21 @@ Each evaluator requirement becomes a pass/fail check grouped by task ID, so the 
 
 Beaker independently optimized eight models on the full scenario dataset. Each
 row compares the starting agent with that model's selected optimized agent on
-held-out scenarios.
+held-out scenarios. See public sample run
+[f143790a-e33d-47d9-9e58-8d2762ba6ee9](https://app.withbeaker.ai/public/runs/f143790a-e33d-47d9-9e58-8d2762ba6ee9).
+TGC and SGC columns show starting → optimized percentages; the score columns
+show the combined objective.
 
-| Model | Starting score | Optimized score | Gain (percentage points) | Optimized cost / scenario |
-|---|---:|---:|---:|---:|
-| Gemini 3.8 Flash | 95.1% | **100.0%** | +4.9 | $0.448 |
-| DeepSeek V4.1 Flash | 86.3% | 96.3% | +10.0 | $0.118 |
-| MiMo-V2.6-Flash | 78.9% | 96.1% | +17.2 | $0.027 |
-| Claude Haiku 5.5 | 66.0% | 96.1% | +30.2 | $0.033 |
-| GPT-6 Luna | 92.3% | 93.5% | +1.2 | $0.011 |
-| Kimi K3 | 83.5% | 93.2% | +9.6 | $0.414 |
-| GLM 5.3 Flash | 36.0% | 89.3% | +53.3 | $0.033 |
-| Gemini 3.5 Flash Lite | 44.9% | 87.7% | +42.8 | $0.070 |
+| Model | TGC (starting → optimized) | SGC (starting → optimized) | Starting score | Optimized score | Gain (percentage points) | Optimized cost / scenario |
+|---|---:|---:|---:|---:|---:|---:|
+| Gemini 3.8 Flash | 96.5% → 100.0% | 89.5% → 100.0% | 95.1% | **100.0%** | +4.9 | $0.448 |
+| DeepSeek V4.1 Flash | 89.5% → 97.4% | 73.7% → 92.1% | 86.3% | 96.3% | +10.0 | $0.118 |
+| MiMo-V2.6-Flash | 81.6% → 96.5% | 68.4% → 94.7% | 78.9% | 96.1% | +17.2 | $0.027 |
+| Claude Haiku 5.5 | 69.3% → 96.5% | 52.6% → 94.7% | 66.0% | 96.1% | +30.2 | $0.033 |
+| GPT-6 Luna | 93.0% → 93.9% | 89.5% → 92.1% | 92.3% | 93.5% | +1.2 | $0.011 |
+| Kimi K3 | 86.0% → 94.7% | 73.7% → 86.8% | 83.5% | 93.2% | +9.6 | $0.414 |
+| GLM 5.3 Flash | 37.7% → 91.2% | 28.9% → 81.6% | 36.0% | 89.3% | +53.3 | $0.033 |
+| Gemini 3.5 Flash Lite | 48.2% → 88.6% | 31.6% → 84.2% | 44.9% | 87.7% | +42.8 | $0.070 |
 
 The original GPT-6 Astra setup with high reasoning scored **100% at $0.624 per
 scenario**. Beaker improved Gemini 3.8 Flash from **95.1% to 100%**, matching
