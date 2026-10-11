@@ -9,7 +9,9 @@ permissions:
   contents: read
 
 env:
-  UV_PYTHON: "3.14.8"
+  # Pin for recipes without a ``.python-version``; recipes that have one
+  # (e.g. harvey_lab, pinned to 3.12) keep their own interpreter.
+  DEFAULT_PYTHON: "3.14.8"
 
 jobs:
   # Lint, format, type-check, and verify each recipe builds cleanly. Each
@@ -37,7 +39,12 @@ jobs:
           version: "latest"
 
       - name: Install Python
-        run: uv python install "$UV_PYTHON"
+        run: |
+          if [ ! -f .python-version ]; then
+            echo "UV_PYTHON=$DEFAULT_PYTHON" >> "$GITHUB_ENV"
+            export UV_PYTHON="$DEFAULT_PYTHON"
+          fi
+          uv python install
 
       # ``--locked`` fails the job if this recipe's uv.lock is stale vs its
       # pyproject — catches "forgot to ``uv lock`` after editing pyproject"
@@ -82,7 +89,12 @@ jobs:
           version: "latest"
 
       - name: Install Python
-        run: uv python install "$UV_PYTHON"
+        run: |
+          if [ ! -f .python-version ]; then
+            echo "UV_PYTHON=$DEFAULT_PYTHON" >> "$GITHUB_ENV"
+            export UV_PYTHON="$DEFAULT_PYTHON"
+          fi
+          uv python install
 
       - name: uv sync (locked)
         run: uv sync --group dev --locked
