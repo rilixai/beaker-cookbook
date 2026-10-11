@@ -1,0 +1,91 @@
+[project]
+name = "officeqa"
+version = "0.1.0"
+description = "OfficeQA Pro recipe: a grounded-reasoning baseline agent over the U.S. Treasury Bulletin corpus with fs/REPL tools, frozen splits, and the upstream scorer."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "rilixai" }]
+dependencies = [
+  # Multi-provider LLM client; model strings are LiteLLM-style so any
+  # provider works (OpenAI, Anthropic, OpenRouter, ...).
+  "litellm>=1.74",
+  # Gated HF dataset access: questions via ``datasets``, corpus via
+  # ``huggingface_hub.snapshot_download`` (resumable, with progress bars).
+  "datasets>=3.0",
+  "huggingface_hub>=0.30",
+  "python-dotenv>=1.0",
+  # Optional web_search backend (registered only with ``--tools ...,web``).
+  "ddgs>=9.0",
+  # Cheap RAM readout for the startup concurrency check.
+  "psutil>=5.9",
+]
+
+[project.scripts]
+officeqa = "officeqa.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Standard src layout. hatchling ships everything under ``src/officeqa``,
+# including the frozen ``splits/*.txt`` id lists that ``load_split`` reads.
+[tool.hatch.build.targets.wheel]
+packages = ["src/officeqa"]
+
+[dependency-groups]
+dev = [
+  "ruff",
+  "mypy",
+  "pytest",
+  "pytest-asyncio>=0.23",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 119
+# ``reward.py`` is copied verbatim from databricks/officeqa; keep it out of
+# lint/format so diffs against upstream stay reviewable.
+extend-exclude = ["src/officeqa/evaluation/reward.py"]
+
+[tool.ruff.lint]
+ignore = ["C901", "E501"]
+select = ["C", "E", "F", "I", "W", "UP006", "UP007", "UP045"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402", "F401", "F403"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["officeqa"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+show_error_codes = true
+files = ["src/officeqa"]
+# Upstream ``reward.py`` is typed to its own standard, not this repo's.
+exclude = ["src/officeqa/evaluation/reward.py"]
+
+[[tool.mypy.overrides]]
+module = ["officeqa.evaluation.reward"]
+follow_imports = "skip"
+
+# Deps that ship without complete typing for our checks.
+[[tool.mypy.overrides]]
+module = ["litellm", "datasets", "ddgs", "psutil"]
+ignore_missing_imports = true
+follow_imports = "skip"
