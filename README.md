@@ -23,10 +23,6 @@ finds.
 | [`appworld/`](appworld/) | Stable | AppWorld: an agent that drives simulated apps by writing code. Built on the OpenAI Agents SDK, scored with TGC/SGC. | `OPENAI_API_KEY` |
 | [`harvey_lab/`](harvey_lab/) | Stable | A junior-lawyer agent on Harvey's Legal Agent Benchmark: reads a case folder, writes the deliverables, gets graded criterion by criterion by an LLM judge. | `OPENROUTER_API_KEY` (optional `GITHUB_TOKEN` to fetch the corpus) |
 | [`automationbench/`](automationbench/) | Stable | Zapier AutomationBench: a tool-calling agent on `verifiers` that can read a `skills/` folder — edit the skills, rerun, watch the score move. | `OPENAI_API_KEY` (or Anthropic / Gemini, see its README) |
-| [`hotpotqa/`](hotpotqa/) | WIP | Multi-hop QA over Wikipedia. A PydanticAI agent with two tools, `retrieve_k` and `summarize`. | `OPENAI_API_KEY` |
-| [`apex_agents/`](apex_agents/) | WIP | APEX-Agents: professional knowledge-work tasks. A ReAct agent with a toolbelt, graded against a rubric by an LLM judge. | `HF_TOKEN` (gated dataset), `OPENAI_API_KEY` (agent), `GOOGLE_API_KEY` (Gemini judge) |
-
-WIP recipes run, but the agent, splits, and scores may still change.
 
 Each recipe is a standalone uv project (own `pyproject.toml` + `uv.lock`, no
 root workspace) and comes with:
@@ -44,15 +40,16 @@ You need [`uv`](https://docs.astral.sh/uv/) and Python 3.12 or higher. Pick a
 recipe, install it, set your keys, and you're running:
 
 ```bash
-cd hotpotqa                      # or harvey_lab / apex_agents / appworld / automationbench
+cd appworld                      # or harvey_lab / automationbench
 uv sync --group dev
 export OPENAI_API_KEY=sk-...
-uv run hotpotqa evaluate --split test --test-size 20 --output-dir hotpotqa_run
 ```
+
+Then run the commands in that recipe's README.
 
 Keys are read from environment variables. `automationbench/` also reads a
 `.env` in its own folder (`cp .env.example .env`). Every recipe README covers
-the knobs: model, dataset size, retrieval mode, and so on.
+the knobs: model, dataset size, and so on.
 
 ## Development
 
