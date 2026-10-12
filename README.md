@@ -16,25 +16,6 @@ and enterprise automation) with a local eval you can run in minutes. Clone one, 
 baseline, then point Beaker at it and see what the first round of experiments
 finds.
 
-## AppWorld: better agents, lower costs
-
-Beaker improved the held-out scores of **all eight models** in our AppWorld
-demo by editing agent code and prompts. The evaluator stayed fixed.
-
-Our reference agent, **GPT-6 Astra with high reasoning**, scored **100%** at
-**$0.624 per scenario**. After optimization, cheaper models closed the gap:
-
-- **Gemini 3.8 Flash matched Astra's score.** Its score rose from **95.1% to
-  100%**, at **28.2% lower inference cost** ($0.448 per scenario).
-- **MiMo-V2.6-Flash approached Astra's score at a fraction of the cost.** Its
-  score rose from **78.9% to 96.1%**, at **95.7% lower inference cost**
-  ($0.027 per scenario).
-
-Measured on 19 held-out AppWorld dev scenarios, each containing three tasks.
-Cost reductions are relative to the Astra reference agent and cover inference.
-
-[Explore all eight models, evaluation details, and the recipe →](appworld/README.md#beaker-optimization-results)
-
 ## Recipes
 
 | Recipe | Status | What it is | Keys |
