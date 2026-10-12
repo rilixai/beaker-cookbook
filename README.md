@@ -18,11 +18,11 @@ finds.
 
 ## Recipes
 
-| Recipe | Status | What it is | Keys |
-|---|---|---|---|
-| [`appworld/`](appworld/) | Stable | AppWorld: an agent that drives simulated apps by writing code. Built on the OpenAI Agents SDK, scored with TGC/SGC. | `OPENAI_API_KEY` |
-| [`harvey_lab/`](harvey_lab/) | Stable | A junior-lawyer agent on Harvey's Legal Agent Benchmark: reads a case folder, writes the deliverables, gets graded criterion by criterion by an LLM judge. | `OPENROUTER_API_KEY` (optional `GITHUB_TOKEN` to fetch the corpus) |
-| [`automationbench/`](automationbench/) | Stable | Zapier AutomationBench: a tool-calling agent on `verifiers` that can read a `skills/` folder — edit the skills, rerun, watch the score move. | `OPENAI_API_KEY` (or Anthropic / Gemini, see its README) |
+| Recipe | What it is | Keys |
+|---|---|---|
+| [`appworld/`](appworld/) | AppWorld: an agent that drives simulated apps by writing code. Built on the OpenAI Agents SDK, scored with TGC/SGC. | `OPENAI_API_KEY` |
+| [`harvey_lab/`](harvey_lab/) | A junior-lawyer agent on Harvey's Legal Agent Benchmark: reads a case folder, writes the deliverables, gets graded criterion by criterion by an LLM judge. | `OPENROUTER_API_KEY` (optional `GITHUB_TOKEN` to fetch the corpus) |
+| [`automationbench/`](automationbench/) | Zapier AutomationBench: a tool-calling agent on `verifiers` that can read a `skills/` folder — edit the skills, rerun, watch the score move. | `OPENAI_API_KEY` (or Anthropic / Gemini, see its README) |
 
 Each recipe is a standalone uv project (own `pyproject.toml` + `uv.lock`, no
 root workspace) and comes with:
