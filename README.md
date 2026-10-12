@@ -23,6 +23,7 @@ finds.
 | [`appworld/`](appworld/) | AppWorld: an agent that drives simulated apps by writing code. Built on the OpenAI Agents SDK, scored with TGC/SGC. | `OPENAI_API_KEY` |
 | [`harvey_lab/`](harvey_lab/) | A junior-lawyer agent on Harvey's Legal Agent Benchmark: reads a case folder, writes the deliverables, gets graded criterion by criterion by an LLM judge. | `OPENROUTER_API_KEY` (optional `GITHUB_TOKEN` to fetch the corpus) |
 | [`automationbench/`](automationbench/) | Zapier AutomationBench: a tool-calling agent on `verifiers` that can read a `skills/` folder — edit the skills, rerun, watch the score move. | `OPENAI_API_KEY` (or Anthropic / Gemini, see its README) |
+| [`healthbench/`](healthbench/) | **WIP.** OpenAI HealthBench: a health-conversation agent answers realistic medical chats, graded criterion by criterion against physician-written rubrics by an LLM judge. | `OPENAI_API_KEY` |
 
 Each recipe is a standalone uv project (own `pyproject.toml` + `uv.lock`, no
 root workspace) and comes with:
@@ -40,7 +41,7 @@ You need [`uv`](https://docs.astral.sh/uv/) and Python 3.12 or higher. Pick a
 recipe, install it, set your keys, and you're running:
 
 ```bash
-cd appworld                      # or harvey_lab / automationbench
+cd appworld                      # or harvey_lab / automationbench / healthbench
 uv sync --group dev
 export OPENAI_API_KEY=sk-...
 ```
