@@ -7,7 +7,7 @@
   testing fixes, and compounding the improvements that work.
 </p>
 <p align="center">
-  <a href="https://app.withbeaker.ai/?utm_source=cookbook&utm_medium=github">
+  <a href="https://app.withbeaker.ai/auth/sign-up?utm_source=cookbook&utm_medium=github">
     <img src="assets/try-for-free.svg" width="280" alt="Try Beaker for free">
   </a>
 </p>
@@ -15,16 +15,16 @@
   <a href="https://www.withbeaker.ai/docs/getting-started/getting-started">Tutorial</a> ·
   <a href="https://www.withbeaker.ai/docs">Docs</a> ·
   <a href="https://withbeaker.ai">Website</a> ·
-  <a href="https://www.withbeaker.ai/blog/tune-the-agent">Blog: tuning 8 models</a>
+  <a href="https://www.withbeaker.ai/blog/tune-the-agent">Blog</a>
 </p>
 
 Every recipe in this cookbook is a real agent on a real benchmark, including legal
 research, knowledge work, app control, and enterprise automation.
 
-## Run it with Beaker
+## Run this cookbook with Beaker
 
 1. Fork this repo.
-2. [Sign up for Beaker](https://app.withbeaker.ai/?utm_source=cookbook&utm_medium=github) and connect your fork.
+2. [Sign up for Beaker](https://app.withbeaker.ai/auth/sign-up?utm_source=cookbook&utm_medium=github) and connect your fork.
 3. Follow the [tutorial](https://www.withbeaker.ai/docs/getting-started/getting-started).
 
 ## Recipes
@@ -39,5 +39,5 @@ Each recipe is a standalone uv project with its own README covering setup, comma
 
 ## Stay in the loop
 
-[**Try Beaker for free →**](https://app.withbeaker.ai/?utm_source=cookbook&utm_medium=github), then star the repo and follow
+[**Try Beaker for free →**](https://app.withbeaker.ai/auth/sign-up?utm_source=cookbook&utm_medium=github), then star the repo and follow
 [@withbeaker on X](https://x.com/withbeaker) for Beaker news.
