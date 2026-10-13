@@ -7,7 +7,7 @@
   testing fixes, and compounding the improvements that work.
 </p>
 <p align="center">
-  <a href="https://app.withbeaker.ai/auth/sign-up?utm_source=cookbook&utm_medium=github">
+  <a href="https://app.withbeaker.ai/auth/sign-up?utm_source=cookbook&utm_medium=github&utm_content=button">
     <img src="assets/try-for-free.svg" width="280" alt="Try Beaker for free">
   </a>
 </p>
@@ -24,7 +24,7 @@ research, knowledge work, app control, and enterprise automation.
 ## Run this cookbook with Beaker
 
 1. Fork this repo.
-2. [Sign up for Beaker](https://app.withbeaker.ai/auth/sign-up?utm_source=cookbook&utm_medium=github) and connect your fork.
+2. [Sign up for Beaker](https://app.withbeaker.ai/auth/sign-up?utm_source=cookbook&utm_medium=github&utm_content=steps) and connect your fork.
 3. Follow the [tutorial](https://www.withbeaker.ai/docs/getting-started/getting-started).
 
 ## Recipes
@@ -39,5 +39,5 @@ Each recipe is a standalone uv project with its own README covering setup, comma
 
 ## Stay in the loop
 
-[**Try Beaker for free →**](https://app.withbeaker.ai/auth/sign-up?utm_source=cookbook&utm_medium=github), then star the repo and follow
+[**Try Beaker for free →**](https://app.withbeaker.ai/auth/sign-up?utm_source=cookbook&utm_medium=github&utm_content=footer), then star the repo and follow
 [@withbeaker on X](https://x.com/withbeaker) for Beaker news.
