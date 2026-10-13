@@ -25,7 +25,7 @@ research, knowledge work, app control, and enterprise automation.
 
 1. Fork this repo.
 2. [Sign up for Beaker](https://app.withbeaker.ai/?utm_source=cookbook&utm_medium=github) and connect your fork.
-3. Follow the [tutorial](https://www.withbeaker.ai/docs/getting-started/getting-started) (AppWorld).
+3. Follow the [tutorial](https://www.withbeaker.ai/docs/getting-started/getting-started).
 
 ## Recipes
 
