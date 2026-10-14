@@ -145,9 +145,9 @@ async def test_run_case_displays_changes_once_and_native_scoring_uses_full_conte
     assert score.objective == pytest.approx(0.8 * 2 / 3)
     assert [check.verdict for check in score.checks] == ["pass", "fail", "pass"]
     assert all(check.expected is None and check.predicted is None for check in score.checks)
-    assert "Condition gmail_message_sent_to evaluated to False" in score.checks[1].message
-    assert '"expected_to": "missing@example.com"' in score.checks[1].message
-    assert '"all_recipients"' in score.checks[1].message
+    assert "Required conditions:" in score.checks[1].message
+    assert 'Expected to: "missing@example.com"' in score.checks[1].message
+    assert "All recipients:" in score.checks[1].message
     assert score == await integration.score_case(
         case=case, result=CaseResult(output=None, context=result.context), case_files_dir=tmp_path
     )
@@ -229,7 +229,7 @@ def test_native_failure_diagnostics_across_apps_without_rerunning_assertions(mon
     messages = [failure_trace(assertion, events[id(assertion)]) for assertion in assertions]
     assert "19200" in messages[0] and "19500" in messages[0]
     assert "19100" in messages[1] and "19500" in messages[1]
-    assert '"actual": "19200"' in messages[2] and '"expected": "19500"' in messages[2]
+    assert '"19200" compared with "19500": no match' in messages[2]
     assert "19100" not in messages[0] and "a@example.com" not in messages[1]
     assert all(len(message.encode("utf-8")) <= 6_000 for message in messages)
 
@@ -273,5 +273,71 @@ def test_negative_alias_and_large_unicode_diagnostics_are_bounded() -> None:
     with capture_assertion_returns(world, [assertion]) as events:
         assert not AssertionRegistry.check(world, assertion)
     message = failure_trace(assertion, events[id(assertion)])
-    assert "forbidden" in message and "returned False" in message and "truncated" in message
+    assert 'compared with "forbidden": match' in message and "truncated" in message
+    assert "overall failure" in message and "```python" not in message
     assert len(message.encode("utf-8")) <= 6_000
+
+
+@pytest.mark.parametrize("row_count", [4, 12])
+def test_row_failure_summary_shows_partial_comparisons_and_accurate_row_count(row_count) -> None:
+    assertion = {
+        "type": "google_sheets_row_exists",
+        "spreadsheet_id": "ss_inv_tracker",
+        "worksheet_id": "ws_pending",
+        "cell_contains": {"Invoice": "GL-88210", "Amount": "11,340.5", "Notes": "REVIEW"},
+    }
+    invoices = ["GL-88210"] + ["OTHER"] * (row_count - 3) + ["SP-0091", "AS-7744"]
+    world = WorldState(
+        google_sheets={
+            "rows": [
+                {
+                    "spreadsheet_id": "ss_inv_tracker",
+                    "worksheet_id": "ws_pending",
+                    "row_id": index,
+                    "cells": {"Invoice": invoice, "Amount": "wrong amount", "Notes": "REVIEW"},
+                }
+                for index, invoice in enumerate(invoices)
+            ]
+        }
+    )
+    with capture_assertion_returns(world, [assertion]) as events:
+        assert not AssertionRegistry.check(world, assertion)
+    message = failure_trace(assertion, events[id(assertion)])
+    assert '"Invoice": "GL-88210", "Amount": "11,340.5", "Notes": "REVIEW"' in message
+    assert '"SP-0091" compared with "GL-88210": no match' in message
+    assert '"AS-7744" compared with "GL-88210": no match' in message
+    assert f"Rows: {row_count} items (contents not captured)" in message
+    assert "not exhaustive" in message and "overall failure" in message
+    assert "_contains_normalized" not in message and "```" not in message and "<Row>" not in message
+    # The invoice actually exists in an earlier row, but those comparisons
+    # were evicted. The summary must not claim that the invoice is absent.
+    assert "missing" not in message and "absent" not in message
+
+
+def test_failure_summary_without_captured_events_keeps_requirements_and_states_limit() -> None:
+    message = failure_trace({"type": "gmail_message_sent_to", "to": "a@example.com", "scored": True}, [])
+    assert 'To: "a@example.com"' in message and "not captured" in message
+    assert "scored" not in message and "Observed comparisons" not in message
+
+
+def test_failure_summary_keeps_observations_that_differ_from_same_named_requirement() -> None:
+    message = failure_trace(
+        {"type": "example", "value": "required"},
+        [{"function": "example", "returned": False, "values": {"value": "observed"}}],
+    )
+    assert 'Value: "required"' in message and 'Value: "observed"' in message
+
+
+def test_failure_summary_total_size_is_bounded_with_many_unicode_observations() -> None:
+    message = failure_trace(
+        {"type": "example"},
+        [
+            {
+                "function": "example",
+                "returned": False,
+                "values": {f"value_{index}": "界" * 400 for index in range(20)},
+            }
+        ],
+    )
+    assert len(message.encode("utf-8")) <= 6_000 and "diagnostic truncated" in message
+    assert "Partial diagnostic:" in message and "overall failure" in message

@@ -13,8 +13,10 @@ value pairs. Check names include the assertion type and complete parameter value
 resolving record IDs to readable labels when available. Descriptions include the
 handler's first docstring line and the full condition parameters with original IDs;
 scoring metadata (`scored`, `excluded`) is omitted from both names and descriptions.
-Failed Checks show bounded native evaluator code and local-value
-snapshots captured during scoring, without app-specific rules or inferred causes.
+Failed Checks show a readable summary of required conditions, recorded value
+comparisons, and the latest evaluator observations captured during scoring.
+Messages omit Python code and function traces, and explicitly note that the
+diagnostic is partial; it does not infer a cause from the last comparisons alone.
 **OUTPUT** shows app changes once per sample with size limits and omission markers.
 The full final state remains in `context` for native scoring.
 

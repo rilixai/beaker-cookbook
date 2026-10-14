@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import json
-import linecache
 import sys
 from collections import defaultdict, deque
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from inspect import CO_ASYNC_GENERATOR, CO_GENERATOR
-from textwrap import dedent
 from types import FrameType
 from typing import Any
 
@@ -78,11 +76,15 @@ def capture_assertion_returns(
                     }
                     captured[identity].append(
                         {
-                            "file": frame.f_code.co_filename,
-                            "line": frame.f_lineno,
                             "function": frame.f_code.co_name,
                             "returned": result,
                             "values": values,
+                            "collection_sizes": {
+                                name: len(value)
+                                for name, value in frame.f_locals.items()
+                                if name not in {"world", "assertion"}
+                                and isinstance(value, (list, tuple, set, frozenset, Mapping))
+                            },
                         }
                     )
                     break
@@ -100,24 +102,77 @@ def capture_assertion_returns(
             sys.setprofile(previous)
 
 
-def failure_trace(assertion: Mapping[str, Any], events: Iterable[Mapping[str, Any]]) -> str:
-    parts = [f"Condition {assertion['type']} evaluated to False."]
-    for event in events:
-        source = dedent(
-            "".join(
-                linecache.getline(event["file"], line) for line in range(max(1, event["line"] - 2), event["line"] + 1)
-            )
-        ).strip()
-        parts.append(
-            f"{event['function']} returned {event['returned']}\n"
-            f"```python\n{source}\n```\n"
-            "Local values (bounded execution snapshot):\n"
-            + json.dumps(event["values"], ensure_ascii=False, indent=2, default=str)
-        )
-    text = "\n\n".join(parts)
-    encoded = text.encode("utf-8")
-    return (
-        text
-        if len(encoded) <= 6_000
-        else encoded[:5_960].decode("utf-8", errors="ignore") + "\n… diagnostic truncated"
+def _label(name: str) -> str:
+    return {"col": "Column", "expected_val": "Required value", "cell_value": "Observed value"}.get(
+        name, name.replace("_", " ").capitalize()
     )
+
+
+def _display(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def failure_trace(assertion: Mapping[str, Any], events: Iterable[Mapping[str, Any]]) -> str:
+    """Render requirements and recorded evidence without guessing a failure cause."""
+    snapshots = list(events)
+    requirements = [
+        f"- {_label(name)}: {_display(_brief(value))}"
+        for name, value in assertion.items()
+        if name not in {"type", "scored", "excluded"}
+    ]
+    parts = ["Required conditions:\n" + "\n".join(requirements)] if requirements else []
+    comparisons = []
+    for event in snapshots:
+        # These shared helpers compare values across apps. A helper match can
+        # also violate a negative assertion; do not label it a Check pass/fail.
+        function = event["function"]
+        if function != "_cell_values_equal" and not function.startswith("_contains_"):
+            continue
+        values = event["values"]
+        for observed, required in (("actual", "expected"), ("haystack", "needle"), ("hay", "ndl")):
+            if observed in values and required in values:
+                comparisons.append(
+                    f"- {_display(values[observed])} compared with {_display(values[required])}: "
+                    + ("match" if event["returned"] else "no match")
+                )
+                break
+    if comparisons:
+        parts.append("Observed comparisons (values may be normalized):\n" + "\n".join(comparisons))
+    if snapshots:
+        latest = snapshots[-1]
+        observations = []
+        for name, value in latest["values"].items():
+            if value is None or name in {"prefix", "suffix", "match"}:
+                continue
+            if name in assertion and value == _brief(assertion[name]):
+                continue
+            count = latest.get("collection_sizes", {}).get(name)
+            if (
+                isinstance(value, list)
+                and value
+                and all(
+                    isinstance(item, str) and ((item.startswith("<") and item.endswith(">")) or item.startswith("… "))
+                    for item in value
+                )
+            ):
+                rendered = f"{count} items (contents not captured)" if count is not None else "contents not captured"
+            else:
+                rendered = _display(value)
+            observations.append(f"- {_label(name)}: {rendered}")
+        if observations:
+            parts.append("Latest evaluator observations:\n" + "\n".join(observations))
+    else:
+        parts.append("Detailed execution evidence was not captured; see OUTPUT for observed app changes.")
+    text = "\n\n".join(parts)
+    limit_notice = (
+        "\n\nPartial diagnostic: the comparisons shown are not exhaustive and do not by themselves explain "
+        "the overall failure. Long values and collections may be shortened."
+        if snapshots
+        else ""
+    )
+    encoded = text.encode("utf-8")
+    budget = 6_000 - len(limit_notice.encode("utf-8"))
+    if len(encoded) > budget:
+        marker = "\n… diagnostic truncated"
+        text = encoded[: budget - len(marker.encode("utf-8"))].decode("utf-8", errors="ignore") + marker
+    return text + limit_notice

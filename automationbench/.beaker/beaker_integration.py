@@ -19,8 +19,8 @@ world state so each check reads as ``salesforce_campaign_member_exists ·
 contact_id=David Park · campaign_id=Q1 Product Launch Webinar`` rather than a
 dict of ids. These Checks verify conditions, rather than compare field values:
 their complete parameters are preserved in ``description``, with no
-``expected``/``predicted`` pair. Failed conditions carry bounded native evaluator
-code and local-value snapshots in ``message``, captured during trusted scoring.
+``expected``/``predicted`` pair. Failed conditions carry bounded readable summaries
+of comparisons and evaluator observations in ``message``, captured during trusted scoring.
 The app diff is shown once, never repeated on individual Checks.
 
 Model calls are traced by subclassing the verifiers client (see
