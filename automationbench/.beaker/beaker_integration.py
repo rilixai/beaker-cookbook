@@ -6,8 +6,9 @@ by name, run the harness ``run_one`` path, and score the benchmark's
 deterministic assertion metrics.
 
 Contract: the dataset row's ``expected`` holds the task's assertion list
-(``{"assertions": [...]}``), ``run_case`` returns no answer and reports the
-final world state in ``CaseResult.context["end_state"]``, and ``score_case``
+(``{"assertions": [...]}``), ``run_case`` exposes bounded app changes as the
+observed output and reports the final world state separately in
+``CaseResult.context["end_state"]``. ``score_case``
 runs the benchmark's own ``partial_credit`` rubric against that state,
 emitting one ``Check`` per assertion so the optimizer sees which requirements
 failed.
@@ -16,11 +17,11 @@ Assertions reference simulated records by opaque id (``"contact_id":
 "003xx000004MNO1"``); the scorer resolves those against the initial and end
 world state so each check reads as ``salesforce_campaign_member_exists ·
 contact_id=David Park · campaign_id=Q1 Product Launch Webinar`` rather than a
-dict of ids. Each check also carries the assertion handler's docstring as
-``description``, the raw assertion params as ``expected`` and, when it failed,
-a before/after diff of the targeted app's records as ``predicted`` (see
-``world_diff.py``) so a reader sees what the agent actually did there without
-replaying the trace.
+dict of ids. These Checks verify conditions, rather than compare field values:
+their complete parameters are preserved in ``description``, with no
+``expected``/``predicted`` pair. Failed Gmail sent-message checks carry scoped
+observations in ``message``; other failures retain a general explanation.
+The app diff is shown once in OUTPUT, never repeated on individual Checks.
 
 Model calls are traced by subclassing the verifiers client (see
 ``_TracedChatCompletionsClient`` and ``_TracedAnthropicClient``); the verifiers
@@ -42,6 +43,7 @@ from anthropic import AsyncAnthropic
 from automationbench.clients import StreamingAnthropicClient
 from automationbench.domains import get_combined_dataset
 from automationbench.rubric import partial_credit
+from automationbench.rubric.assertions.gmail import _extract_email_address, _message_body_text
 from automationbench.rubric.registry import AssertionRegistry
 from automationbench.schema.world import WorldState
 from beaker import (
@@ -338,9 +340,14 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
         # The scorer needs the error and the end state; the model/tool turns are
         # already in the trace via the traced Chat Completions or Anthropic client.
         stage.output({"error": error, "messages": len(completion)})
+        observed = None
+        if isinstance(end_state, Mapping):
+            initial = _authored_initial_states()[sample.task_name]
+            initial_world = WorldState(**initial) if initial else None
+            observed = ServiceDiffs(initial, initial_world, end_state).to_output()
         return CaseResult(
-            output=None,
-            output_kind="none",
+            output=to_json_safe(observed),
+            output_kind="record" if observed is not None else "none",
             context={
                 "task_name": sample.task_name,
                 "domain": sample.domain,
@@ -396,13 +403,55 @@ def _description_for(assertion_type: str) -> str | None:
     return next((line.strip() for line in doc.splitlines() if line.strip()), None)
 
 
+def _gmail_failure_message(world: WorldState, params: Mapping[str, Any]) -> str:
+    """Bounded observations only; never infer which predicate failed."""
+    raw_to = params.get("to") or []
+    wanted = {_extract_email_address(addr) for addr in (raw_to if isinstance(raw_to, list) else [raw_to])}
+    sent = [m for m in world.gmail.messages if "SENT" in m.label_ids]
+    scoped = [
+        m
+        for m in sent
+        if (not wanted or wanted <= {_extract_email_address(addr) for addr in m.to + m.cc})
+        and (not params.get("thread_id") or m.thread_id == params["thread_id"])
+        and (
+            not params.get("to_contains")
+            or any(str(params["to_contains"]).lower() in addr.lower() for addr in m.to + m.cc)
+        )
+    ]
+    body_check = any("body" in key or key == "text" for key in params)
+    subject_check = any(key.startswith("subject") for key in params)
+    if scoped and (body_check or subject_check):
+        observed: dict[str, Any] = {
+            "messages": [
+                {
+                    "to": [clip(addr, 80) for addr in m.to[:3]],
+                    "cc": [clip(addr, 80) for addr in m.cc[:3]],
+                    **({"subject": clip(m.subject or "", 200)} if subject_check else {}),
+                    **({"body_excerpt": clip(_message_body_text(m), 200)} if body_check else {}),
+                }
+                for m in scoped[:3]
+            ]
+        }
+    else:
+        observed = {
+            "sent_recipients": sorted(
+                {
+                    _extract_email_address(addr)
+                    for m in (scoped or ([] if params.get("thread_id") else sent))
+                    for addr in m.to + m.cc
+                }
+            )[:10]
+        }
+    return "Observed sent emails (bounded excerpts):\n" + clip(json.dumps(observed, ensure_ascii=True), 4_000)
+
+
 def _check(
     outcome: Mapping[str, Any],
     *,
     error: str | None,
     entities: Mapping[str, str],
     held_initially: bool = False,
-    diffs: ServiceDiffs | None = None,
+    world: WorldState | None = None,
 ) -> Check:
     assertion_type = str(outcome["type"])
     params = dict(outcome.get("params") or {})
@@ -418,7 +467,14 @@ def _check(
         if k not in _META_KEYS
     ]
     name = " · ".join([assertion_type, *rendered])
-    expected = {k: to_json_safe(v) for k, v in params.items() if k not in _META_KEYS}
+    requirements = {k: to_json_safe(v) for k, v in params.items() if k not in _META_KEYS}
+    description = _description_for(assertion_type)
+    if requirements:
+        description = "\n".join(
+            part
+            for part in (description, "Condition parameters: " + json.dumps(requirements, ensure_ascii=False))
+            if part
+        )
     if excluded:
         message = (
             "excluded from scoring by the task author"
@@ -431,18 +487,22 @@ def _check(
         message = (
             "satisfied in the initial state; broken by the run" if held_initially else "not satisfied by the end state"
         ) + (f" (rollout error: {error})" if error else "")
-    # Only failed, scored checks carry the diff: that is where a reader needs
-    # to know what the agent did in the app without replaying the trace.
-    predicted = diffs.get(service) if diffs is not None and not passed and not excluded else None
+    if not passed and not excluded and world is not None:
+        if (
+            service == "gmail"
+            and "draft" not in assertion_type
+            and ("sent" in assertion_type or "body_contains" in assertion_type)
+        ):
+            message += "\n" + _gmail_failure_message(world, params)
+        else:
+            message += "; see OUTPUT for observed app changes"
     return Check(
         name=name,
         verdict="pass" if passed else "fail",
         message=message,
         group=service,
         informational=excluded,
-        description=_description_for(assertion_type),
-        expected=expected,
-        predicted=predicted,
+        description=description,
     )
 
 
@@ -467,16 +527,16 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
     held_initially = [
         initial_world is not None and bool(AssertionRegistry.check(initial_world, a)) for a in assertions
     ]
-    diffs: ServiceDiffs | None = None
+    world: WorldState | None = None
     if isinstance(end_state, Mapping):
+        world = WorldState(**end_state)
         state: dict[str, Any] = {
             "info": {"assertions": assertions},
-            "world": WorldState(**end_state),
+            "world": world,
             "initial_state": initial_state,
         }
         partial = float(partial_credit(state))
         outcomes: list[Mapping[str, Any]] = list(state.get("_assertion_results") or [])
-        diffs = ServiceDiffs(initial_state, initial_world, end_state)
     elif not context:
         # Beaker sheds ``context`` when a case result is over its wire limit;
         # an absent context is not a failed case.
@@ -501,7 +561,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
         field_scores=scores,
         objective=objective_score(scores, field_weights=FIELD_WEIGHTS),
         checks=tuple(
-            _check(outcome, error=error, entities=entities, held_initially=held, diffs=diffs)
+            _check(outcome, error=error, entities=entities, held_initially=held, world=world)
             for outcome, held in zip(outcomes, held_initially, strict=True)
         ),
     )

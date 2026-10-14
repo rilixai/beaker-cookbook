@@ -8,6 +8,11 @@ This present recipe runs the benchmark one task at a time (`run_one`). The agent
 > working `beaker.yaml` and `beaker_integration.py`; there is nothing to write
 > before pointing Beaker at it.
 
+Beaker displays assertion conditions as **Checks**, without Expected/Predicted
+value pairs. Failed sent-email Checks add bounded, scoped observations in their
+message. **OUTPUT** shows app changes once per sample, with size limits and
+omission markers; the full final state remains in `context` for native scoring.
+
 ## Quick start
 
 ```bash
