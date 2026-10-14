@@ -9,7 +9,11 @@ This present recipe runs the benchmark one task at a time (`run_one`). The agent
 > before pointing Beaker at it.
 
 Beaker displays assertion conditions as **Checks**, without Expected/Predicted
-value pairs. Failed Checks show bounded native evaluator code and local-value
+value pairs. Check names include the assertion type and complete parameter values,
+resolving record IDs to readable labels when available. Descriptions include the
+handler's first docstring line and the full condition parameters with original IDs;
+scoring metadata (`scored`, `excluded`) is omitted from both names and descriptions.
+Failed Checks show bounded native evaluator code and local-value
 snapshots captured during scoring, without app-specific rules or inferred causes.
 **OUTPUT** shows app changes once per sample with size limits and omission markers.
 The full final state remains in `context` for native scoring.

@@ -68,7 +68,7 @@ from pydantic import BaseModel, Field, field_validator
 from verifiers.clients import Client, OpenAIChatCompletionsClient
 from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
 from verifiers.types import ClientConfig
-from world_diff import ServiceDiffs, clip, service_for
+from world_diff import ServiceDiffs, service_for
 
 from automationbench_skills.clients import DEFAULT_MODEL_REQUEST_TIMEOUT, CostTrackingChatCompletionsClient
 from automationbench_skills.data.tasks import Sample, load_samples
@@ -419,9 +419,10 @@ def _check(
     service = service_for(assertion_type)
 
     # ``type · key=value``; an id is swapped for the record's label when the
-    # world state knows it ("David Park" rather than "003xx000004MNO1").
+    # world state knows it ("David Park" rather than "003xx000004MNO1"). Keep
+    # values complete so distinct requirements cannot collapse to one name.
     rendered = [
-        f"{k}={clip(entities.get(str(v), v if isinstance(v, str) else json.dumps(to_json_safe(v), default=str)))}"
+        f"{k}={entities.get(str(v), v if isinstance(v, str) else json.dumps(to_json_safe(v), ensure_ascii=False, default=str))}"
         for k, v in params.items()
         if k not in _META_KEYS
     ]

@@ -22,6 +22,51 @@ from assertion_diagnostics import capture_assertion_returns, failure_trace  # no
 from world_diff import OUTPUT_MAX_BYTES, ServiceDiffs  # noqa: E402
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "界" * 80 + " final requirement",
+        ["界" * 80, "final requirement"],
+        {"text": "界" * 80, "suffix": "final requirement"},
+    ],
+)
+def test_check_names_preserve_complete_parameter_values(value) -> None:
+    check = integration._check(
+        {
+            "type": "slack_message_exists",
+            "passed": False,
+            "params": {"text_contains": value, "scored": True, "excluded": False},
+        },
+        error=None,
+        entities={},
+    )
+    assert "界" * 80 in check.name and "final requirement" in check.name
+    assert "…" not in check.name and "scored=" not in check.name and "excluded=" not in check.name
+    assert json.loads(check.description.split("Condition parameters: ", 1)[1]) == {"text_contains": value}
+
+
+def test_long_entity_labels_and_distinct_requirement_suffixes_survive_in_names() -> None:
+    label = "Channel " + "a" * 80 + " final label"
+    prefix = "Shared requirement " + "b" * 80
+    checks = [
+        integration._check(
+            {
+                "type": "slack_message_exists",
+                "passed": True,
+                "params": {"channel": "c1", "text_contains": prefix + suffix},
+            },
+            error=None,
+            entities={"c1": label},
+        )
+        for suffix in (" first", " second")
+    ]
+    assert checks[0].name != checks[1].name
+    assert all(f"channel={label}" in check.name for check in checks)
+    assert checks[0].name.endswith(" first") and checks[1].name.endswith(" second")
+    assert all('"channel": "c1"' in check.description for check in checks)
+    assert all(check.description.startswith("Check") for check in checks)
+
+
 @pytest.mark.parametrize(("passed", "excluded"), [(True, False), (False, False), (False, True)])
 @pytest.mark.parametrize(
     ("assertion_type", "params"),
