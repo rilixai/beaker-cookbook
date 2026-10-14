@@ -19,8 +19,8 @@ world state so each check reads as ``salesforce_campaign_member_exists ·
 contact_id=David Park · campaign_id=Q1 Product Launch Webinar`` rather than a
 dict of ids. These Checks verify conditions, rather than compare field values:
 their complete parameters are preserved in ``description``, with no
-``expected``/``predicted`` pair. All failed conditions retain a general
-explanation in ``message`` and refer to the observed app changes in OUTPUT.
+``expected``/``predicted`` pair. Failed conditions carry bounded native evaluator
+code and local-value snapshots in ``message``, captured during trusted scoring.
 The app diff is shown once, never repeated on individual Checks.
 
 Model calls are traced by subclassing the verifiers client (see
@@ -40,6 +40,7 @@ from typing import Any
 
 import verifiers as vf
 from anthropic import AsyncAnthropic
+from assertion_diagnostics import capture_assertion_returns, failure_trace
 from automationbench.clients import StreamingAnthropicClient
 from automationbench.domains import get_combined_dataset
 from automationbench.rubric import partial_credit
@@ -409,6 +410,7 @@ def _check(
     entities: Mapping[str, str],
     held_initially: bool = False,
     world: WorldState | None = None,
+    diagnostic: str | None = None,
 ) -> Check:
     assertion_type = str(outcome["type"])
     params = dict(outcome.get("params") or {})
@@ -444,7 +446,9 @@ def _check(
         message = (
             "satisfied in the initial state; broken by the run" if held_initially else "not satisfied by the end state"
         ) + (f" (rollout error: {error})" if error else "")
-    if not passed and not excluded and world is not None:
+    if not passed and diagnostic:
+        message += "\n\n" + diagnostic
+    elif not passed and not excluded and world is not None:
         message += "; see OUTPUT for observed app changes"
     return Check(
         name=name,
@@ -478,6 +482,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
         initial_world is not None and bool(AssertionRegistry.check(initial_world, a)) for a in assertions
     ]
     world: WorldState | None = None
+    diagnostics: Mapping[int, Any] = {}
     if isinstance(end_state, Mapping):
         world = WorldState(**end_state)
         state: dict[str, Any] = {
@@ -485,7 +490,8 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
             "world": world,
             "initial_state": initial_state,
         }
-        partial = float(partial_credit(state))
+        with capture_assertion_returns(world, assertions) as diagnostics:
+            partial = float(partial_credit(state))
         outcomes: list[Mapping[str, Any]] = list(state.get("_assertion_results") or [])
     elif not context:
         # Beaker sheds ``context`` when a case result is over its wire limit;
@@ -511,8 +517,17 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
         field_scores=scores,
         objective=objective_score(scores, field_weights=FIELD_WEIGHTS),
         checks=tuple(
-            _check(outcome, error=error, entities=entities, held_initially=held, world=world)
-            for outcome, held in zip(outcomes, held_initially, strict=True)
+            _check(
+                outcome,
+                error=error,
+                entities=entities,
+                held_initially=held,
+                world=world,
+                diagnostic=failure_trace(assertion, diagnostics.get(id(assertion), ()))
+                if world is not None and not outcome.get("passed")
+                else None,
+            )
+            for outcome, held, assertion in zip(outcomes, held_initially, assertions, strict=True)
         ),
     )
 
