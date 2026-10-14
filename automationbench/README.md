@@ -9,9 +9,9 @@ This present recipe runs the benchmark one task at a time (`run_one`). The agent
 > before pointing Beaker at it.
 
 Beaker displays assertion conditions as **Checks**, without Expected/Predicted
-value pairs. Failed sent-email Checks add bounded, scoped observations in their
-message. **OUTPUT** shows app changes once per sample, with size limits and
-omission markers; the full final state remains in `context` for native scoring.
+value pairs. Failed Checks use the same general explanation for every assertion
+and refer to **OUTPUT**, which shows app changes once per sample with size limits
+and omission markers. The full final state remains in `context` for native scoring.
 
 ## Quick start
 

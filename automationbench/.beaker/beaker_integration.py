@@ -19,9 +19,9 @@ world state so each check reads as ``salesforce_campaign_member_exists ·
 contact_id=David Park · campaign_id=Q1 Product Launch Webinar`` rather than a
 dict of ids. These Checks verify conditions, rather than compare field values:
 their complete parameters are preserved in ``description``, with no
-``expected``/``predicted`` pair. Failed Gmail sent-message checks carry scoped
-observations in ``message``; other failures retain a general explanation.
-The app diff is shown once in OUTPUT, never repeated on individual Checks.
+``expected``/``predicted`` pair. All failed conditions retain a general
+explanation in ``message`` and refer to the observed app changes in OUTPUT.
+The app diff is shown once, never repeated on individual Checks.
 
 Model calls are traced by subclassing the verifiers client (see
 ``_TracedChatCompletionsClient`` and ``_TracedAnthropicClient``); the verifiers
@@ -43,7 +43,6 @@ from anthropic import AsyncAnthropic
 from automationbench.clients import StreamingAnthropicClient
 from automationbench.domains import get_combined_dataset
 from automationbench.rubric import partial_credit
-from automationbench.rubric.assertions.gmail import _extract_email_address, _message_body_text
 from automationbench.rubric.registry import AssertionRegistry
 from automationbench.schema.world import WorldState
 from beaker import (
@@ -403,48 +402,6 @@ def _description_for(assertion_type: str) -> str | None:
     return next((line.strip() for line in doc.splitlines() if line.strip()), None)
 
 
-def _gmail_failure_message(world: WorldState, params: Mapping[str, Any]) -> str:
-    """Bounded observations only; never infer which predicate failed."""
-    raw_to = params.get("to") or []
-    wanted = {_extract_email_address(addr) for addr in (raw_to if isinstance(raw_to, list) else [raw_to])}
-    sent = [m for m in world.gmail.messages if "SENT" in m.label_ids]
-    scoped = [
-        m
-        for m in sent
-        if (not wanted or wanted <= {_extract_email_address(addr) for addr in m.to + m.cc})
-        and (not params.get("thread_id") or m.thread_id == params["thread_id"])
-        and (
-            not params.get("to_contains")
-            or any(str(params["to_contains"]).lower() in addr.lower() for addr in m.to + m.cc)
-        )
-    ]
-    body_check = any("body" in key or key == "text" for key in params)
-    subject_check = any(key.startswith("subject") for key in params)
-    if scoped and (body_check or subject_check):
-        observed: dict[str, Any] = {
-            "messages": [
-                {
-                    "to": [clip(addr, 80) for addr in m.to[:3]],
-                    "cc": [clip(addr, 80) for addr in m.cc[:3]],
-                    **({"subject": clip(m.subject or "", 200)} if subject_check else {}),
-                    **({"body_excerpt": clip(_message_body_text(m), 200)} if body_check else {}),
-                }
-                for m in scoped[:3]
-            ]
-        }
-    else:
-        observed = {
-            "sent_recipients": sorted(
-                {
-                    _extract_email_address(addr)
-                    for m in (scoped or ([] if params.get("thread_id") else sent))
-                    for addr in m.to + m.cc
-                }
-            )[:10]
-        }
-    return "Observed sent emails (bounded excerpts):\n" + clip(json.dumps(observed, ensure_ascii=True), 4_000)
-
-
 def _check(
     outcome: Mapping[str, Any],
     *,
@@ -488,14 +445,7 @@ def _check(
             "satisfied in the initial state; broken by the run" if held_initially else "not satisfied by the end state"
         ) + (f" (rollout error: {error})" if error else "")
     if not passed and not excluded and world is not None:
-        if (
-            service == "gmail"
-            and "draft" not in assertion_type
-            and ("sent" in assertion_type or "body_contains" in assertion_type)
-        ):
-            message += "\n" + _gmail_failure_message(world, params)
-        else:
-            message += "; see OUTPUT for observed app changes"
+        message += "; see OUTPUT for observed app changes"
     return Check(
         name=name,
         verdict="pass" if passed else "fail",

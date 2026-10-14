@@ -19,41 +19,15 @@ import beaker_integration as integration  # noqa: E402
 from world_diff import OUTPUT_MAX_BYTES, ServiceDiffs  # noqa: E402
 
 
-def test_failed_email_check_has_scoped_message_without_a_value_pair() -> None:
-    world = WorldState(
-        gmail={
-            "messages": [
-                {"to": ["target@example.com"], "label_ids": ["SENT"], "body_plain": "Wrong total"},
-                {"to": ["other@example.com"], "label_ids": ["SENT"], "body_plain": "Unrelated email"},
-                {"to": ["target@example.com"], "label_ids": ["INBOX"], "body_plain": "Unsent email"},
-            ]
-        }
-    )
-    check = integration._check(
-        {
-            "type": "gmail_message_sent_to_with_body_contains",
-            "passed": False,
-            "params": {"to": "target@example.com", "body_contains": ["19,500"]},
-        },
-        error=None,
-        entities={},
-        world=world,
-    )
-    assert check.expected is None and check.predicted is None and check.verdict == "fail"
-    assert "Wrong total" in check.message
-    assert "Unrelated email" not in check.message and "Unsent email" not in check.message
-    assert "19,500" in check.description
-    missing = integration._gmail_failure_message(world, {"to": "missing@example.com", "body_contains": ["total"]})
-    assert "target@example.com" in missing and "other@example.com" in missing
-    assert "Wrong total" not in missing and "Unrelated email" not in missing
-
-
 @pytest.mark.parametrize(("passed", "excluded"), [(True, False), (False, False), (False, True)])
 @pytest.mark.parametrize(
     ("assertion_type", "params"),
     [
         ("salesforce_campaign_member_exists", {"contact_id": "c1", "campaign_id": "p1"}),
         ("gmail_draft_body_contains", {"to": "c1", "body_contains": "p1"}),
+        ("gmail_message_sent_to_with_body_contains", {"to": "c1", "body_contains": ["p1"]}),
+        ("slack_message_exists", {"channel": "c1", "text_contains": "p1"}),
+        ("google_sheets_cell_equals", {"spreadsheet_id": "c1", "value": "p1"}),
     ],
 )
 def test_all_conditions_preserve_verdict_exclusion_and_parameters(
@@ -78,7 +52,7 @@ def test_all_conditions_preserve_verdict_exclusion_and_parameters(
     elif passed:
         assert check.message is None
     else:
-        assert "see OUTPUT" in check.message
+        assert check.message == "not satisfied by the end state; see OUTPUT for observed app changes"
 
 
 async def test_run_case_displays_changes_once_and_native_scoring_uses_full_context(monkeypatch, tmp_path) -> None:
