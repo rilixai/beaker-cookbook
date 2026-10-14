@@ -6,8 +6,9 @@ by name, run the harness ``run_one`` path, and score the benchmark's
 deterministic assertion metrics.
 
 Contract: the dataset row's ``expected`` holds the task's assertion list
-(``{"assertions": [...]}``), ``run_case`` returns no answer and reports the
-final world state in ``CaseResult.context["end_state"]``, and ``score_case``
+(``{"assertions": [...]}``), ``run_case`` exposes bounded app changes as the
+observed output and reports the final world state separately in
+``CaseResult.context["end_state"]``. ``score_case``
 runs the benchmark's own ``partial_credit`` rubric against that state,
 emitting one ``Check`` per assertion so the optimizer sees which requirements
 failed.
@@ -16,11 +17,11 @@ Assertions reference simulated records by opaque id (``"contact_id":
 "003xx000004MNO1"``); the scorer resolves those against the initial and end
 world state so each check reads as ``salesforce_campaign_member_exists ·
 contact_id=David Park · campaign_id=Q1 Product Launch Webinar`` rather than a
-dict of ids. Each check also carries the assertion handler's docstring as
-``description``, the raw assertion params as ``expected`` and, when it failed,
-a before/after diff of the targeted app's records as ``predicted`` (see
-``world_diff.py``) so a reader sees what the agent actually did there without
-replaying the trace.
+dict of ids. These Checks verify conditions, rather than compare field values:
+their complete parameters are preserved in ``description``, with no
+``expected``/``predicted`` pair. Failed conditions carry bounded readable summaries
+of comparisons and evaluator observations in ``message``, captured during trusted scoring.
+The app diff is shown once, never repeated on individual Checks.
 
 Model calls are traced by subclassing the verifiers client (see
 ``_TracedChatCompletionsClient`` and ``_TracedAnthropicClient``); the verifiers
@@ -39,6 +40,7 @@ from typing import Any
 
 import verifiers as vf
 from anthropic import AsyncAnthropic
+from assertion_diagnostics import capture_assertion_returns, failure_trace
 from automationbench.clients import StreamingAnthropicClient
 from automationbench.domains import get_combined_dataset
 from automationbench.rubric import partial_credit
@@ -66,7 +68,7 @@ from pydantic import BaseModel, Field, field_validator
 from verifiers.clients import Client, OpenAIChatCompletionsClient
 from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
 from verifiers.types import ClientConfig
-from world_diff import ServiceDiffs, clip, service_for
+from world_diff import ServiceDiffs, service_for
 
 from automationbench_skills.clients import DEFAULT_MODEL_REQUEST_TIMEOUT, CostTrackingChatCompletionsClient
 from automationbench_skills.data.tasks import Sample, load_samples
@@ -85,6 +87,12 @@ FIELD_WEIGHTS = {"partial_credit": 0.8, "task_completed_correctly": 0.2}
 DEFAULT_TIMEOUT_SECONDS = 2400.0
 # The scored benchmark domains (``upload_splits.py`` draws from the same set).
 _PUBLIC_DOMAINS = ("sales", "marketing", "operations", "support", "finance", "hr")
+# Mirrors beaker_runtime.optimization.evaluation.repository.protocol's
+# MAX_EXECUTION_PAYLOAD_BYTES (not exposed by beaker-sdk 0.6.4).
+_RESULT_MAX_BYTES = 8 * 1024 * 1024
+# The child adds an index, error and compact trace receipt after run_case.
+# Reserve space for those fields before allocating any display output.
+_RESULT_METADATA_RESERVE_BYTES = 64 * 1024
 
 
 class TaskRow(BaseModel):
@@ -338,16 +346,41 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
         # The scorer needs the error and the end state; the model/tool turns are
         # already in the trace via the traced Chat Completions or Anthropic client.
         stage.output({"error": error, "messages": len(completion)})
-        return CaseResult(
-            output=None,
-            output_kind="none",
-            context={
-                "task_name": sample.task_name,
-                "domain": sample.domain,
-                "error": error,
-                "end_state": to_json_safe(end_state),
-            },
-        )
+        observed = None
+        if isinstance(end_state, Mapping):
+            initial = _authored_initial_states()[sample.task_name]
+            initial_world = WorldState(**initial) if initial else None
+            observed = ServiceDiffs(initial, initial_world, end_state).to_output()
+        context: dict[str, JsonValue] = {
+            "task_name": sample.task_name,
+            "domain": sample.domain,
+            "error": error,
+            "end_state": to_json_safe(end_state),
+        }
+        display = _budget_output(to_json_safe(observed), context)
+        return CaseResult(output=display, output_kind="record" if display is not None else "none", context=context)
+
+
+def _budget_output(output: JsonValue, context: Mapping[str, JsonValue]) -> JsonValue:
+    """Shrink display evidence before it can displace the scoring state."""
+    if output is None:
+        return None
+    # Match write_execution_payload's compact JSON and default ASCII escaping;
+    # UTF-8 size alone undercounts non-ASCII world states on this transport.
+    envelope = {"context": context, "output": None, "output_kind": "record"}
+    available = (
+        _RESULT_MAX_BYTES
+        - _RESULT_METADATA_RESERVE_BYTES
+        - len(json.dumps(envelope, separators=(",", ":")).encode("utf-8"))
+        + len("null")
+    )
+    omitted: JsonValue = {"summary": "App changes omitted to preserve the scoring state.", "truncated": True}
+    for display in (output, omitted):
+        if len(json.dumps(display, separators=(",", ":")).encode("utf-8")) <= available:
+            return display
+    # If even the marker cannot fit, return the same no-output result used
+    # before app diffs were added. Never trim the context to make room.
+    return None
 
 
 def _assertions_for(case: Case) -> list[dict[str, Any]]:
@@ -402,7 +435,8 @@ def _check(
     error: str | None,
     entities: Mapping[str, str],
     held_initially: bool = False,
-    diffs: ServiceDiffs | None = None,
+    world: WorldState | None = None,
+    diagnostic: str | None = None,
 ) -> Check:
     assertion_type = str(outcome["type"])
     params = dict(outcome.get("params") or {})
@@ -411,14 +445,22 @@ def _check(
     service = service_for(assertion_type)
 
     # ``type · key=value``; an id is swapped for the record's label when the
-    # world state knows it ("David Park" rather than "003xx000004MNO1").
+    # world state knows it ("David Park" rather than "003xx000004MNO1"). Keep
+    # values complete so distinct requirements cannot collapse to one name.
     rendered = [
-        f"{k}={clip(entities.get(str(v), v if isinstance(v, str) else json.dumps(to_json_safe(v), default=str)))}"
+        f"{k}={entities.get(str(v), v if isinstance(v, str) else json.dumps(to_json_safe(v), ensure_ascii=False, default=str))}"
         for k, v in params.items()
         if k not in _META_KEYS
     ]
     name = " · ".join([assertion_type, *rendered])
-    expected = {k: to_json_safe(v) for k, v in params.items() if k not in _META_KEYS}
+    requirements = {k: to_json_safe(v) for k, v in params.items() if k not in _META_KEYS}
+    description = _description_for(assertion_type)
+    if requirements:
+        description = "\n".join(
+            part
+            for part in (description, "Condition parameters: " + json.dumps(requirements, ensure_ascii=False))
+            if part
+        )
     if excluded:
         message = (
             "excluded from scoring by the task author"
@@ -431,18 +473,17 @@ def _check(
         message = (
             "satisfied in the initial state; broken by the run" if held_initially else "not satisfied by the end state"
         ) + (f" (rollout error: {error})" if error else "")
-    # Only failed, scored checks carry the diff: that is where a reader needs
-    # to know what the agent did in the app without replaying the trace.
-    predicted = diffs.get(service) if diffs is not None and not passed and not excluded else None
+    if not passed and diagnostic:
+        message += "\n\n" + diagnostic
+    elif not passed and not excluded and world is not None:
+        message += "; see OUTPUT for observed app changes"
     return Check(
         name=name,
         verdict="pass" if passed else "fail",
         message=message,
         group=service,
         informational=excluded,
-        description=_description_for(assertion_type),
-        expected=expected,
-        predicted=predicted,
+        description=description,
     )
 
 
@@ -467,16 +508,18 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
     held_initially = [
         initial_world is not None and bool(AssertionRegistry.check(initial_world, a)) for a in assertions
     ]
-    diffs: ServiceDiffs | None = None
+    world: WorldState | None = None
+    diagnostics: Mapping[int, Any] = {}
     if isinstance(end_state, Mapping):
+        world = WorldState(**end_state)
         state: dict[str, Any] = {
             "info": {"assertions": assertions},
-            "world": WorldState(**end_state),
+            "world": world,
             "initial_state": initial_state,
         }
-        partial = float(partial_credit(state))
+        with capture_assertion_returns(world, assertions) as diagnostics:
+            partial = float(partial_credit(state))
         outcomes: list[Mapping[str, Any]] = list(state.get("_assertion_results") or [])
-        diffs = ServiceDiffs(initial_state, initial_world, end_state)
     elif not context:
         # Beaker sheds ``context`` when a case result is over its wire limit;
         # an absent context is not a failed case.
@@ -501,8 +544,17 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
         field_scores=scores,
         objective=objective_score(scores, field_weights=FIELD_WEIGHTS),
         checks=tuple(
-            _check(outcome, error=error, entities=entities, held_initially=held, diffs=diffs)
-            for outcome, held in zip(outcomes, held_initially, strict=True)
+            _check(
+                outcome,
+                error=error,
+                entities=entities,
+                held_initially=held,
+                world=world,
+                diagnostic=failure_trace(assertion, diagnostics.get(id(assertion), ()))
+                if world is not None and not outcome.get("passed")
+                else None,
+            )
+            for outcome, held, assertion in zip(outcomes, held_initially, assertions, strict=True)
         ),
     )
 

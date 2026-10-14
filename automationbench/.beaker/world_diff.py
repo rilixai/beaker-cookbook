@@ -1,7 +1,7 @@
 """Before/after diff of one simulated app between a task's initial and end world state.
 
-``predicted`` on a failed check: what the agent did in the app the assertion
-targets, as added / changed / removed records, bounded in size. Pure functions
+Observed OUTPUT: what the agent changed in each app, as added / changed /
+removed records, bounded in size and shown once per sample. Pure functions
 over ``WorldState`` dumps; no model calls, no randomness.
 """
 
@@ -36,14 +36,15 @@ def clip(text: str, limit: int = 60) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-# ``predicted`` on a failed check is a before/after diff of the app it targets.
+# OUTPUT contains before/after diffs of the apps changed by the agent.
 # Records are reduced to their own fields and the diff is re-rendered with
 # fewer records / shorter strings until it serializes under the byte cap.
 _DIFF_MAX_RECORDS = 5  # per added/changed/removed list
 _DIFF_MAX_STR_CHARS = 400
 _DIFF_MAX_FIELDS = 40  # per record
 _DIFF_MAX_LIST_ITEMS = 20  # per scalar list inside a record
-_DIFF_MAX_BYTES = 8_000  # serialized ``predicted`` per check
+_DIFF_MAX_BYTES = 8_000  # serialized diff per app
+OUTPUT_MAX_BYTES = 32_000  # serialized global OUTPUT, excluding the scorer's context
 _DIFF_SHRINK_STEPS = ((_DIFF_MAX_RECORDS, _DIFF_MAX_STR_CHARS), (3, 400), (2, 200), (1, 120), (0, 0))
 
 _Record = dict[str, Any]  # flattened record: scalars and lists of scalars
@@ -234,13 +235,24 @@ def _service_diff(
     for max_records, max_str in _DIFF_SHRINK_STEPS:
         diff: dict[str, Any] = {"service": service}
         diff.update({k: render(v, max_records, max_str) for k, v in lists.items() if v})
+        if any(
+            len(entries) > max_records
+            or any(
+                _shrink(record, max_str) != record
+                for entry in entries[:max_records]
+                for record in entry.values()
+                if isinstance(record, dict)
+            )
+            for entries in lists.values()
+        ):
+            diff["truncated"] = True
         if len(json.dumps(diff, ensure_ascii=False).encode("utf-8")) <= _DIFF_MAX_BYTES:
             break
     return diff
 
 
 class ServiceDiffs:
-    """Per-service diff of the case's world, computed once and shared by every check targeting that app."""
+    """Per-service diffs for the sample's observed output, independent of its Checks."""
 
     def __init__(
         self, raw_initial: Mapping[str, Any], initial_world: WorldState | None, end_state: Mapping[str, Any]
@@ -249,6 +261,38 @@ class ServiceDiffs:
         self._initial: Mapping[str, Any] = initial_world.model_dump(mode="json") if initial_world is not None else {}
         self._end = end_state
         self._cache: dict[str, dict[str, Any] | None] = {}
+
+    def to_output(self) -> dict[str, Any]:
+        """Keep all changed apps, including changes unrelated to assertions.
+
+        Each app's records are already bounded by get(). If the combined
+        output is too large, replace the largest app details with an explicit
+        omission marker rather than silently dropping apps or risking the
+        full scoring context being dropped at the transport boundary.
+        """
+        # A flat app.operation envelope avoids exceeding the evidence API's
+        # six-level JSON depth limit when a record contains scalar lists.
+        changes: dict[str, dict[str, Any]] = {}
+        for service in sorted(_SERVICE_FIELDS):
+            diff = self.get(service)
+            if diff is not None and any(diff.get(kind) for kind in ("added", "changed", "removed")):
+                changes[service] = diff
+        output: dict[str, Any] = {
+            f"{service}.{kind}": value
+            for service, diff in changes.items()
+            for kind, value in diff.items()
+            if kind != "service"
+        }
+        if not output:
+            return {"summary": "No app changes observed."}
+        for service in sorted(changes, key=lambda key: len(json.dumps(changes[key]).encode("utf-8")), reverse=True):
+            if len(json.dumps(output).encode("utf-8")) <= OUTPUT_MAX_BYTES:
+                break
+            for kind in changes[service]:
+                output.pop(f"{service}.{kind}", None)
+            output[f"{service}.details_omitted"] = True
+            output["truncated"] = True
+        return output
 
     def get(self, service: str | None) -> dict[str, Any] | None:
         if service is None:

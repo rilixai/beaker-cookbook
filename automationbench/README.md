@@ -8,6 +8,20 @@ This present recipe runs the benchmark one task at a time (`run_one`). The agent
 > working `beaker.yaml` and `beaker_integration.py`; there is nothing to write
 > before pointing Beaker at it.
 
+Beaker displays assertion conditions as **Checks**, without Expected/Predicted
+value pairs. Check names include the assertion type and complete parameter values,
+resolving record IDs to readable labels when available. Descriptions include the
+handler's first docstring line and the full condition parameters with original IDs;
+scoring metadata (`scored`, `excluded`) is omitted from both names and descriptions.
+Failed Checks show a readable summary of required conditions, recorded value
+comparisons, and the latest evaluator observations captured during scoring.
+Messages omit Python code and function traces, and explicitly note that the
+diagnostic is partial; it does not infer a cause from the last comparisons alone.
+**OUTPUT** shows app changes once per sample with size limits and omission markers.
+Display output is reduced or omitted when the combined result approaches Beaker's
+transport limit, preserving the complete scoring state before display details.
+The full final state remains in `context` for native scoring.
+
 ## Quick start
 
 ```bash
