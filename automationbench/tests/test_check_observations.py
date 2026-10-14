@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,7 +19,7 @@ from beaker import Case, CaseResult
 
 sys.path.insert(0, str(Path(__file__).parents[1] / ".beaker"))
 import beaker_integration as integration  # noqa: E402
-from assertion_diagnostics import capture_assertion_returns, failure_trace  # noqa: E402
+from assertion_diagnostics import _brief, capture_assertion_returns, failure_trace  # noqa: E402
 from world_diff import OUTPUT_MAX_BYTES, ServiceDiffs  # noqa: E402
 
 
@@ -154,6 +155,86 @@ async def test_run_case_displays_changes_once_and_native_scoring_uses_full_conte
     monkeypatch.setattr(integration, "run_rollout_raw", AsyncMock(return_value={"completion": ["done"]}))
     missing = await integration.run_case(case_input={}, runtime=SimpleNamespace(trace=SimpleNamespace(stage=stage)))
     assert missing.output is None and missing.output_kind == "none"
+
+
+@pytest.mark.parametrize(
+    ("headroom", "display_kind"),
+    [(100_000, "full"), (64 * 1024 + 200, "omitted"), (1_024, "none")],
+)
+async def test_large_scoring_state_takes_priority_over_display_output(
+    monkeypatch, tmp_path, headroom, display_kind
+) -> None:
+    initial = {"gmail": {"messages": []}}
+    end = WorldState(
+        gmail={"messages": [{"to": ["target@example.com"], "label_ids": ["SENT"], "body_plain": ""}]}
+    ).model_dump(mode="json")
+    context = {"task_name": "sample", "domain": "finance", "error": None, "end_state": end}
+    envelope = {"context": context, "output": None, "output_kind": "record"}
+    padding_bytes = (
+        integration._RESULT_MAX_BYTES - headroom - len(json.dumps(envelope, separators=(",", ":")).encode("utf-8"))
+    )
+    # The wire escapes each Unicode character as six ASCII bytes. Measuring
+    # UTF-8 with ensure_ascii=False would incorrectly retain the large diff.
+    end["gmail"]["messages"][0]["body_plain"] = "界" * (padding_bytes // 6) + "x" * (padding_bytes % 6)
+    observed = {"gmail.added": "change details " * 1_500}
+    monkeypatch.setattr(integration, "_authored_initial_states", lambda: {"sample": initial})
+    monkeypatch.setattr(integration, "_sample_for", lambda _: SimpleNamespace(task_name="sample", domain="finance"))
+    monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
+    monkeypatch.setattr(integration, "_client_for", lambda _: (SimpleNamespace(close=AsyncMock()), None))
+    monkeypatch.setattr(
+        integration, "run_rollout_raw", AsyncMock(return_value={"completion": ["done"], "_end_state": end})
+    )
+    monkeypatch.setattr(ServiceDiffs, "to_output", lambda _: observed)
+
+    @contextmanager
+    def stage(*args, **kwargs):
+        yield SimpleNamespace(output=lambda _: None)
+
+    result = await integration.run_case(case_input={}, runtime=SimpleNamespace(trace=SimpleNamespace(stage=stage)))
+    assert result.context == context
+    if display_kind == "full":
+        assert result.output == observed and result.output_kind == "record"
+    elif display_kind == "omitted":
+        assert result.output["truncated"] is True and "preserve" in result.output["summary"]
+    else:
+        assert result.output is None and result.output_kind == "none"
+    wire = {
+        "index": 0,
+        "output": result.output,
+        "output_kind": result.output_kind,
+        "context": result.context,
+        "error": None,
+        "trace_capture": {"receipt_uri": "/tmp/receipt.json"},
+    }
+    assert len(json.dumps(wire, separators=(",", ":")).encode("utf-8")) <= integration._RESULT_MAX_BYTES
+    case = Case(
+        id="sample",
+        input={"task_name": "sample"},
+        expected={"assertions": [{"type": "gmail_message_sent_to", "to": "target@example.com"}]},
+    )
+    score = await integration.score_case(case=case, result=result, case_files_dir=tmp_path)
+    assert score.objective == 1.0 and score.checks[0].verdict == "pass"
+
+
+def test_diagnostic_mapping_snapshot_reads_only_eight_entries() -> None:
+    consumed = []
+
+    class LargeMapping(Mapping):
+        def __len__(self):
+            return 100_000
+
+        def __iter__(self):
+            for index in range(len(self)):
+                assert index < 8, "diagnostics consumed more than eight mapping entries"
+                consumed.append(index)
+                yield index
+
+        def __getitem__(self, key):
+            return key
+
+    summary = _brief(LargeMapping())
+    assert consumed == list(range(8))
+    assert summary == {**{str(index): index for index in range(8)}, "…": "99992 more entries"}
 
 
 def test_output_keeps_all_change_kinds_and_marks_size_limits(monkeypatch) -> None:

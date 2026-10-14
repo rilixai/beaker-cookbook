@@ -87,6 +87,12 @@ FIELD_WEIGHTS = {"partial_credit": 0.8, "task_completed_correctly": 0.2}
 DEFAULT_TIMEOUT_SECONDS = 2400.0
 # The scored benchmark domains (``upload_splits.py`` draws from the same set).
 _PUBLIC_DOMAINS = ("sales", "marketing", "operations", "support", "finance", "hr")
+# Mirrors beaker_runtime.optimization.evaluation.repository.protocol's
+# MAX_EXECUTION_PAYLOAD_BYTES (not exposed by beaker-sdk 0.6.4).
+_RESULT_MAX_BYTES = 8 * 1024 * 1024
+# The child adds an index, error and compact trace receipt after run_case.
+# Reserve space for those fields before allocating any display output.
+_RESULT_METADATA_RESERVE_BYTES = 64 * 1024
 
 
 class TaskRow(BaseModel):
@@ -345,16 +351,36 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             initial = _authored_initial_states()[sample.task_name]
             initial_world = WorldState(**initial) if initial else None
             observed = ServiceDiffs(initial, initial_world, end_state).to_output()
-        return CaseResult(
-            output=to_json_safe(observed),
-            output_kind="record" if observed is not None else "none",
-            context={
-                "task_name": sample.task_name,
-                "domain": sample.domain,
-                "error": error,
-                "end_state": to_json_safe(end_state),
-            },
-        )
+        context: dict[str, JsonValue] = {
+            "task_name": sample.task_name,
+            "domain": sample.domain,
+            "error": error,
+            "end_state": to_json_safe(end_state),
+        }
+        display = _budget_output(to_json_safe(observed), context)
+        return CaseResult(output=display, output_kind="record" if display is not None else "none", context=context)
+
+
+def _budget_output(output: JsonValue, context: Mapping[str, JsonValue]) -> JsonValue:
+    """Shrink display evidence before it can displace the scoring state."""
+    if output is None:
+        return None
+    # Match write_execution_payload's compact JSON and default ASCII escaping;
+    # UTF-8 size alone undercounts non-ASCII world states on this transport.
+    envelope = {"context": context, "output": None, "output_kind": "record"}
+    available = (
+        _RESULT_MAX_BYTES
+        - _RESULT_METADATA_RESERVE_BYTES
+        - len(json.dumps(envelope, separators=(",", ":")).encode("utf-8"))
+        + len("null")
+    )
+    omitted: JsonValue = {"summary": "App changes omitted to preserve the scoring state.", "truncated": True}
+    for display in (output, omitted):
+        if len(json.dumps(display, separators=(",", ":")).encode("utf-8")) <= available:
+            return display
+    # If even the marker cannot fit, return the same no-output result used
+    # before app diffs were added. Never trim the context to make room.
+    return None
 
 
 def _assertions_for(case: Case) -> list[dict[str, Any]]:

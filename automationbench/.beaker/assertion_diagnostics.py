@@ -8,6 +8,7 @@ from collections import defaultdict, deque
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from inspect import CO_ASYNC_GENERATOR, CO_GENERATOR
+from itertools import islice
 from types import FrameType
 from typing import Any
 
@@ -19,7 +20,7 @@ def _brief(value: Any, depth: int = 0) -> Any:
         return value
     if depth < 2:
         if isinstance(value, Mapping):
-            items = list(value.items())[:8]
+            items = list(islice(value.items(), 8))
             bounded_map = {str(key): _brief(child, depth + 1) for key, child in items}
             if len(value) > 8:
                 bounded_map["…"] = f"{len(value) - 8} more entries"

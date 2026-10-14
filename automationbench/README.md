@@ -18,6 +18,8 @@ comparisons, and the latest evaluator observations captured during scoring.
 Messages omit Python code and function traces, and explicitly note that the
 diagnostic is partial; it does not infer a cause from the last comparisons alone.
 **OUTPUT** shows app changes once per sample with size limits and omission markers.
+Display output is reduced or omitted when the combined result approaches Beaker's
+transport limit, preserving the complete scoring state before display details.
 The full final state remains in `context` for native scoring.
 
 ## Quick start
