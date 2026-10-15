@@ -24,8 +24,12 @@ DEFAULT_MAX_REASONING_TOKENS = 24_576
 DEFAULT_MAX_ANSWER_TOKENS = 8_192
 DEFAULT_MAX_MODEL_ATTEMPTS = 3
 # Each attempt times out on its own, and the whole turn, retries and backoff
-# included, has a longer deadline.
-DEFAULT_MODEL_REQUEST_TIMEOUT = 300.0
+# included, has a longer deadline. Agent requests are not streamed, so the
+# attempt limit is the wait for the whole reply. Over about 2,000 gpt-5.6-luna
+# agent calls in two runs, p99 was 13 s and the slowest reply 27 s. The only
+# slower ones were stalls of 200-240 s, so a stalled request is retried after
+# 60 s.
+DEFAULT_MODEL_REQUEST_TIMEOUT = 60.0
 DEFAULT_MODEL_TURN_TIMEOUT = 600.0
 
 

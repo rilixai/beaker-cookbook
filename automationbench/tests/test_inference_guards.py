@@ -77,7 +77,7 @@ async def test_retries_are_bounded_and_client_errors_fail_fast(status: int, atte
 
     client = _client(handler)
     assert client.client.max_retries == 0
-    assert client.client.timeout == 300
+    assert client.client.timeout == 60
     try:
         with pytest.raises(APIStatusError):
             await client.get_native_response([], "gpt-5.6-luna", {})
@@ -111,6 +111,45 @@ async def test_deadline_cancels_a_stalled_request_or_backoff(backoff: bool) -> N
     assert time.monotonic() - started < 1
     assert len(requests) == 1
     assert backoff or cancelled.is_set()
+
+
+async def test_a_stalled_attempt_times_out_and_the_retry_answers() -> None:
+    # Scaled down, over a real socket so the SDK's own timeout applies: the
+    # provider never answers the first request, as in a stall.
+    requests = 0
+    reply = json.dumps(_reply()).encode()
+
+    async def serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        nonlocal requests
+        head = await reader.readuntil(b"\r\n\r\n")
+        length = next(
+            int(line.split(b":")[1]) for line in head.split(b"\r\n") if line.lower().startswith(b"content-length:")
+        )
+        await reader.readexactly(length)
+        requests += 1
+        if requests == 1:
+            await reader.read()  # until the client gives up and hangs up
+        else:
+            writer.write(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n")
+            writer.write(b"content-length: %d\r\nconnection: close\r\n\r\n%s" % (len(reply), reply))
+            await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    client = CostTrackingChatCompletionsClient(
+        AsyncOpenAI(api_key="test", base_url=f"http://127.0.0.1:{port}/v1"), request_timeout=0.2
+    )
+    started = time.monotonic()
+    try:
+        response = await client.get_native_response([], "gpt-5.6-luna", {})
+    finally:
+        await client.close()
+        server.close()
+    assert response.choices[0].message.content == "done"
+    assert requests == 2
+    # The stalled attempt ends at its limit, then one second of backoff.
+    assert time.monotonic() - started < 3
 
 
 async def test_empty_response_retry_retains_usage_and_cost() -> None:
@@ -227,7 +266,7 @@ async def test_hosted_client_creation_uses_the_limits(monkeypatch: Any, selected
     client, model = beaker_integration._client_for(SimpleNamespace(model=object() if selected_model else None))
     try:
         assert client.client.max_retries == 0
-        assert client.client.timeout == 300
+        assert client.client.timeout == 60
         assert client.turn_timeout == 600
         await client.get_native_response([], model.name, model.sampling_args())
     finally:
