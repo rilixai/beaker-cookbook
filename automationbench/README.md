@@ -166,11 +166,31 @@ of assertions is checked against that world
 or does not. Assertions already true before the agent acted don't count, so
 doing nothing scores 0.
 
-**Prefer `partial_credit` as the metric to optimize**, the share of assertions
-that hold (0–1). It is the objective in `.beaker/beaker_integration.py` and
-gives a much denser signal than `task_completed_correctly` (all assertions
-hold), which is the strict pass rate. It is also possible to optimize a combination
-of both.
+Hosted Beaker evaluations optimize **90% correctness and 10% latency**:
+
+```text
+correctness = 0.8 × partial_credit + 0.2 × task_completed_correctly
+latency_score = 60 / (60 + elapsed_seconds)  # only for correct, error-free tasks
+objective = 0.9 × correctness + 0.1 × latency_score
+```
+
+The trusted `.beaker/beaker_integration.py` measures elapsed wall time around
+the candidate rollout, including model and tool work. It excludes client
+cleanup, output rendering and assertion scoring, and ignores timing reported
+by editable `src/` code. Failed or incomplete tasks, rollout errors, and missing
+or invalid timing earn zero latency reward. The original correctness metrics
+remain visible, alongside the normalized `latency_score` field.
+
+For a fully correct task, 120 seconds scores 0.9333, 60 seconds scores 0.9500,
+and 30 seconds scores 0.9667. An incomplete task scores below 0.72 regardless
+of speed. The fixed 60-second scale is shared by TRAIN and TEST; it is not
+recalibrated per candidate. Provider load and caching still affect wall time,
+so speed gains must clear Beaker's normal repeated-rollout noise checks.
+
+The standalone CLI continues to report the upstream benchmark's correctness
+metrics and mean latency separately. Rebuild the Integration/playbook from
+this commit before launching a hosted optimization; existing runs retain
+their original scoring policy.
 
 ## Development
 
