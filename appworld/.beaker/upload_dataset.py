@@ -15,6 +15,11 @@ from appworld_setup import prepare_appworld
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tgc", action="store_true", help="Upload all 147 tasks individually for the TGC agent.")
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Upload all training scenarios and use dev for evaluation (default; kept for compatibility).",
+    )
     args = parser.parse_args()
     cli = ["beaker", "--config-file", ".beaker/tgc.yaml"] if args.tgc else ["beaker"]
     integration_id = "appworld_tgc" if args.tgc else "app_world"
