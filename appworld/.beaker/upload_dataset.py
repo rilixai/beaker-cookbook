@@ -15,23 +15,17 @@ from appworld_setup import prepare_appworld
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tgc", action="store_true", help="Upload all 147 tasks individually for the TGC agent.")
-    parser.add_argument(
-        "--full", action="store_true", help="Upload all training scenarios and use dev for evaluation."
-    )
     args = parser.parse_args()
-    if args.tgc:
-        args.full = True
     cli = ["beaker", "--config-file", ".beaker/tgc.yaml"] if args.tgc else ["beaker"]
     integration_id = "appworld_tgc" if args.tgc else "app_world"
     root = prepare_appworld()
     splits = {}
-    for source_split in ("train", "dev") if args.full else ("train",):
+    for source_split in ("train", "dev"):
         groups: dict[str, list[str]] = OrderedDict()
         for task_id in (root / f"data/datasets/{source_split}.txt").read_text().splitlines():
             groups.setdefault(task_id if args.tgc else task_id.split("_")[0], []).append(task_id)
         rows = []
-        selected_groups = list(groups.items()) if args.full else list(groups.items())[:4]
-        for scenario, tasks in selected_groups:
+        for scenario, tasks in groups.items():
             inputs, expected = [], {}
             for task_id in tasks:
                 task_dir = root / "data/tasks" / task_id
@@ -42,10 +36,7 @@ def main() -> None:
                 rows.append({"id": scenario, "input": inputs[0], "expected": expected[scenario]})
             else:
                 rows.append({"id": scenario, "input": {"tasks": inputs}, "expected": expected})
-        if args.full:
-            splits["train" if source_split == "train" else "test"] = rows
-        else:
-            splits = {"train": rows[:3], "test": rows[3:]}
+        splits["train" if source_split == "train" else "test"] = rows
     if {row["id"] for row in splits["train"]} & {row["id"] for row in splits["test"]}:
         raise ValueError("Training and evaluation scenarios must be disjoint")
     with tempfile.TemporaryDirectory(prefix="beaker-appworld-dataset-") as temporary:
@@ -74,7 +65,7 @@ def main() -> None:
                 "--agent",
                 "appworld-task-goal-completion" if args.tgc else "appworld-fresh",
                 "--name",
-                "appworld-tgc-full" if args.tgc else "appworld-sgc-full" if args.full else "appworld-sgc-quickstart",
+                "appworld-tgc-full" if args.tgc else "appworld-sgc-full",
                 "--total-count",
                 str(sum(len(rows) for rows in splits.values())),
                 "--split",
