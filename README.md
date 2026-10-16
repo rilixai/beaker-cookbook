@@ -4,7 +4,7 @@
 <h3 align="center">Beaker, the autonomous AI engineer</h3>
 <p align="center">
   Beaker autonomously experiments with your AI agents: finding failures,
-  testing fixes, and compounding the improvements that work.
+  testing fixes, and compounding the improvments that work.
 </p>
 <p align="center">
   <a href="https://app.withbeaker.ai/auth/sign-up?utm_source=cookbook&utm_medium=github&utm_content=header-button">
