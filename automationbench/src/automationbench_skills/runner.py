@@ -19,14 +19,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from verifiers import stop
 from verifiers.clients import Client
 from verifiers.legacy.types import ClientConfig
-from verifiers.types import RolloutInput
+from verifiers.types import RolloutInput, UserMessage
 
 from automationbench_skills.clients import (
     DEFAULT_MAX_ANSWER_TOKENS,
@@ -161,6 +163,64 @@ class RunResult:
         }
 
 
+# A short plan without a tool call is a progress message, not completion.
+# Match only a leading first-person next step; completed summaries, optional
+# follow-up offers, empty replies and tool-bearing messages keep their stop path.
+_NEXT_STEP = re.compile(
+    r"^(?:(?:now|next)[, ]+)?(?:let me|i(?:['’]ll| will))\s+"
+    r"(?:read|search|look|find|locate|check|verify|gather|retrieve|fetch|pull|"
+    r"query|load|create|update|send|apply|process|analyze|execute)\b",
+    re.IGNORECASE,
+)
+_MAX_NEXT_STEP_CONTINUATIONS = 2
+_NEXT_STEP_REMINDER = (
+    "You announced a next step but made no tool call. Continue the authorized "
+    "task using the tools for that step. Check prior tool results before "
+    "repeating any write. If the task is complete or a concrete blocker "
+    "prevents progress, report that instead."
+)
+
+
+def _announces_next_step(message: Any) -> bool:
+    content = getattr(message, "content", None)
+    return (
+        getattr(message, "role", None) == "assistant"
+        and not getattr(message, "tool_calls", None)
+        and isinstance(content, str)
+        and len(content.strip()) <= 650
+        and bool(_NEXT_STEP.match(content.strip()))
+    )
+
+
+class _NextStepContinuation:
+    """Recover explicit progress replies within the existing rollout limits."""
+
+    @stop
+    async def no_tools_called(self, state: Any) -> bool:
+        terminal = await super().no_tools_called(state)
+        if not terminal:
+            return False
+        message = state["trajectory"][-1]["completion"][-1]
+        can_continue = (
+            state.get("_next_step_continuations", 0) < _MAX_NEXT_STEP_CONTINUATIONS
+            and _announces_next_step(message)
+        )
+        return not can_continue
+
+    async def env_response(self, messages: Any, state: Any, **kwargs: Any) -> Any:
+        if (
+            messages
+            and _announces_next_step(messages[-1])
+            and state.get("_next_step_continuations", 0) < _MAX_NEXT_STEP_CONTINUATIONS
+        ):
+            # No tool ran in this reply. Retain its usage and the conversation;
+            # the next model turn chooses actions from the unchanged task/world.
+            self._extract_usage_and_debug(state)
+            state["_next_step_continuations"] = state.get("_next_step_continuations", 0) + 1
+            return [UserMessage(content=_NEXT_STEP_REMINDER)]
+        return await super().env_response(messages, state, **kwargs)
+
+
 _ENV_CACHE: dict[tuple[str, bool, int, float | None], Any] = {}
 _CLIENT_CACHE: dict[tuple[ModelSpec, Any], Client] = {}
 
@@ -214,7 +274,10 @@ def get_env(
                 }
             ]
         )
-        env = AutomationBenchEnv(
+        class WorkflowAutomationBenchEnv(_NextStepContinuation, AutomationBenchEnv):
+            pass
+
+        env = WorkflowAutomationBenchEnv(
             dataset=dataset,
             rubric=create_rubric(),
             tools=list(SKILL_TOOLS) if skills else None,
