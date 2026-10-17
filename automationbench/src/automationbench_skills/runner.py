@@ -21,6 +21,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -165,6 +166,27 @@ _ENV_CACHE: dict[tuple[str, bool, int, float | None], Any] = {}
 _CLIENT_CACHE: dict[tuple[ModelSpec, Any], Client] = {}
 
 
+def _with_confluence_description(search: Any) -> Any:
+    """Clarify the page lookup operation at discovery without changing ranking."""
+    @wraps(search)
+    def search_tools(query: str, top_k: int = 5) -> str:
+        results = json.loads(search(query=query, top_k=top_k))
+        for result in results:
+            if result.get("name") == "confluence_pageSearch":
+                result["description"] = (
+                    "Look up pages. This operation does not publish or update page content. "
+                    "Its body, contentId, and explainIgnoredWithContent inputs do not turn "
+                    "the lookup into a write. A returned title, page ID, or echoed body "
+                    "does not confirm publication. When the request calls for a new page, "
+                    "use confluence_pageCreate with the requested title and body. Keep "
+                    "required checks for existing pages, but do not substitute this lookup "
+                    "for the requested creation."
+                )
+        return json.dumps(results, indent=2)
+
+    return search_tools
+
+
 def get_env(
     toolset: str = "zapier",
     skills: bool = True,
@@ -222,6 +244,13 @@ def get_env(
             toolset=toolset,
             timeout_seconds=timeout,
         )
+        if toolset == "zapier" and skills:
+            search = env.tool_map["search_tools"]
+            tool_order = [tool.name for tool in env.tool_defs]
+            env.remove_tool(search)
+            env.add_tool(_with_confluence_description(search))
+            env.tool_defs.sort(key=lambda tool: tool_order.index(tool.name))
+            env._all_tool_defs = list(env.tool_defs)
         # One ``tool_call`` span per tool execution, under whichever Beaker
         # capture is active at call time; the hidden ``world`` arg stays out.
         _ENV_CACHE[key] = beaker_verifiers.instrument(env)
