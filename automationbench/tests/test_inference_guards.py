@@ -224,6 +224,13 @@ async def test_hosted_client_creation_uses_the_limits(monkeypatch: Any, selected
         "inference_target",
         lambda runtime: SimpleNamespace(model="gpt-5.6-luna", api_key="test", base_url="https://gateway.invalid/v1"),
     )
+    # The no-selection default is Claude on the Anthropic client; pin a Chat Completions
+    # default here so this still covers that path's limits.
+    monkeypatch.setattr(
+        beaker_integration,
+        "default_model_spec",
+        lambda: ModelSpec(name="gpt-5.6-luna", api="chat_completions", reasoning_effort="medium"),
+    )
     client, model = beaker_integration._client_for(SimpleNamespace(model=object() if selected_model else None))
     try:
         assert client.client.max_retries == 0
