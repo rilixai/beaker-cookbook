@@ -112,14 +112,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--task-temperature",
         type=float,
         default=defaults.task_temperature,
-        help="Sampling temperature for the agent model.",
+        help="Sampling temperature for models that support it; omitted by default for Luna.",
     )
     parser.add_argument(
         "--task-reasoning-effort",
         type=str,
         default=defaults.task_reasoning_effort,
         choices=("none", "minimal", "low", "medium", "high", "xhigh"),
-        help="Reasoning budget for a thinking task model (default xhigh = DeepSeek V4 Pro max reasoning); use none for non-reasoning models.",
+        help="Reasoning budget for a thinking task model (default medium for Luna); use none for non-reasoning models.",
     )
     parser.add_argument(
         "--max-output-tokens",
@@ -138,6 +138,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default=defaults.judge_model,
         help="LiteLLM model string for the rubric judge. Keep it fixed when comparing runs.",
+    )
+    parser.add_argument(
+        "--judge-reasoning-effort",
+        choices=["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        default=defaults.judge_reasoning_effort,
+        help="Judge reasoning effort. Choose a level supported by the selected judge; GLM supports low/high/max.",
     )
     parser.add_argument(
         "--judge-batch-size",
@@ -208,6 +214,7 @@ def _config_from_args(args: argparse.Namespace) -> HarveyLabConfig:
         max_output_tokens=args.max_output_tokens,
         context_window_tokens=args.context_window_tokens,
         judge_model=args.judge_model,
+        judge_reasoning_effort=args.judge_reasoning_effort,
         judge_batch_size=args.judge_batch_size,
         max_turns=args.max_turns,
         task_llm_timeout=args.task_llm_timeout,
@@ -525,6 +532,7 @@ def _run_evaluate(args: argparse.Namespace) -> int:
     outputs, errors = _load_persisted_outputs(args.output_dir, records, manifest)
     judge = build_rubric_judge(
         model=config.judge_model,
+        reasoning_effort=config.judge_reasoning_effort,
         timeout=config.judge_llm_timeout,
         num_retries=config.judge_num_retries,
     )

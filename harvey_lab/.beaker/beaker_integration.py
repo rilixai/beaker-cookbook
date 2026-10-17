@@ -52,7 +52,7 @@ from harvey_lab.evaluation.scoring import (
 
 BEAKER_JUDGE_BATCH_SIZE = 4
 SELECTED_CONTEXT_WINDOW_ENV = "HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS"
-DEFAULT_SELECTED_CONTEXT_WINDOW = 128_000
+DEFAULT_SELECTED_CONTEXT_WINDOW = 1_000_000
 
 
 def relative_path(value: str) -> str:
@@ -248,7 +248,7 @@ def selected_model_factory(runtime: RolloutRuntime[Any]) -> Any:
 
     def factory(
         model: str,
-        temperature: float,
+        temperature: float | None,
         max_tokens: int,
         context_window_tokens: int,
         timeout: float,
@@ -370,6 +370,8 @@ def grade(task: TaskInput, expected: Expected, deliverables: dict[str, str]) -> 
                 model=f"openai/{target.model}" if target else model,
                 messages=messages,
                 temperature=0.0,
+                reasoning_effort=config.judge_reasoning_effort,
+                allowed_openai_params=["reasoning_effort"],
                 timeout=config.judge_llm_timeout,
                 num_retries=config.judge_num_retries,
                 **routing,

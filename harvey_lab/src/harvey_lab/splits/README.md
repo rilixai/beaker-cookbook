@@ -11,9 +11,11 @@ under `harvey-labs/tasks/`). They are the source of truth for reproducible runs
 - **Sizes:** train 1660 / test 100 (all 1760 tasks, two-way disjoint).
 - **Sampling:** test is capped at 100 (`config.TEST_CAP`) and drawn to
   **follow the natural practice-area distribution** of the pinned commit; train
-  is everything else. Each list is ordered round-robin across practice areas,
-  so any prefix stays distribution-representative — `--limit N` takes the first
-  N.
+  is everything else. Each list is ordered round-robin across practice areas.
+  `--limit N` takes a prefix, which does not preserve the full distribution.
+  The Beaker helper `.beaker/upload_splits.py` instead samples training tasks
+  using practice-area quotas from the full, unchanged test set; see the recipe
+  README for its seed, rounding rules, and dry-run report.
 
 ## Regenerating
 

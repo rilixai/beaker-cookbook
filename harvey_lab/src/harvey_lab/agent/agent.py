@@ -73,7 +73,7 @@ class HarveyLabAgentOutput:
 
 # Factory that builds a Stirrup ``LLMClient`` from model settings. Kept behind
 # a factory so tests inject a scripted client and avoid network calls.
-ModelFactory = Callable[[str, float, int, int, float, str], Any]
+ModelFactory = Callable[[str, float | None, int, int, float, str], Any]
 
 # Factory that builds the Stirrup ``CodeExecToolProvider`` used for each task.
 # Kept injectable for tests and callers extending the local-only default.
@@ -82,7 +82,7 @@ ExecProviderFactory = Callable[[HarveyLabConfig], Any]
 
 def _default_model_factory(
     model: str,
-    temperature: float,
+    temperature: float | None,
     max_tokens: int,
     context_window_tokens: int,
     timeout: float,
@@ -94,7 +94,9 @@ def _default_model_factory(
     # ``none``/empty is the documented "non-reasoning model" sentinel: send no
     # reasoning param at all.
     effort = reasoning_effort if reasoning_effort not in ("", "none") else None
-    kwargs: dict[str, Any] = {"temperature": temperature, "timeout": timeout}
+    kwargs: dict[str, Any] = {"timeout": timeout}
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     if effort is not None:
         # litellm only forwards ``reasoning_effort`` for models it already knows
         # are reasoning-capable; a newly released model (e.g. deepseek-v4-pro on

@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
 from beaker_integration import TaskRow, row_payload
+from sample_splits import distribution_report, sample_train, validate_splits
 
 from harvey_lab.config import HARVEY_LABS_COMMIT
 from harvey_lab.data.dataset import load_records, read_split
@@ -43,23 +44,44 @@ def positive_count(value: str) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--agent", help="defaults to agent_key in .beaker/beaker.yaml")
-    parser.add_argument("--name", default="harvey-lab-quickstart")
-    parser.add_argument("--train-limit", type=positive_count, default=8)
-    parser.add_argument("--test-limit", type=positive_count, default=4)
+    parser.add_argument("--name", default="harvey-lab-stratified-100")
+    parser.add_argument("--train-limit", type=positive_count, default=100)
+    parser.add_argument("--seed", type=int, default=0, help="seed for uniform sampling within each practice area")
+    parser.add_argument(
+        "--test-limit", type=positive_count, help="smoke-only prefix; uploads always keep all test tasks"
+    )
     parser.add_argument("--full", action="store_true", help="use all 1660 train and 100 test tasks")
     parser.add_argument("--tasks-root", type=Path, help="tasks/ from a checkout at HARVEY_LABS_COMMIT")
     parser.add_argument("--smoke-only", action="store_true", help="validate locally without uploading")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="print selection and distribution without downloads or upload"
+    )
     args = parser.parse_args()
+    if args.test_limit is not None and (not args.smoke_only or args.full):
+        parser.error("--test-limit requires --smoke-only and cannot be combined with --full")
+    frozen_train, frozen_test = read_split("train"), read_split("test")
+    validate_splits(frozen_train, frozen_test)
+    train = frozen_train if args.full else sample_train(frozen_train, frozen_test, args.train_limit, args.seed)
+    splits = {"train": train, "test": frozen_test[: args.test_limit]}
+    manifest = {
+        "source": "harveyai/harvey-labs",
+        "commit": HARVEY_LABS_COMMIT,
+        "sampling": {
+            "method": "full" if args.full else "practice-area-largest-remainder-v1",
+            "seed": None if args.full else args.seed,
+            "target": "frozen-test",
+            "test_truncated_for_smoke": args.test_limit is not None,
+        },
+        "distribution": distribution_report(splits["train"], splits["test"]),
+        "task_ids": splits,
+    }
+    print(json.dumps(manifest, indent=2))
+    if args.dry_run:
+        return
     beaker = shutil.which("beaker")
     if beaker is None:
         raise RuntimeError("beaker CLI is not on PATH; run with `uv run python .beaker/upload_splits.py`")
-    splits = {
-        split: read_split(split)[: None if args.full else limit]
-        for split, limit in (("train", args.train_limit), ("test", args.test_limit))
-    }
     ids = [task_id for task_ids in splits.values() for task_id in task_ids]
-    if len(ids) != len(set(ids)):
-        raise ValueError("frozen train and test splits overlap")
     tasks_root = args.tasks_root or ensure_task_dirs(ids)
     with tempfile.TemporaryDirectory(prefix="harvey-beaker-dataset-") as directory:
         dataset_dir = Path(directory)
@@ -74,9 +96,7 @@ def main() -> None:
                         metadata={"practice_area": record.practice_area, "source_split": split},
                     )
                     stream.write(row.model_dump_json() + "\n")
-        (dataset_dir / "manifest.json").write_text(
-            json.dumps({"source": "harveyai/harvey-labs", "commit": HARVEY_LABS_COMMIT}), encoding="utf-8"
-        )
+        (dataset_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         subprocess.run(
             [
                 beaker,

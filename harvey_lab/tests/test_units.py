@@ -42,6 +42,7 @@ from harvey_lab.evaluation.run_eval import evaluate_agent_on_records, evaluate_o
 from harvey_lab.evaluation.scoring import (
     ALL_PASS_FIELD,
     CRITERION_PASS_RATE_FIELD,
+    DEFAULT_JUDGE_MODEL,
     JudgeCallError,
     _parse_batch_verdicts,
     _scope_deliverables,
@@ -1316,17 +1317,49 @@ def test_evaluate_agent_contains_errors_and_excludes_unscoreable(tasks_root: Pat
     assert report.all_pass_rate == pytest.approx(5 / 6)
 
 
-def test_default_config_targets_deepseek_v4_pro_max_reasoning() -> None:
+def test_default_config_targets_luna_and_glm_flash() -> None:
     config = HarveyLabConfig()
-    assert config.task_model == "openrouter/deepseek/deepseek-v4-pro"
-    # xhigh is the top tier the Stirrup LiteLLM client exposes (max reasoning).
-    assert config.task_reasoning_effort == "xhigh"
-    assert cli_mod._parse_args(["run"]).task_reasoning_effort == "xhigh"
+    assert config.task_model == "openai/gpt-6-luna"
+    assert config.task_reasoning_effort == "medium"
+    assert config.task_temperature is None
+    assert config.max_output_tokens == 128_000
+    assert config.context_window_tokens == 1_000_000
+    assert config.judge_model == DEFAULT_JUDGE_MODEL == "openrouter/z-ai/glm-5.3-flash"
+    assert config.judge_reasoning_effort == "high"
+    args = cli_mod._parse_args(["run"])
+    assert args.task_model == config.task_model
+    assert args.task_reasoning_effort == config.task_reasoning_effort
+    assert cli_mod._config_from_args(args).task_temperature is None
+    assert cli_mod._config_from_args(args).judge_reasoning_effort == "high"
+    low_args = cli_mod._parse_args(["run", "--judge-reasoning-effort", "low"])
+    assert cli_mod._config_from_args(low_args).judge_reasoning_effort == "low"
+
+
+def test_judge_forwards_reasoning_effort(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    requests: list[dict[str, Any]] = []
+
+    def completion(**kwargs: Any) -> Any:
+        requests.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"verdicts":[{"id":"C1","verdict":"pass"}]}'))]
+        )
+
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion))
+    for effort in ("high", "low"):
+        judge = build_rubric_judge(reasoning_effort=effort)
+        assert judge("Task", [{"id": "C1", "match_criteria": "States the fee"}], "The fee is $50.") == {"C1": True}
+        assert requests[-1]["reasoning_effort"] == effort
+        # The provider catalog can know a model before LiteLLM recognizes its reasoning support.
+        assert requests[-1]["allowed_openai_params"] == ["reasoning_effort"]
 
 
 def test_default_model_factory_threads_reasoning_effort() -> None:
     client = _default_model_factory("openrouter/deepseek/deepseek-v4-pro", 0.0, 16_384, 262_144, 120.0, "xhigh")
     assert client._reasoning_effort == "xhigh"
+    assert client._kwargs["temperature"] == 0.0
     # A reasoning effort opts the param through litellm's model-support gate so a
     # newly released model (not yet in litellm's reasoning map) doesn't raise
     # UnsupportedParamsError on OpenRouter.
@@ -1337,3 +1370,17 @@ def test_default_model_factory_threads_reasoning_effort() -> None:
         disabled = _default_model_factory("openrouter/openai/gpt-4.1-mini", 0.0, 16_384, 262_144, 120.0, sentinel)
         assert disabled._reasoning_effort is None
         assert "allowed_openai_params" not in disabled._kwargs
+
+
+def test_luna_client_omits_unsupported_temperature() -> None:
+    config = HarveyLabConfig()
+    client = _default_model_factory(
+        config.task_model,
+        config.task_temperature,
+        config.max_output_tokens,
+        config.context_window_tokens,
+        config.task_llm_timeout,
+        config.task_reasoning_effort,
+    )
+    assert "temperature" not in client._kwargs
+    assert client._reasoning_effort == "medium"
