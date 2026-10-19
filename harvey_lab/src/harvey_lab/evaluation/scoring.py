@@ -99,6 +99,46 @@ Respond with JSON only — one object per criterion, echoing its id:
 ```"""
 
 
+def verdict_response_format(ids: Sequence[str]) -> dict[str, Any]:
+    """The JSON schema a batch's reply must follow: the prompt's shape, enforced by the provider.
+
+    A free-text reply can come back without a parseable ``verdicts`` object, and
+    the same input at temperature 0 tends to fail again. The schema holds the
+    reply to ``{"verdicts": [...]}`` with each ``id`` one of the batch's
+    criteria and each ``verdict`` ``pass`` or ``fail``. That every criterion
+    appears exactly once stays the parser's check: array-length keywords are not
+    supported by every provider that enforces schemas.
+    """
+
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "rubric_verdicts",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "verdicts": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string", "enum": list(dict.fromkeys(ids))},
+                                "verdict": {"type": "string", "enum": ["pass", "fail"]},
+                                "reasoning": {"type": "string"},
+                            },
+                            "required": ["id", "verdict", "reasoning"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["verdicts"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
 def _criteria_block(criteria: Sequence[Mapping[str, Any]]) -> str:
     parts: list[str] = []
     for c in criteria:
@@ -194,7 +234,7 @@ def build_rubric_judge(
     In production ``llm`` is ``None`` and litellm is imported lazily.
     """
 
-    def _call_llm(messages: list[dict[str, str]]) -> str:
+    def _call_llm(messages: list[dict[str, str]], ids: Sequence[str]) -> str:
         if llm is not None:
             result = llm(model=model, messages=messages)
             if isinstance(result, str):
@@ -215,6 +255,11 @@ def build_rubric_judge(
             temperature=0.0,
             reasoning_effort=reasoning_effort,
             allowed_openai_params=["reasoning_effort"],
+            response_format=verdict_response_format(ids),
+            # OpenRouter serves a model from many providers, and not all of them
+            # enforce a schema; this routes only to those that support every
+            # parameter sent.
+            **({"extra_body": {"provider": {"require_parameters": True}}} if model.startswith("openrouter/") else {}),
             timeout=timeout,
             num_retries=num_retries,
         )
@@ -228,7 +273,7 @@ def build_rubric_judge(
             criteria_block=_criteria_block(criteria),
         )
         try:
-            reply = _call_llm([{"role": "user", "content": prompt}])
+            reply = _call_llm([{"role": "user", "content": prompt}], ids)
         except Exception as exc:
             raise JudgeCallError(f"Rubric judge request failed: {exc}") from exc
         return _parse_batch_verdicts(reply, ids)
@@ -378,4 +423,5 @@ __all__ = [
     "JudgeCallError",
     "build_rubric_judge",
     "score_rubric",
+    "verdict_response_format",
 ]

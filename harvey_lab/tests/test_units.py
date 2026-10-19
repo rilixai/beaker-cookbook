@@ -48,6 +48,7 @@ from harvey_lab.evaluation.scoring import (
     _scope_deliverables,
     build_rubric_judge,
     score_rubric,
+    verdict_response_format,
 )
 
 
@@ -1354,6 +1355,43 @@ def test_judge_forwards_reasoning_effort(monkeypatch: pytest.MonkeyPatch) -> Non
         assert requests[-1]["reasoning_effort"] == effort
         # The provider catalog can know a model before LiteLLM recognizes its reasoning support.
         assert requests[-1]["allowed_openai_params"] == ["reasoning_effort"]
+
+
+def test_verdict_response_format_allows_only_the_batch_ids_and_two_verdicts() -> None:
+    response_format = verdict_response_format(["C1", "C2", "C1"])
+    assert response_format["type"] == "json_schema"
+    schema = response_format["json_schema"]
+    assert schema["strict"] is True
+    assert schema["schema"]["required"] == ["verdicts"]
+    assert schema["schema"]["additionalProperties"] is False
+    entry = schema["schema"]["properties"]["verdicts"]["items"]
+    assert entry["properties"]["id"]["enum"] == ["C1", "C2"]
+    assert entry["properties"]["verdict"]["enum"] == ["pass", "fail"]
+    assert entry["required"] == ["id", "verdict", "reasoning"]
+    assert entry["additionalProperties"] is False
+
+
+@pytest.mark.parametrize(("model", "routed"), [("openrouter/z-ai/glm-5.3-flash", True), ("openai/gpt-5-mini", False)])
+def test_judge_requests_the_verdict_schema(monkeypatch: pytest.MonkeyPatch, model: str, routed: bool) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    requests: list[dict[str, Any]] = []
+    reply = (
+        '{"verdicts":[{"id":"C1","verdict":"pass","reasoning":"States it."},'
+        '{"id":"C2","verdict":"fail","reasoning":"No clause."}]}'
+    )
+
+    def completion(**kwargs: Any) -> Any:
+        requests.append(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=reply))])
+
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion))
+    criteria = [{"id": "C1", "match_criteria": "States the fee"}, {"id": "C2", "match_criteria": "Cites the clause"}]
+    assert build_rubric_judge(model=model)("Task", criteria, "The fee is $50.") == {"C1": True, "C2": False}
+    assert requests[-1]["response_format"] == verdict_response_format(["C1", "C2"])
+    # Only OpenRouter needs telling to skip the providers that would ignore the schema.
+    assert requests[-1].get("extra_body") == ({"provider": {"require_parameters": True}} if routed else None)
 
 
 def test_default_model_factory_threads_reasoning_effort() -> None:

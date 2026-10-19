@@ -47,6 +47,7 @@ from harvey_lab.evaluation.scoring import (
     _extract_verdicts_payload,
     build_rubric_judge,
     score_rubric,
+    verdict_response_format,
 )
 
 
@@ -372,6 +373,9 @@ def grade(task: TaskInput, expected: Expected, deliverables: dict[str, str]) -> 
                 temperature=0.0,
                 reasoning_effort=config.judge_reasoning_effort,
                 allowed_openai_params=["reasoning_effort"],
+                # Beaker's gateway sends an OpenRouter request that carries a schema
+                # only to providers that enforce it.
+                response_format=verdict_response_format(key),
                 timeout=config.judge_llm_timeout,
                 num_retries=config.judge_num_retries,
                 **routing,
