@@ -51,9 +51,9 @@ from beaker import (
     Check,
     Integration,
     JsonValue,
-    RepositoryRunSetup,
     RetryableCaseError,
     RolloutRuntime,
+    RunSetup,
     SetupRuntime,
     inference_target,
     objective_score,
@@ -115,7 +115,7 @@ class TaskRow(BaseModel):
         return task_name
 
 
-class TaskSetup(RepositoryRunSetup[TaskRow]):
+class TaskSetup(RunSetup[TaskRow]):
     row_model = TaskRow
 
     async def load_cases(self, row: TaskRow, *, runtime: SetupRuntime) -> AsyncIterator[Case]:
