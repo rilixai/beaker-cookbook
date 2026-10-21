@@ -179,6 +179,13 @@ def _parse_batch_verdicts(text: str, ids: Sequence[str]) -> dict[str, bool]:
     return result
 
 
+def judge_reasoning_kwargs(reasoning_effort: str) -> dict[str, Any]:
+    """Omit reasoning parameters for the non-reasoning model sentinels."""
+    if reasoning_effort in ("", "none"):
+        return {}
+    return {"reasoning_effort": reasoning_effort, "allowed_openai_params": ["reasoning_effort"]}
+
+
 def build_rubric_judge(
     model: str = DEFAULT_JUDGE_MODEL,
     llm: Callable[..., Any] | None = None,
@@ -213,10 +220,9 @@ def build_rubric_judge(
             model=model,
             messages=messages,
             temperature=0.0,
-            reasoning_effort=reasoning_effort,
-            allowed_openai_params=["reasoning_effort"],
             timeout=timeout,
             num_retries=num_retries,
+            **judge_reasoning_kwargs(reasoning_effort),
         )
         return str(response.choices[0].message.content or "")
 
@@ -377,5 +383,6 @@ __all__ = [
     "BatchJudge",
     "JudgeCallError",
     "build_rubric_judge",
+    "judge_reasoning_kwargs",
     "score_rubric",
 ]

@@ -143,7 +143,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--judge-reasoning-effort",
         choices=["none", "minimal", "low", "medium", "high", "xhigh", "max"],
         default=defaults.judge_reasoning_effort,
-        help="Judge reasoning effort. Choose a level supported by the selected judge; GLM supports low/high/max.",
+        help="Judge reasoning effort (default high). Use none to omit reasoning parameters for non-reasoning models; GLM supports low/high/max.",
     )
     parser.add_argument(
         "--judge-batch-size",

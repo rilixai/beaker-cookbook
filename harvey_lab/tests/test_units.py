@@ -1335,7 +1335,8 @@ def test_default_config_targets_luna_and_glm_flash() -> None:
     assert cli_mod._config_from_args(low_args).judge_reasoning_effort == "low"
 
 
-def test_judge_forwards_reasoning_effort(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("effort", [None, "high", "low", "none", ""])
+def test_judge_reasoning_effort(monkeypatch: pytest.MonkeyPatch, effort: str | None) -> None:
     import sys
     from types import SimpleNamespace
 
@@ -1348,12 +1349,64 @@ def test_judge_forwards_reasoning_effort(monkeypatch: pytest.MonkeyPatch) -> Non
         )
 
     monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion))
-    for effort in ("high", "low"):
-        judge = build_rubric_judge(reasoning_effort=effort)
-        assert judge("Task", [{"id": "C1", "match_criteria": "States the fee"}], "The fee is $50.") == {"C1": True}
-        assert requests[-1]["reasoning_effort"] == effort
+    judge = build_rubric_judge() if effort is None else build_rubric_judge(reasoning_effort=effort)
+    assert judge("Task", [{"id": "C1", "match_criteria": "States the fee"}], "The fee is $50.") == {"C1": True}
+    assert len(requests) == 1
+    if effort in ("", "none"):
+        assert "reasoning_effort" not in requests[0]
+        assert "allowed_openai_params" not in requests[0]
+    else:
+        assert requests[0]["reasoning_effort"] == ("high" if effort is None else effort)
         # The provider catalog can know a model before LiteLLM recognizes its reasoning support.
-        assert requests[-1]["allowed_openai_params"] == ["reasoning_effort"]
+        assert requests[0]["allowed_openai_params"] == ["reasoning_effort"]
+
+
+@pytest.mark.parametrize("effort", [None, "high", "low", "none", ""])
+def test_hosted_judge_reasoning_effort(monkeypatch: pytest.MonkeyPatch, effort: str | None) -> None:
+    import importlib
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / ".beaker"))
+    integration = importlib.import_module("beaker_integration")
+    requests: list[dict[str, Any]] = []
+
+    def completion(**kwargs: Any) -> Any:
+        requests.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"verdicts":[{"id":"C1","verdict":"pass"}]}'))]
+        )
+
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion))
+    monkeypatch.setattr(
+        integration,
+        "scoring_inference_target",
+        lambda: SimpleNamespace(model="judge-model", base_url="https://gateway.invalid/v1", api_key="test-key"),
+    )
+    if effort is not None:
+        monkeypatch.setattr(
+            integration, "HarveyLabConfig", lambda **kwargs: HarveyLabConfig(judge_reasoning_effort=effort, **kwargs)
+        )
+    task = integration.TaskInput(
+        task_id="contracts/test", title="Task", instructions="State the fee", deliverables={"memo.txt": "Memo"}
+    )
+    expected = integration.Expected(
+        criteria=[
+            integration.Criterion(id="C1", title="Fee", match_criteria="States the fee", deliverables=["memo.txt"])
+        ]
+    )
+    score = integration.grade(task, expected, {"memo.txt": "The fee is $50."})
+
+    assert score.objective == 1.0
+    assert len(requests) == 1
+    assert requests[0]["model"] == "openai/judge-model"
+    assert requests[0]["api_base"] == "https://gateway.invalid/v1"
+    if effort in ("", "none"):
+        assert "reasoning_effort" not in requests[0]
+        assert "allowed_openai_params" not in requests[0]
+    else:
+        assert requests[0]["reasoning_effort"] == ("high" if effort is None else effort)
+        assert requests[0]["allowed_openai_params"] == ["reasoning_effort"]
 
 
 def test_default_model_factory_threads_reasoning_effort() -> None:

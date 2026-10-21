@@ -46,6 +46,7 @@ from harvey_lab.evaluation.scoring import (
     JudgeCallError,
     _extract_verdicts_payload,
     build_rubric_judge,
+    judge_reasoning_kwargs,
     score_rubric,
 )
 
@@ -370,10 +371,9 @@ def grade(task: TaskInput, expected: Expected, deliverables: dict[str, str]) -> 
                 model=f"openai/{target.model}" if target else model,
                 messages=messages,
                 temperature=0.0,
-                reasoning_effort=config.judge_reasoning_effort,
-                allowed_openai_params=["reasoning_effort"],
                 timeout=config.judge_llm_timeout,
                 num_retries=config.judge_num_retries,
+                **judge_reasoning_kwargs(config.judge_reasoning_effort),
                 **routing,
             )
             text = str(response.choices[0].message.content or "")

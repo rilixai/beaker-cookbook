@@ -210,6 +210,8 @@ cases to check judge output and latency. The judge explicitly requests high reas
 the middle of GLM's supported low/high/max levels, instead of inheriting Beaker's
 max default. Luna remains at medium. The standalone CLI can override judge effort
 with `--judge-reasoning-effort`; hosted grading uses `HarveyLabConfig.judge_reasoning_effort`.
+Use `--judge-reasoning-effort none` for a non-reasoning judge model. Both judging
+paths omit reasoning parameters when the configured effort is `none` or an empty string.
 
 Selected-model runs use the Beaker gateway, omit temperature and output-token limits, and default
 to a 1,000,000-token history window. Set the optional hosted agent variable
