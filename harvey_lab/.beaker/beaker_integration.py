@@ -25,10 +25,11 @@ from beaker import (
     Check,
     Integration,
     JsonValue,
-    RepositoryRunSetup,
     RepositoryRunSetupResult,
     RetryableCaseError,
     RolloutRuntime,
+    RunSetup,
+    RunSetupResults,
     SetupRuntime,
     inference_target,
     repository,
@@ -121,16 +122,16 @@ class TaskRow(BaseModel):
         return self
 
 
-class TaskSetup(RepositoryRunSetup[TaskRow]):
+class TaskSetup(RunSetup[TaskRow]):
     row_model = TaskRow
 
     @asynccontextmanager
-    async def prepare_run(self, *, runtime: SetupRuntime) -> AsyncIterator[RepositoryRunSetupResult]:
+    async def prepare_run(self, *, runtime: SetupRuntime) -> AsyncIterator[RunSetupResults]:
         del runtime
         selected_context_window()
         with tempfile.TemporaryDirectory(prefix="harvey-beaker-corpus-") as cache:
             self.cache_dir = Path(cache)
-            yield RepositoryRunSetupResult()
+            yield {"repository": RepositoryRunSetupResult()}
 
     async def load_cases(self, row: TaskRow, *, runtime: SetupRuntime) -> AsyncIterator[Case]:
         # Optional local source avoids network in smoke; never forwarded to a candidate.
