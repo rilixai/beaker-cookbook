@@ -60,8 +60,11 @@ def main() -> None:
     if args.test_limit is not None and (not args.smoke_only or args.full):
         parser.error("--test-limit requires --smoke-only and cannot be combined with --full")
     frozen_train, frozen_test = read_split("train"), read_split("test")
-    validate_splits(frozen_train, frozen_test)
-    train = frozen_train if args.full else sample_train(frozen_train, frozen_test, args.train_limit, args.seed)
+    if args.full:
+        validate_splits(frozen_train, frozen_test)
+        train = frozen_train
+    else:
+        train = sample_train(frozen_train, frozen_test, args.train_limit, args.seed)
     splits = {"train": train, "test": frozen_test[: args.test_limit]}
     manifest = {
         "source": "harveyai/harvey-labs",
