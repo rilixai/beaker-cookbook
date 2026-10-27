@@ -184,11 +184,3 @@ uv run pytest -q          # no network, scripted fake client
 
 AutomationBench is MIT-licensed by Zapier, Inc. See [ATTRIBUTION.md](ATTRIBUTION.md)
 and [LICENSE](LICENSE).
-
-## Experimental latency pilot
-
-A separate frozen H20 pilot is available under
-[`.beaker/latency-pilot`](.beaker/latency-pilot/README.md). It preserves the
-selected candidate and dependencies from the October 26 run, keeps correctness
-separate from timing, and reserves 36 TRAIN / 18 TEST cases. It requires the
-experimental Beaker latency goal and performs no paid evaluation by default.
