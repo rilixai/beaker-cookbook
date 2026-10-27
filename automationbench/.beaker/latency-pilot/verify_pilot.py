@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -10,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 
-def verify(root: Path = ROOT) -> dict[str, object]:
+def verify(root: Path = ROOT, *, source_dataset_dir: Path | None = None) -> dict[str, object]:
     provenance = json.loads((root / "provenance.json").read_text())
     project = root / "project"
     expected_paths = set()
@@ -38,13 +39,25 @@ def verify(root: Path = ROOT) -> dict[str, object]:
             raise ValueError(f"Trusted pilot policy changed: {path}")
     ids_by_split = {}
     for split, expected_count in (("train", 36), ("test", 18)):
-        data = (root / "dataset" / f"{split}.jsonl").read_bytes()
         manifest = provenance["dataset"][split]
-        if hashlib.sha256(data).hexdigest() != manifest["pilot_sha256"]:
-            raise ValueError(f"Frozen {split} dataset changed")
-        rows = [json.loads(line) for line in data.splitlines()]
-        if len(rows) != expected_count or [row["id"] for row in rows] != manifest["case_ids"]:
+        case_ids = manifest["case_ids"]
+        if len(case_ids) != expected_count or len(set(case_ids)) != expected_count:
             raise ValueError(f"Wrong {split} membership")
+        ids_by_split[split] = set(case_ids)
+        if source_dataset_dir is None:
+            continue
+        data = (source_dataset_dir / f"{split}.jsonl").read_bytes()
+        if hashlib.sha256(data).hexdigest() != manifest["source_sha256"]:
+            raise ValueError(f"Source {split} dataset changed")
+        source_rows = [json.loads(line) for line in data.splitlines()]
+        if len(source_rows) != manifest["source_cases"]:
+            raise ValueError(f"Wrong source {split} size")
+        rows = [row for row in source_rows if row["id"] in ids_by_split[split]]
+        if [row["id"] for row in rows] != case_ids:
+            raise ValueError(f"Wrong {split} membership")
+        pilot_data = "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows).encode()
+        if hashlib.sha256(pilot_data).hexdigest() != manifest["pilot_sha256"]:
+            raise ValueError(f"Frozen {split} dataset changed")
         counts: dict[str, int] = {}
         for row in rows:
             metadata = row["metadata"]
@@ -54,7 +67,6 @@ def verify(root: Path = ROOT) -> dict[str, object]:
             counts[domain] = counts.get(domain, 0) + 1
         if len(counts) != 6 or set(counts.values()) != {manifest["per_domain"]}:
             raise ValueError(f"Wrong domain balance in {split}")
-        ids_by_split[split] = set(manifest["case_ids"])
     if ids_by_split["train"] & ids_by_split["test"]:
         raise ValueError("TRAIN and TEST overlap")
     return {
@@ -66,9 +78,19 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         "model": provenance["model"],
         "reasoning_effort": provenance["reasoning_effort"],
         "max_concurrency": provenance["max_concurrency"],
-        "status": "verified; no evaluations launched",
+        "dataset_rows_verified": source_dataset_dir is not None,
+        "status": "verified; no evaluations launched"
+        if source_dataset_dir is not None
+        else "candidate and dataset references verified; dataset rows not supplied",
     }
 
 
 if __name__ == "__main__":
-    print(json.dumps(verify(), indent=2))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--source-dataset-dir",
+        type=Path,
+        help="External directory holding the source revision's TRAIN and TEST JSONL files",
+    )
+    args = parser.parse_args()
+    print(json.dumps(verify(source_dataset_dir=args.source_dataset_dir), indent=2))

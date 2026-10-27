@@ -26,7 +26,7 @@ reasoning, 50 steps, 1,200-second task timeout, concurrency 32 and two retries.
 `provenance.json` records the exported file hashes, immutable source dataset
 revision, dependency hashes, and selected task IDs.
 
-## Frozen pilot data
+## Pilot dataset references
 
 The original immutable dataset has 120 TRAIN and 104 TEST cases. This pilot
 takes the first six TRAIN and three TEST cases per domain in source-file order,
@@ -34,6 +34,10 @@ without consulting outcomes: 36 TRAIN / 18 TEST. Both splits retain their
 original cases and assertions. The smaller TEST set supports preliminary
 claims only. It was part of a previously evaluated benchmark, not a new unseen
 benchmark.
+
+Dataset rows and expected assertions are kept in Beaker. This repository stores
+only the immutable source revision, selected case IDs, and source/pilot checksums
+in `provenance.json`.
 
 ## Validate and prepare
 
@@ -44,10 +48,23 @@ python3 verify_pilot.py
 python3 -m compileall -q project/.beaker
 ```
 
+These checks verify the candidate and dataset references without downloading
+data. Before preparing a run, retrieve the source revision's `train.jsonl` and
+`test.jsonl` from Beaker into a directory outside the repository, then run:
+
+```bash
+python3 verify_pilot.py --source-dataset-dir /path/outside/repository/source-dataset
+```
+
+This verifies the source-file checksums, selects the pinned cases in memory,
+and checks their membership, domain balance, and pilot checksums. It writes no
+dataset files. Without this option, the verifier explicitly reports that dataset
+rows have not been verified. Keep any prepared pilot rows outside the repository.
+
 The opt-in config is `project/.beaker/beaker.yaml`. It pins concurrency and
 retry settings and sets `harness_optimization.optimization_goal: latency`.
 Use that config explicitly; do not change the normal recipe's default config.
-Use a fresh dataset name when uploading `dataset/`; never replace the source
+Use a fresh dataset name when uploading the externally prepared pilot; never replace the source
 run's dataset revision. Pin the returned immutable revision for smoke and
 launch. The source integration name is `automationbench-skills`; its agent
 must be the Rilix agent associated with `rilixai/beaker-cookbook`.

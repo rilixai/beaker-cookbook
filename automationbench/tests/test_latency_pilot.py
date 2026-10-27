@@ -1,6 +1,8 @@
 """Offline integrity checks for the frozen H20 experiment."""
 
+import hashlib
 import importlib.util
+import json
 import shutil
 from pathlib import Path
 
@@ -20,16 +22,50 @@ def test_pilot_preserves_h20_and_the_frozen_split():
     assert result["train_cases"] == 36
     assert result["test_cases"] == 18
     assert result["max_concurrency"] == 32
+    assert result["dataset_rows_verified"] is False
+    assert not (PILOT / "dataset").exists()
 
 
-@pytest.mark.parametrize("relative", ["project/prompts/system.md", "project/uv.lock", "dataset/test.jsonl"])
-def test_pilot_rejects_changed_candidate_dependencies_or_data(tmp_path, relative):
+@pytest.mark.parametrize(
+    "relative", ["project/prompts/system.md", "project/uv.lock", "project/.beaker/beaker_integration.py"]
+)
+def test_pilot_rejects_changed_candidate_dependencies_or_policy(tmp_path, relative):
     copy = tmp_path / "pilot"
     shutil.copytree(PILOT, copy, ignore=shutil.ignore_patterns("__pycache__"))
     path = copy / relative
     path.write_bytes(path.read_bytes() + b"\n")
     with pytest.raises(ValueError, match="changed"):
         verifier.verify(copy)
+
+
+def test_external_source_data_is_verified_without_writing_pilot_rows(tmp_path):
+    copy = tmp_path / "pilot"
+    shutil.copytree(PILOT, copy, ignore=shutil.ignore_patterns("__pycache__"))
+    source = tmp_path / "external-source"
+    source.mkdir()
+    provenance_path = copy / "provenance.json"
+    provenance = json.loads(provenance_path.read_text())
+    # Synthetic metadata-only rows exercise verification without embedding real tasks or assertions.
+    for split in ("train", "test"):
+        manifest = provenance["dataset"][split]
+        rows = [
+            {"id": case_id, "metadata": {"domain": f"domain-{i // manifest['per_domain']}", "source_split": split}}
+            for i, case_id in enumerate(manifest["case_ids"])
+        ]
+        data = "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows).encode()
+        (source / f"{split}.jsonl").write_bytes(data)
+        manifest.update(
+            source_cases=len(rows),
+            source_sha256=hashlib.sha256(data).hexdigest(),
+            pilot_sha256=hashlib.sha256(data).hexdigest(),
+        )
+    provenance_path.write_text(json.dumps(provenance))
+    assert verifier.verify(copy, source_dataset_dir=source)["dataset_rows_verified"] is True
+    assert not (copy / "dataset").exists()
+    with (source / "test.jsonl").open("ab") as output:
+        output.write(b"\n")
+    with pytest.raises(ValueError, match="Source test dataset changed"):
+        verifier.verify(copy, source_dataset_dir=source)
 
 
 def test_trusted_pilot_client_rejects_model_and_reasoning_changes():
