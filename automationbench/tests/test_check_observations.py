@@ -105,6 +105,8 @@ def test_all_conditions_preserve_verdict_exclusion_and_parameters(
 
 
 async def test_run_case_displays_changes_once_and_native_scoring_uses_full_context(monkeypatch, tmp_path) -> None:
+    clock = iter([0.0, 60.0, 60.0, 120.0])
+    monkeypatch.setattr(integration.time, "perf_counter", lambda: next(clock))
     initial = {"gmail": {"messages": []}}
     end = WorldState(
         gmail={"messages": [{"to": ["target@example.com"], "label_ids": ["SENT"], "body_plain": "Total: $19,500"}]}
@@ -115,7 +117,9 @@ async def test_run_case_displays_changes_once_and_native_scoring_uses_full_conte
     client = SimpleNamespace(close=AsyncMock())
     monkeypatch.setattr(integration, "_client_for", lambda _: (client, None))
     monkeypatch.setattr(
-        integration, "run_rollout_raw", AsyncMock(return_value={"completion": ["done"], "_end_state": end})
+        integration,
+        "run_rollout_raw",
+        AsyncMock(return_value={"completion": ["done"], "_end_state": end, "latency_s": 0.001}),
     )
 
     @contextmanager
@@ -124,6 +128,7 @@ async def test_run_case_displays_changes_once_and_native_scoring_uses_full_conte
 
     result = await integration.run_case(case_input={}, runtime=SimpleNamespace(trace=SimpleNamespace(stage=stage)))
     assert result.output_kind == "record" and result.context["end_state"] == end
+    assert result.context["latency_s"] == 60.0  # ignore the editable runner's claimed timing
     assert result.output["gmail.added"][0]["record"]["body_plain"] == "Total: $19,500"
     client.close.assert_awaited_once()
     case = Case(
@@ -142,8 +147,12 @@ async def test_run_case_displays_changes_once_and_native_scoring_uses_full_conte
         },
     )
     score = await integration.score_case(case=case, result=result, case_files_dir=tmp_path)
-    assert score.field_scores == {"partial_credit": pytest.approx(2 / 3), "task_completed_correctly": 0.0}
-    assert score.objective == pytest.approx(0.8 * 2 / 3)
+    assert score.field_scores == {
+        "partial_credit": pytest.approx(2 / 3),
+        "task_completed_correctly": 0.0,
+        "latency_score": 0.0,
+    }
+    assert score.objective == pytest.approx(0.72 * 2 / 3)
     assert [check.verdict for check in score.checks] == ["pass", "fail", "pass"]
     assert all(check.expected is None and check.predicted is None for check in score.checks)
     assert "Required conditions:" in score.checks[1].message
@@ -164,11 +173,13 @@ async def test_run_case_displays_changes_once_and_native_scoring_uses_full_conte
 async def test_large_scoring_state_takes_priority_over_display_output(
     monkeypatch, tmp_path, headroom, display_kind
 ) -> None:
+    clock = iter([0.0, 60.0])
+    monkeypatch.setattr(integration.time, "perf_counter", lambda: next(clock))
     initial = {"gmail": {"messages": []}}
     end = WorldState(
         gmail={"messages": [{"to": ["target@example.com"], "label_ids": ["SENT"], "body_plain": ""}]}
     ).model_dump(mode="json")
-    context = {"task_name": "sample", "domain": "finance", "error": None, "end_state": end}
+    context = {"task_name": "sample", "domain": "finance", "error": None, "end_state": end, "latency_s": 60.0}
     envelope = {"context": context, "output": None, "output_kind": "record"}
     padding_bytes = (
         integration._RESULT_MAX_BYTES - headroom - len(json.dumps(envelope, separators=(",", ":")).encode("utf-8"))
@@ -213,7 +224,7 @@ async def test_large_scoring_state_takes_priority_over_display_output(
         expected={"assertions": [{"type": "gmail_message_sent_to", "to": "target@example.com"}]},
     )
     score = await integration.score_case(case=case, result=result, case_files_dir=tmp_path)
-    assert score.objective == 1.0 and score.checks[0].verdict == "pass"
+    assert score.objective == pytest.approx(0.95) and score.checks[0].verdict == "pass"
 
 
 def test_diagnostic_mapping_snapshot_reads_only_eight_entries() -> None:

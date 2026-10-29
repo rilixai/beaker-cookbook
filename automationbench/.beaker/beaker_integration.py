@@ -2,8 +2,8 @@
 
 The candidate is the live ``skills/`` tree and the agent's system prompt,
 ``prompts/system.md``. Evaluation policy stays here: load a frozen-split task
-by name, run the harness ``run_one`` path, and score the benchmark's
-deterministic assertion metrics.
+by name, run the harness ``run_one`` path, and combine the benchmark's
+deterministic correctness metrics (90%) with measured rollout latency (10%).
 
 Contract: the dataset row's ``expected`` holds the task's assertion list
 (``{"assertions": [...]}``), ``run_case`` exposes bounded app changes as the
@@ -32,7 +32,9 @@ enable here.
 from __future__ import annotations
 
 import json
+import math
 import os
+import time
 from collections.abc import AsyncIterator, Mapping
 from functools import cache
 from pathlib import Path
@@ -81,9 +83,10 @@ from automationbench_skills.runner import (
 )
 
 
-# Hill-climb mostly on assertion partial credit, with strict task completion
-# as a smaller term so fully-correct runs are preferred.
-FIELD_WEIGHTS = {"partial_credit": 0.8, "task_completed_correctly": 0.2}
+# Preserve the existing 80/20 correctness rubric within its 90% share.
+# Only fully correct, error-free executions earn the remaining latency term.
+FIELD_WEIGHTS = {"partial_credit": 0.72, "task_completed_correctly": 0.18, "latency_score": 0.10}
+LATENCY_REFERENCE_SECONDS = 60.0
 DEFAULT_TIMEOUT_SECONDS = 2400.0
 # The scored benchmark domains (``upload_splits.py`` draws from the same set).
 _PUBLIC_DOMAINS = ("sales", "marketing", "operations", "support", "finance", "hr")
@@ -297,6 +300,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
         },
     ) as stage:
         client, model = _client_for(runtime)
+        started = time.perf_counter()
         try:
             # Same execution path as the app's own ``run_one_async``; only the
             # client (traced, run-scoped) and the scoring below are Beaker's.
@@ -313,6 +317,10 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
                 max_steps=DEFAULT_MAX_STEPS,
                 timeout=DEFAULT_TIMEOUT_SECONDS,
             )
+            # Measured here in trusted .beaker code, never taken from the
+            # optimizer-editable runner's returned metrics. Excludes client
+            # cleanup, display rendering and assertion scoring.
+            latency_s = time.perf_counter() - started
         except TimeoutError as exc:
             timeout = f"timeout after {DEFAULT_TIMEOUT_SECONDS + TIMEOUT_GRACE_SECONDS}s"
             stage.output({"error": timeout})
@@ -356,6 +364,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             "domain": sample.domain,
             "error": error,
             "end_state": to_json_safe(end_state),
+            "latency_s": latency_s,
         }
         display = _budget_output(to_json_safe(observed), context)
         return CaseResult(output=display, output_kind="record" if display is not None else "none", context=context)
@@ -492,7 +501,8 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
 
     ``partial_credit`` is the benchmark's own scoring function (including its
     free-assertion exclusion against the task's initial state); it is fed the
-    dataset's assertions and the end state the candidate reported.
+    dataset's assertions and the end state the candidate reported. Correct,
+    error-free tasks also earn the bounded, trusted latency component.
     """
     del case_files_dir
     assertions = _assertions_for(case)
@@ -539,6 +549,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
     scores = {
         "task_completed_correctly": 1.0 if partial == 1.0 else 0.0,
         "partial_credit": partial,
+        "latency_score": _latency_score(context, correct=partial == 1.0 and error is None),
     }
     return CaseScore(
         field_scores=scores,
@@ -557,6 +568,21 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
             for outcome, held, assertion in zip(outcomes, held_initially, assertions, strict=True)
         ),
     )
+
+
+def _latency_score(context: Mapping[str, JsonValue], *, correct: bool) -> float:
+    """Bounded speed reward, earned only by a correctly completed task.
+
+    A 60-second rollout earns 0.5; halving its duration to 30 seconds earns
+    2/3. The fixed scale keeps scores comparable across candidates and splits.
+    Missing or invalid measurements earn no bonus, including legacy results.
+    """
+    elapsed = context.get("latency_s")
+    if not correct or isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)):
+        return 0.0
+    if not math.isfinite(elapsed) or elapsed <= 0:
+        return 0.0
+    return LATENCY_REFERENCE_SECONDS / (LATENCY_REFERENCE_SECONDS + elapsed)
 
 
 integration = Integration(
