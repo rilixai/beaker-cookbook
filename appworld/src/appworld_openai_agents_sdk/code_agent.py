@@ -14,6 +14,7 @@ code (checked after every execution) or exhausts its step budget.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, cast
 
 from agents import (
@@ -65,6 +66,8 @@ def build_agent(
     world: AppWorld, profile: ModelProfile, instructions: str, logger: Logger
 ) -> tuple[Agent, dict[str, int]]:
     step_counter = {"count": 0}
+    opaque_file_hint_sent = False
+    selection_hint_sent = False
 
     # NOTE: async so the SDK runs it on the event-loop thread. AppWorld's
     # interpreter must run on the thread that created the world (its execution
@@ -73,10 +76,66 @@ def build_agent(
     async def execute_python(code: str) -> str:
         """Execute python code in the task's REPL environment and return its
         printed output. Variables persist across calls. Apps are callable as
-        apis.<app_name>.<api_name>(...)."""
+        apis.<app_name>.<api_name>(...).
+
+        When a task selects earlier items or items through the current
+        item in an ordered queue, locate the current item's position from
+        the returned current marker.
+        Filter the queue by position before changing items.
+        Include the current item when requested and exclude later items.
+        Queue membership alone does not mean an item has been played or
+        processed.
+
+        When a selection joins properties with "and" or "or", write the
+        full Boolean test for each affected item type before changing it.
+        Fetch data for every property in that test.
+        Keep every alternative for "or" and require every property for "and".
+        A definition of one property does not replace the full test.
+
+        Before calling apis.supervisor.complete_task in code, identify where
+        the task asks you to deliver the result.
+        When asked to send or reply with information in an app, deliver it
+        in that message. Omit the completion answer unless the supervisor
+        also asks you to report the result back.
+        A question from a message recipient asks for a reply to that person,
+        not an answer to the supervisor.
+        Put saved-record content in the target app too.
+        For a direct information request from the supervisor, supply the
+        requested result as the answer after completing any app actions.
+        For other app actions, omit the answer argument.
+        Do not add an unrequested count, chosen name, or confirmation."""
+        nonlocal opaque_file_hint_sent, selection_hint_sent
         step_counter["count"] += 1
         logger.show_message(role="agent", content=code, step_number=step_counter["count"])
         output = cast(str, world.execute(code))
+        if not selection_hint_sent and re.search(
+            r"\bapis\.api_docs\.show_api_descriptions\s*\(", code
+        ):
+            output += (
+                "\nSelection note: when the task acts on items inside collections, "
+                "identify the items the action changes before choosing lookup APIs. "
+                "In your next code chunk, write a comment mapping each requested "
+                "condition to an item or a collection. Resolve an ambiguous trailing "
+                "personal preference on the action items unless the task explicitly "
+                "names the collection as its target. Read the API docs for both types. "
+                "Get all member IDs from the requested collections, then test item "
+                "conditions using item fields or item lookups. A condition on items "
+                "does not also restrict their collections. Filter collections by a "
+                "property only when the task explicitly asks for that property of "
+                "the collections. Combine membership and item conditions by item ID "
+                "before changing items."
+            )
+            selection_hint_sent = True
+        if not opaque_file_hint_sent and re.search(r"\bbinary:[0-9a-fA-F]+\.\.\.", output):
+            output += (
+                "\nFile-content note: a truncated binary:... marker contains no readable "
+                "file bytes. Copying it to another extension does not reveal its content. "
+                "Look for needed facts through read APIs. For information-only requests, "
+                "keep experiments in Python variables; do not create, copy, archive, or "
+                "delete account files as scratch work. File changes explicitly requested "
+                "by the task are still allowed. Do not guess missing values."
+            )
+            opaque_file_hint_sent = True
         logger.show_message(role="environment", content=output, step_number=step_counter["count"])
         return output
 
