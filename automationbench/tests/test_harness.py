@@ -354,7 +354,7 @@ class TestRunner:
         # Independent of ModelSpec's defaults, so the CLI default can change freely.
         spec = default_model_spec()
         assert (spec.name, spec.resolved_api(), spec.sampling_args()) == (
-            "gpt-5.6-luna",
+            "gpt-6-luna",
             "chat_completions",
             {"reasoning_effort": "medium", "max_completion_tokens": 32768},
         )
