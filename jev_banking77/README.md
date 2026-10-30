@@ -9,6 +9,48 @@ Beaker optimizes only `prompts/instructions.md` and the intent descriptions in
 and exact-match scorer stay fixed. The model is pinned to `jev-1.14.0`.
 No LLM judge, chat-completions adapter, or OpenRouter route is used.
 
+## What this benchmark tests
+
+BANKING77 is a fine-grained intent-classification dataset introduced by
+[Casanueva et al. (2020)](https://arxiv.org/abs/2003.04807). It contains 13,083
+annotated banking support queries across 77 intents. Many intents are closely
+related: a message about a card that has not arrived must be distinguished from
+one asking for a delivery estimate, for example. The task is to identify the
+customer's intended support category from the message's meaning.
+
+This recipe uses Jev as the routing decision-maker. Each message produces one
+label and a probability distribution over the fixed intent set. Exact-label
+accuracy measures routing correctness; calibration metrics measure how well the
+reported probabilities match observed correctness. This tests semantic routing
+and confidence quality. It does not measure answer generation, tool execution,
+or planning across multiple steps.
+
+The fixed labels and known answers make this a useful Beaker optimization task:
+changes to instructions and intent descriptions can be evaluated directly,
+without an LLM judge. Training and validation examples support those changes;
+the separate official test set measures the frozen candidate's final performance.
+
+## Papers and related work
+
+- **Dataset paper:** Iñigo Casanueva, Tadas Temčinas, Daniela Gerz, Matthew
+  Henderson, and Ivan Vulić (2020).
+  [*Efficient Intent Detection with Dual Sentence Encoders*](https://arxiv.org/abs/2003.04807).
+  Introduces BANKING77 and studies intent detection with pretrained sentence
+  encoders. This recipe uses its dataset, not its encoder-based classifier.
+- **Related Jev evaluation:** Tobias Deußer, Rajkumar Ramamurthy, Lorenz
+  Sparrenberg, and Rafet Sifa (2026).
+  [*Evaluating and Benchmarking the System One Model Jev*](https://arxiv.org/abs/2609.37647v2).
+  Evaluates Jev 1.13 on classification, routing, and other decision tasks, including
+  probability calibration. Its results provide context; this recipe uses Jev
+  1.14 and its own optimization protocol, so it is not a reproduction of that study.
+- **Related open-source benchmark:**
+  [JevBench](https://github.com/dhruvmehra/jevbench) compares classifiers on
+  BANKING77, AG News, and SST-2, including Jev through OpenRouter. It is a code
+  reference rather than a paper, and its reported scores are not this recipe's baseline.
+
+See [ATTRIBUTION.md](ATTRIBUTION.md) for the pinned dataset source, copied
+material, and license details.
+
 ## Setup and prepare data
 
 From this recipe directory, with Python 3.12 and uv:
