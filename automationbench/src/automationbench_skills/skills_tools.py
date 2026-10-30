@@ -69,12 +69,18 @@ def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:
     return {}, text
 
 
-def list_skills() -> str:
+def list_skills(skill_ids: list[str] | None = None) -> str:
     """List the reusable skill guides available for this workspace. Call this first,
     before planning tool calls: skills contain proven step-by-step procedures for
     common workflows. Returns one `id: description` line per skill; read a relevant
-    skill with read_skill(id) before acting. Guides marked include_in_listing
-    are also supplied in full and do not need a separate read_skill call.
+    skill with read_skill(id) before acting. Pass skill_ids to include the full
+    bodies of the domain and app guides you already need in this same call.
+    Requested guides and guides marked include_in_listing count as read;
+    do not request their bodies again.
+
+    Args:
+        skill_ids: Optional guide IDs to read with the listing, e.g.
+            ["domains/finance", "apps/gmail"]. Omit for the usual listing.
 
     Returns:
         One line per skill: `<id>: <description>` (IDs look like `apps/gmail` or
@@ -85,25 +91,35 @@ def list_skills() -> str:
         return "No skills available."
     lines = []
     included = []
+    requested = {skill_id.strip("/"): skill_id for skill_id in (skill_ids or [])}
+    errors = []
     for skill_id, f in sorted(files.items()):
         try:
             meta, body = _split_frontmatter(f.read_text())
-        except OSError:
+        except OSError as e:
+            if skill_id in requested:
+                errors.append(f"Could not read skill {requested[skill_id]!r}: {e}")
             continue
         description = meta.get("description", "")
         if not description:
             description = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
         lines.append(f"{skill_id}: {description}")
-        if meta.get("include_in_listing", "").lower() == "true" and body.strip():
+        if skill_id in requested or (meta.get("include_in_listing", "").lower() == "true" and body.strip()):
             included.append(f"### {skill_id}\n\n{body}")
+    available = ", ".join(sorted(files))
+    for skill_id, original in requested.items():
+        if skill_id not in files:
+            errors.append(f"Unknown skill {original!r}. Available skills: {available}")
     if not lines:
-        return "No skills available."
+        return "\n\n".join(["No skills available.", *errors])
     listing = "\n".join(lines)
     if included:
         listing += (
             "\n\nThe following guides are included in full and count as read. "
             "Apply each only within its stated scope.\n\n" + "\n\n".join(included)
         )
+    if errors:
+        listing += "\n\n" + "\n\n".join(errors)
     return listing
 
 
