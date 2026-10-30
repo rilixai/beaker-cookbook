@@ -28,7 +28,12 @@ from verifiers.clients import Client
 from verifiers.legacy.types import ClientConfig
 from verifiers.types import RolloutInput
 
-from automationbench_skills.clients import CostTrackingChatCompletionsClient
+from automationbench_skills.clients import (
+    DEFAULT_MAX_ANSWER_TOKENS,
+    DEFAULT_MAX_REASONING_TOKENS,
+    DEFAULT_MODEL_REQUEST_TIMEOUT,
+    CostTrackingChatCompletionsClient,
+)
 from automationbench_skills.data.tasks import Sample
 from automationbench_skills.prompts import load_system_prompt, task_clock, with_system_prompt
 from automationbench_skills.skills_tools import SKILL_TOOLS, set_skills_dir
@@ -86,6 +91,7 @@ class ModelSpec:
         return str(resolve_api(self.name, self.base_url, self.api))
 
     def sampling_args(self) -> dict[str, Any]:
+        args: dict[str, Any]
         effort = self.reasoning_effort if self.reasoning_effort not in (None, "", "default") else None
         if self.is_openrouter():
             reasoning: dict[str, Any] = {}
@@ -96,8 +102,28 @@ class ModelSpec:
             extra_body: dict[str, Any] = {"reasoning": reasoning} if reasoning else {}
             if self.extra_body:
                 extra_body = {**extra_body, **json.loads(self.extra_body)}
-            return {"extra_body": extra_body} if extra_body else {}
-        return build_sampling_args(self.name, self.resolved_api(), effort, self.extra_body) or {}
+            args = {"extra_body": extra_body} if extra_body else {}
+        else:
+            args = build_sampling_args(self.name, self.resolved_api(), effort, self.extra_body) or {}
+        if self.resolved_api() == "chat_completions":
+            extra = args.get("extra_body") or {}
+            # Reasoning shares the completion cap. An explicit reasoning budget
+            # (OpenRouter's reasoning.max_tokens) sets the allowance; otherwise the
+            # default allowance applies.
+            requested_reasoning = extra.get("reasoning")
+            budget = requested_reasoning.get("max_tokens") if isinstance(requested_reasoning, dict) else None
+            if budget is not None and (not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0):
+                raise ValueError("reasoning.max_tokens must be a positive integer")
+            cap = (budget or DEFAULT_MAX_REASONING_TOKENS) + DEFAULT_MAX_ANSWER_TOKENS
+            for key in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
+                for container in (args, extra):
+                    requested = container.pop(key, None)
+                    if requested is not None:
+                        if not isinstance(requested, int) or isinstance(requested, bool) or requested <= 0:
+                            raise ValueError(f"{key} must be a positive integer")
+                        cap = min(cap, requested)
+            args["max_completion_tokens"] = cap
+        return args
 
 
 @dataclass
@@ -225,6 +251,8 @@ def get_client(model: ModelSpec) -> Client:
                     api_key_var=key_var,
                     api_base_url=model.effective_base_url() or "https://api.openai.com/v1",
                     extra_headers={},
+                    max_retries=0,
+                    timeout=DEFAULT_MODEL_REQUEST_TIMEOUT,
                 )
             )
         else:

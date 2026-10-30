@@ -9,15 +9,18 @@ dependencies = [
   # The AppWorld environment + evaluator (NOT vendored). Pinned to the exact
   # commit the prompt/helpers were vendored from.
   "appworld @ git+https://github.com/StonyBrookNLP/appworld.git@a072b7a86e7c1d5b1d7175659d750ebb9b79f10a",
+  # This AppWorld commit passes embed=True to Path(); FastAPI 0.155 removes
+  # the extra keyword arguments that previously accepted it.
+  "fastapi>=0.110,<0.155",
   # This AppWorld commit patches Pydantic's two-argument private match_type API;
   # Pydantic 2.14 adds an origin argument and breaks AppWorld during import.
   "pydantic>=2.12,<2.14",
   # sqlalchemy-utils 0.42 uses ORM internals removed in SQLAlchemy 2.1.
   "sqlalchemy>=2.0.14,<2.1",
   # The OpenAI Agents SDK driving the agent loop (Responses API, reasoning
-  # effort on GPT-5-family models).
+  # effort on GPT-5/6-family models).
   "openai-agents>=0.20,<1",
-  # Must know the GPT-5 family + the `reasoning` field on Responses.
+  # Must know the GPT-5/6 families + the `reasoning` field on Responses.
   "openai>=2.54,<3",
   # appworld @ a072b7a imports the pre-2.0 mcp Server API; pin so its own
   # modules stay importable.
@@ -48,7 +51,7 @@ dev = [
   "ruff",
   "mypy",
   "pytest",
-  "beaker-sdk[openai-agents,tracing]>=0.6.4",
+  "beaker-sdk[openai-agents,tracing]>=0.6.5",
 ]
 
 [tool.pytest.ini_options]

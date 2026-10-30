@@ -8,6 +8,20 @@ This present recipe runs the benchmark one task at a time (`run_one`). The agent
 > working `beaker.yaml` and `beaker_integration.py`; there is nothing to write
 > before pointing Beaker at it.
 
+Beaker displays assertion conditions as **Checks**, without Expected/Predicted
+value pairs. Check names include the assertion type and complete parameter values,
+resolving record IDs to readable labels when available. Descriptions include the
+handler's first docstring line and the full condition parameters with original IDs;
+scoring metadata (`scored`, `excluded`) is omitted from both names and descriptions.
+Failed Checks show a readable summary of required conditions, recorded value
+comparisons, and the latest evaluator observations captured during scoring.
+Messages omit Python code and function traces, and explicitly note that the
+diagnostic is partial; it does not infer a cause from the last comparisons alone.
+**OUTPUT** shows app changes once per sample with size limits and omission markers.
+Display output is reduced or omitted when the combined result approaches Beaker's
+transport limit, preserving the complete scoring state before display details.
+The full final state remains in `context` for native scoring.
+
 ## Quick start
 
 ```bash
@@ -91,6 +105,38 @@ name or pass `--api chat_completions`.
 A `vendor/model` name (e.g. `z-ai/glm-5.3-flash`) routes to OpenRouter using
 `OPENROUTER_API_KEY`; `--reasoning-enabled` toggles reasoning for models that
 only expose an on/off switch.
+
+## Chat Completions limits
+
+OpenAI-compatible Chat Completions calls use **32,768 output tokens** (a 24,576-token
+reasoning allowance plus 8,192 for the answer), at most **three attempts per model
+turn**, a **300-second timeout per attempt**, and a **600-second deadline** for the
+whole turn, covering every attempt and the backoff between them. SDK retries are
+disabled. These limits apply to the hosted Beaker gateway and local runs using
+`--api chat_completions`. Direct OpenAI CLI
+runs select native Responses by default; Responses, Anthropic, and Gemini clients
+retain their upstream behavior.
+
+The defaults are named constants in `src/automationbench_skills/clients.py`.
+Reasoning counts toward the completion cap on most providers, so a reasoning
+budget in `ModelSpec.extra_body` (OpenRouter's `{"reasoning": {"max_tokens": N}}`)
+sets the cap to that budget plus the answer allowance; where the provider honors
+the budget, a call stops reasoning and still answers. The CLI does not expose
+`extra_body`, and a budget applies only to runs that call OpenRouter directly:
+hosted runs send none, and the Beaker gateway accepts `reasoning.effort`,
+`enabled`, and `exclude` but rejects a token budget. A lower output cap in
+`extra_body` is honored; a higher one cannot exceed the cap above. A call whose
+reasoning uses the whole cap without answering fails with a model error rather
+than ending the rollout as if the agent had finished. The client does not retry
+that call, since the same request would stop in the same place, but a hosted run
+re-runs the whole case after any model error, up to the run's case retry limit; a
+local run scores the world as the agent left it. The cap can still truncate a
+legitimate response, so compare task accuracy and truncation when changing it.
+Hosted model requests retain per-attempt traces, and returned responses retain
+usage/cost accounting.
+Tool arguments pass unchanged to the existing environment parser; this client
+adds no batch validation or format-recovery instructions. Rebuild the Integration
+image from the updated cookbook commit before starting hosted evaluations.
 
 ## Reference numbers
 
