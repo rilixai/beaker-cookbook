@@ -85,7 +85,7 @@ Hosted datasets change only when uploaded.
 
 ## Models
 
-`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort medium`. Routing
+`--model` defaults to `gpt-6-luna` with `--reasoning-effort medium`. Routing
 follows the benchmark (`vendored/model_setup.py`): `claude-*` goes to
 Anthropic, `gemini-*` to the Gemini interactions API. Other names served
 directly by OpenAI (no `--base-url` or `OPENAI_BASE_URL`) go to the Responses
