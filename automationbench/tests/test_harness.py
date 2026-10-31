@@ -354,9 +354,9 @@ class TestRunner:
         # Independent of ModelSpec's defaults, so the CLI default can change freely.
         spec = default_model_spec()
         assert (spec.name, spec.resolved_api(), spec.sampling_args()) == (
-            "gpt-6-luna",
+            "gpt-5-mini",
             "chat_completions",
-            {"reasoning_effort": "medium", "max_completion_tokens": 32768},
+            {"reasoning_effort": "high", "max_completion_tokens": 32768},
         )
 
     async def test_beaker_no_model_uses_traced_anthropic_client(self, monkeypatch: Any) -> None:
