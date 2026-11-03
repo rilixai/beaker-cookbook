@@ -12,9 +12,9 @@ import httpx
 import pytest
 from beaker.tracing import local_capture
 from openai import APIStatusError, AsyncOpenAI
-from verifiers.errors import ModelError
 
 from automationbench_skills.clients import CostTrackingChatCompletionsClient
+from automationbench_skills.model_protocol import ModelError
 from automationbench_skills.runner import ModelSpec
 
 

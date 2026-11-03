@@ -1,6 +1,6 @@
 # AutomationBench + filesystem skills
 
-[AutomationBench](https://github.com/zapier/AutomationBench) ([paper](https://arxiv.org/abs/2604.18934)) is Zapier's benchmark for business automation agents: 600 public tasks in six domains (sales, marketing, operations, support, finance, hr). The agent works in a simulated workspace of SaaS tools (Gmail, Sheets, Slack, CRMs, ...) and is scored by deterministic assertions on the final state of that workspace.
+This recipe uses [AutomationBench-PI](https://github.com/xeophon/AutomationBench-PI), a fork of Zapier's [AutomationBench](https://github.com/zapier/AutomationBench) ([paper](https://arxiv.org/abs/2604.18934)), pinned to `858718b19e5d66c74451432783d34ee64a550a15`. Its loaders publish **800 tasks** across seven domains: sales, marketing, operations, support, finance, HR, and simple. The agent works in simulated SaaS services and PI's deterministic rubric scores the final world state.
 
 This present recipe runs the benchmark one task at a time (`run_one`). The agent uses a system prompt in `prompts/`, and a `skills/` folder it reads through with two tools, `list_skills` and `read_skill`. Both are read from disk on every call, so Beaker can improve the agent by editing those files between rollouts. The optimizer itself is not part of this recipe.
 
@@ -58,7 +58,7 @@ markdown body). Its ID is its path under `skills/`:
 
 ```text
 skills/
-  domains/{sales,marketing,operations,support,finance,hr}/SKILL.md
+  domains/{sales,marketing,operations,support,finance,hr,simple}/SKILL.md
   apps/{gmail,google_sheets,google_drive,slack,salesforce,intercom,jira}/SKILL.md
 ```
 
@@ -69,19 +69,51 @@ the tasks' `zapier_tools`.
 
 ## Splits
 
-We reviewed AutomationBench's task instructions, metadata, and grader code and
-identified **122 cases with data-integrity defects**. The loader excludes these
-cases before use, yielding **374 train and 104 test cases**, with case order and
-split membership preserved. Exclusions address defective tasks or grading, not
-case difficulty or agent performance.
+The loader retains **25 exclusions** from the previous recipe and restores the 97 excluded tasks whose definitions PI directly changed. This leaves **584 train and 191 test cases**. Existing split membership stays fixed; the 200 `simple` tasks add 150 train and 50 test cases. Direct edits do not guarantee that every old defect is resolved; this is a dataset selection policy, not a new full audit.
 
 See [exclusion reasons and source links](src/automationbench_skills/splits/EXCLUSIONS.md)
-for the evidence and [split documentation](src/automationbench_skills/splits/README.md)
-for counts, generation, and held-out evaluation.
+and [split documentation](src/automationbench_skills/splits/README.md).
 
-`uv run python .beaker/upload_splits.py` uses the first six train and three test
-cases per domain from the filtered splits: **54 cases (36 train / 18 test)**.
-Hosted datasets change only when uploaded.
+`uv run python .beaker/upload_splits.py` selects the first six train and three test
+cases per domain: **63 cases (42 train / 21 test)**. It uploads under
+`automationbench-pi-skills-quickstart` and records the pinned benchmark commit.
+Rebuild the hosted integration and upload a fresh dataset before using this recipe;
+old dataset assertions belong to the previous benchmark. This source change does
+not update existing hosted datasets or agents.
+
+## Balanced 210-case demo
+
+The larger demo selects **20 train and 10 test tasks from each of the seven domains**:
+**140 train / 70 test**, or **210 total**. The 25 exclusions are applied first.
+Selection stays within each frozen source split. Within each domain and split,
+task-family quotas are proportional to the eligible pool, rounded by largest
+remainder, with seed 0 used to select family members. Output retains source order.
+Thus domains have equal weight, even though `simple` has more source tasks.
+Small quotas cannot represent every task family; integer family allocations
+remain within one sample of their proportional targets.
+
+Generate the demo **locally, without uploading**:
+
+```bash
+uv run python -m automationbench_skills.data.demo --output-dir /tmp/automationbench-pi-demo210
+```
+
+This writes `train.jsonl`, `test.jsonl`, and `verification.json` with per-domain
+and per-family counts, the benchmark revision, exclusion/overlap checks, and
+file hashes. Existing demo files are not overwritten. The command does not need
+Beaker credentials or invoke the Beaker CLI.
+
+The uploader's optional `--profile demo` uses exactly the same selection and the
+name `automationbench-pi-demo210`; its default remains the 63-case quickstart.
+Run the uploader only when you intend to upload a dataset.
+
+## PI runtime
+
+PI removed the legacy Verifiers environment and model clients. This recipe runs
+its unmodified MCP toolset in a separate in-process session for each rollout,
+adds the skill tools, and calls the pinned PI rubric. Provider adapters retain
+Chat Completions, Responses, Anthropic and Gemini routing. Model requests and MCP
+tool calls emit Beaker spans directly. No legacy Verifiers instrumentation is used.
 
 ## Models
 
@@ -134,7 +166,7 @@ local run scores the world as the agent left it. The cap can still truncate a
 legitimate response, so compare task accuracy and truncation when changing it.
 Hosted model requests retain per-attempt traces, and returned responses retain
 usage/cost accounting.
-Tool arguments pass unchanged to the existing environment parser; this client
+Tool arguments pass unchanged to PI's MCP tool validation; this client
 adds no batch validation or format-recovery instructions. Rebuild the Integration
 image from the updated cookbook commit before starting hosted evaluations.
 
@@ -163,8 +195,11 @@ There is no expected answer. Each task is a prompt against a simulated world
 (Salesforce, Gmail, Sheets, ... as JSON records). After the agent acts, a list
 of assertions is checked against that world
 (`salesforce_campaign_member_exists`, `gmail_message_sent_to`, ...); each holds
-or does not. Assertions already true before the agent acted don't count, so
-doing nothing scores 0.
+or does not. PI excludes unchanged pre-satisfied assertions unless they explicitly opt into
+scoring. A passing negative assertion earns credit only after the scored positive
+requirements pass; failed negative guards still penalize the run. Inverse tasks
+can explicitly reward an untouched world. Beaker uses this same PI score and
+marks excluded checks as informational.
 
 **Prefer `partial_credit` as the metric to optimize**, the share of assertions
 that hold (0–1). It is the objective in `.beaker/beaker_integration.py` and
@@ -177,7 +212,8 @@ of both.
 ```bash
 uv run ruff check && uv run ruff format --check
 uv run python -m mypy
-uv run pytest -q          # no network, scripted fake client
+BEAKER_AGENT_KEY= uv run python -m pytest -q  # no network, scripted fake client
+uv build --no-sources
 ```
 
 ## Attribution

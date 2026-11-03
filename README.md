@@ -33,7 +33,7 @@ research, knowledge work, app control, and enterprise automation.
 |---|---|
 | [`appworld/`](appworld/) | AppWorld: an agent that drives simulated apps by writing code. Built on the OpenAI Agents SDK, scored with TGC/SGC. |
 | [`harvey_lab/`](harvey_lab/) | A junior-lawyer agent on Harvey's Legal Agent Benchmark: reads a case folder, writes the deliverables, gets graded criterion by criterion by an LLM judge. |
-| [`automationbench/`](automationbench/) | Zapier AutomationBench: a tool-calling agent on `verifiers` that can read a `skills/` folder — edit the skills, rerun, watch the score move. |
+| [`automationbench/`](automationbench/) | AutomationBench-PI: 800 published tasks with 25 exclusions and a tool-calling agent that can read a `skills/` folder — edit the skills, rerun, watch the score move. |
 
 Each recipe is a standalone uv project with its own README covering setup, commands, and expected scores.
 

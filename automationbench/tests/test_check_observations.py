@@ -348,7 +348,14 @@ def test_negative_alias_and_large_unicode_diagnostics_are_bounded() -> None:
     }
     world = WorldState(
         gmail={
-            "messages": [{"to": ["a@example.com"], "label_ids": ["SENT"], "body_plain": "forbidden " + "界" * 10000}]
+            "messages": [
+                {
+                    "to": ["a@example.com"],
+                    "label_ids": ["SENT"],
+                    "subject": "Diagnostic test",
+                    "body_plain": "forbidden " + "界" * 10000,
+                }
+            ]
         }
     )
     with capture_assertion_returns(world, [assertion]) as events:
