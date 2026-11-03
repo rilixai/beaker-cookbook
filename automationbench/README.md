@@ -81,6 +81,32 @@ Rebuild the hosted integration and upload a fresh dataset before using this reci
 old dataset assertions belong to the previous benchmark. This source change does
 not update existing hosted datasets or agents.
 
+## Balanced 210-case demo
+
+The larger demo selects **20 train and 10 test tasks from each of the seven domains**:
+**140 train / 70 test**, or **210 total**. The 25 exclusions are applied first.
+Selection stays within each frozen source split. Within each domain and split,
+task-family quotas are proportional to the eligible pool, rounded by largest
+remainder, with seed 0 used to select family members. Output retains source order.
+Thus domains have equal weight, even though `simple` has more source tasks.
+Small quotas cannot represent every task family; integer family allocations
+remain within one sample of their proportional targets.
+
+Generate the demo **locally, without uploading**:
+
+```bash
+uv run python -m automationbench_skills.data.demo --output-dir /tmp/automationbench-pi-demo210
+```
+
+This writes `train.jsonl`, `test.jsonl`, and `verification.json` with per-domain
+and per-family counts, the benchmark revision, exclusion/overlap checks, and
+file hashes. Existing demo files are not overwritten. The command does not need
+Beaker credentials or invoke the Beaker CLI.
+
+The uploader's optional `--profile demo` uses exactly the same selection and the
+name `automationbench-pi-demo210`; its default remains the 63-case quickstart.
+Run the uploader only when you intend to upload a dataset.
+
 ## PI runtime
 
 PI removed the legacy Verifiers environment and model clients. This recipe runs

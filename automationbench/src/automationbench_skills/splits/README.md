@@ -20,6 +20,15 @@ uv run python -m automationbench_skills.data.make_splits
 
 Tasks are keyed by globally unique `domain.task_name`, since upstream numeric `example_id` values collide across domains. The generator is deterministic for the dependency pin. Dataset changes affect score comparability: rebuild the hosted integration and upload a fresh PI dataset before evaluating. The uploader records the benchmark commit in row metadata and uses the distinct `automationbench-pi-skills-quickstart` dataset name.
 
+## Balanced demo
+
+`python -m automationbench_skills.data.demo --output-dir <local-directory>` exports
+140 train and 70 test cases without uploading. It takes 20 train and 10 test
+cases per domain after exclusions. Within each domain/split, largest-remainder
+quotas preserve the eligible task-family proportions, and seed 0 selects members.
+Every selected ID keeps its source split; no scores or test outcomes affect selection.
+The verification manifest records domain/family counts and hashes of both files.
+
 ## Leakage policy
 
 - Use train tasks for development and model selection.
