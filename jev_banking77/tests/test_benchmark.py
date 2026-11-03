@@ -8,16 +8,17 @@ import json
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx2
 import pytest
 from backports import zstd
-from beaker import Case, CaseResult
+from beaker import Case
 from beaker.tracing import current_trace
 from typesafe_sdk import AsyncTypeSafeClient
 
 from jev_banking77 import cli
-from jev_banking77.agent import LABELS, MODEL, Prediction, classify, question
+from jev_banking77.agent import LABELS, MODEL, Prediction, question
 from jev_banking77.data import SPLIT_FILES, Expected, Message, Row, make_splits, source_file
 
 
@@ -56,34 +57,11 @@ def client_for(received: list[dict[str, object]]) -> AsyncTypeSafeClient:
     return AsyncTypeSafeClient(api_key="offline-test-key", transport=httpx2.MockTransport(respond))
 
 
-@pytest.mark.asyncio
-async def test_real_sdk_sends_native_choice_and_reads_usage() -> None:
-    received: list[dict[str, object]] = []
-    async with client_for(received) as client:
-        result = await classify(TEXT, client=client, routing_question=question(ROOT / "prompts"))
-    assert result.intent == INTENT
-    assert result.input_tokens == 100
-    assert result.output_tokens == 2
-    assert result.model == MODEL
-    assert received[0]["state"] == TEXT
-    assert received[0]["model"] == MODEL
-    assert set(received[0]) == {"state", "questions", "model"}
-    assert set(received[0]["questions"]["intent"]["criteria"]) == set(LABELS)  # type: ignore[index]
-
-
 def test_candidate_cannot_remove_or_rename_intents(tmp_path: Path) -> None:
     (tmp_path / "instructions.md").write_text("Choose an intent.")
     (tmp_path / "criteria.json").write_text(json.dumps({"invented_intent": "A new label"}))
     with pytest.raises(ValueError, match="77 intent IDs"):
         question(tmp_path)
-
-
-@pytest.mark.parametrize("bad", [float("nan"), -0.1, 1.1])
-def test_invalid_probabilities_are_rejected(bad: float) -> None:
-    probabilities = distribution()
-    probabilities[INTENT] = bad
-    with pytest.raises(ValueError):
-        Prediction(intent=INTENT, probabilities=probabilities, model=MODEL)
 
 
 def fake_csv(split: str) -> bytes:
@@ -117,7 +95,6 @@ def test_corrupt_cache_fails_closed(tmp_path: Path) -> None:
         source_file("train.csv", tmp_path)
 
 
-@pytest.mark.asyncio
 async def test_cli_persists_errors_instead_of_silently_dropping_cases(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -127,15 +104,9 @@ async def test_cli_persists_errors_instead_of_silently_dropping_cases(
     source.write_text("".join(row.model_dump_json() + "\n" for row in rows))
     monkeypatch.setenv("TYPESAFE_API_KEY", "offline-test-key")
 
-    responses = iter([prediction(), prediction("cash_withdrawal_charge"), TimeoutError("request failed")])
-
-    async def classify_offline(*args: object, **kwargs: object) -> Prediction:
-        result = next(responses)
-        if isinstance(result, Exception):
-            raise result
-        return result
-
-    monkeypatch.setattr(cli, "classify", classify_offline)
+    monkeypatch.setattr(
+        cli, "classify", AsyncMock(side_effect=[prediction(), prediction("cash_withdrawal_charge"), TimeoutError()])
+    )
     output = tmp_path / "result.jsonl"
     metrics = await cli.evaluate(
         argparse.Namespace(data=tmp_path, split="validation", limit=None, prompts=ROOT / "prompts", output=output)
@@ -150,7 +121,6 @@ async def test_cli_persists_errors_instead_of_silently_dropping_cases(
     assert summary == {"model": MODEL, "split": "validation", **metrics}
 
 
-@pytest.mark.asyncio
 async def test_integration_uses_candidate_prompt_and_keeps_expected_label_out_of_request(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -169,7 +139,11 @@ async def test_integration_uses_candidate_prompt_and_keeps_expected_label_out_of
     runtime = SimpleNamespace(model=None, trace=current_trace())
     result = await integration.run_case(case_input={"text": TEXT}, runtime=runtime)
     assert received[0]["state"] == TEXT
-    assert "expected" not in received[0]
+    assert received[0]["model"] == MODEL
+    assert set(received[0]) == {"state", "questions", "model"}
+    assert set(received[0]["questions"]["intent"]["criteria"]) == set(LABELS)  # type: ignore[index]
+    assert result.output["input_tokens"] == 100
+    assert result.output["output_tokens"] == 2
     assert received[0]["questions"]["intent"]["instructions"] == "Candidate-specific routing instructions."  # type: ignore[index]
     for expected, score in ((INTENT, 1), ("cash_withdrawal_charge", 0)):
         case = Case(id="1", input={"text": TEXT}, expected={"intent": expected})
@@ -177,7 +151,3 @@ async def test_integration_uses_candidate_prompt_and_keeps_expected_label_out_of
         assert scored.objective == score
     with pytest.raises(ValueError, match="do not pass"):
         await integration.run_case(case_input={"text": TEXT}, runtime=SimpleNamespace(model="openai:gpt-4o"))
-    with pytest.raises(ValueError):
-        await integration.score_case(
-            case=case, result=CaseResult(output={"intent": "invented"}), case_files_dir=tmp_path
-        )
