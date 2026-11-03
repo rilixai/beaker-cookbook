@@ -182,14 +182,14 @@ class TestPrompts:
         assert load_system_prompt(tmp_path, skills=False) == "plain"
         assert load_system_prompt(tmp_path) == "second"
 
-    def test_shipped_seeds_start_with_the_benchmark_prompt_verbatim(self) -> None:
+    def test_baseline_preserves_benchmark_and_selected_agent_exposes_skills(self) -> None:
         upstream = {s.prompt[0]["content"] for s in load_split("train") + load_split("test")}
         assert len(upstream) == 1
         benchmark = upstream.pop().strip()
         assert load_system_prompt(RECIPE_ROOT / "prompts", skills=False) == benchmark
         text = load_system_prompt(RECIPE_ROOT / "prompts")
         assert text is not None
-        assert text.startswith(benchmark)
+        # The no-skills baseline stays verbatim; the selected H20 prompt is optimized.
         for domain in PUBLIC_DOMAINS:
             assert domain in text
         assert "list_skills" in text and "read_skill" in text

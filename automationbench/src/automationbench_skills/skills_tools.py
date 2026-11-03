@@ -73,7 +73,8 @@ def list_skills() -> str:
     """List the reusable skill guides available for this workspace. Call this first,
     before planning tool calls: skills contain proven step-by-step procedures for
     common workflows. Returns one `id: description` line per skill; read a relevant
-    skill with read_skill(id) before acting.
+    skill with read_skill(id) before acting. Guides marked include_in_listing
+    are also supplied in full and do not need a separate read_skill call.
 
     Returns:
         One line per skill: `<id>: <description>` (IDs look like `apps/gmail` or
@@ -83,6 +84,7 @@ def list_skills() -> str:
     if not files:
         return "No skills available."
     lines = []
+    included = []
     for skill_id, f in sorted(files.items()):
         try:
             meta, body = _split_frontmatter(f.read_text())
@@ -92,7 +94,17 @@ def list_skills() -> str:
         if not description:
             description = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
         lines.append(f"{skill_id}: {description}")
-    return "\n".join(lines) if lines else "No skills available."
+        if meta.get("include_in_listing", "").lower() == "true" and body.strip():
+            included.append(f"### {skill_id}\n\n{body}")
+    if not lines:
+        return "No skills available."
+    listing = "\n".join(lines)
+    if included:
+        listing += (
+            "\n\nThe following guides are included in full and count as read. "
+            "Apply each only within its stated scope.\n\n" + "\n\n".join(included)
+        )
+    return listing
 
 
 def read_skill(skill_id: str) -> str:
