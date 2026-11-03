@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import math
-import time
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -23,7 +22,6 @@ class Prediction(BaseModel):
     model: str
     input_tokens: int | None = None
     output_tokens: int | None = None
-    latency_ms: float
 
     @model_validator(mode="after")
     def valid_distribution(self) -> Prediction:
@@ -53,7 +51,6 @@ def question(prompts_dir: Path) -> Choice:
 async def classify(text: str, *, client: AsyncTypeSafeClient, routing_question: Choice) -> Prediction:
     if not text.strip():
         raise ValueError("Customer message cannot be empty.")
-    started = time.perf_counter()
     response = await client.system_one(state=text, questions={"intent": routing_question}, model=MODEL)
     answer = response.choices["intent"]
     return Prediction(
@@ -62,5 +59,4 @@ async def classify(text: str, *, client: AsyncTypeSafeClient, routing_question: 
         model=response.model,
         input_tokens=response.usage.input_tokens,
         output_tokens=response.usage.output_tokens,
-        latency_ms=(time.perf_counter() - started) * 1000,
     )

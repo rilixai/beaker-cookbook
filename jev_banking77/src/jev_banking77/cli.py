@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
 import json
 from pathlib import Path
 
@@ -12,41 +11,34 @@ from typesafe_sdk import AsyncTypeSafeClient
 
 from jev_banking77.agent import MODEL, classify, question
 from jev_banking77.data import SPLIT_FILES, load_rows, prepare
-from jev_banking77.evaluation import Outcome, summarize
 
 
-async def evaluate(args: argparse.Namespace) -> dict[str, float | int | None]:
+async def evaluate(args: argparse.Namespace) -> dict[str, float | int]:
     dataset_path = args.data / SPLIT_FILES[args.split]
     rows = load_rows(dataset_path)
     if args.limit is not None:
         rows = rows[: args.limit]
     routing_question = question(args.prompts)
-    provenance = {
-        "dataset_sha256": hashlib.sha256(dataset_path.read_bytes()).hexdigest(),
-        "question_sha256": hashlib.sha256(routing_question.model_dump_json().encode()).hexdigest(),
-    }
-    outcomes = []
-    # Serial evaluation gives interpretable per-request latency. Each CLI run
-    # starts fresh; never reuse cached responses as evidence of gateway traffic.
+    correct = errors = 0
     args.output.parent.mkdir(parents=True, exist_ok=True)
     async with AsyncTypeSafeClient(timeout=60) as client:
         with args.output.open("w") as output:
             for row in rows:
-                outcome = Outcome(id=row.id, expected=row.expected.intent)
+                outcome: dict[str, object] = {"id": row.id, "expected": row.expected.intent}
                 try:
-                    outcome.prediction = await classify(
-                        row.input.text, client=client, routing_question=routing_question
-                    )
+                    prediction = await classify(row.input.text, client=client, routing_question=routing_question)
+                    outcome["prediction"] = prediction.model_dump(mode="json")
+                    correct += prediction.intent == row.expected.intent
                 except Exception as exc:
                     # Keep errors in the denominator. Do not print provider
                     # response bodies or credentials into benchmark artifacts.
-                    outcome.error = type(exc).__name__
-                output.write(outcome.model_dump_json() + "\n")
+                    outcome["error"] = type(exc).__name__
+                    errors += 1
+                output.write(json.dumps(outcome) + "\n")
                 output.flush()
-                outcomes.append(outcome)
-    metrics = summarize(outcomes)
+    metrics: dict[str, float | int] = {"cases": len(rows), "errors": errors, "accuracy": correct / len(rows)}
     args.output.with_suffix(".summary.json").write_text(
-        json.dumps({"model": MODEL, "split": args.split, **provenance, **metrics}, indent=2) + "\n"
+        json.dumps({"model": MODEL, "split": args.split, **metrics}, indent=2) + "\n"
     )
     return metrics
 

@@ -19,7 +19,6 @@ from typesafe_sdk import AsyncTypeSafeClient
 from jev_banking77 import cli
 from jev_banking77.agent import LABELS, MODEL, Prediction, classify, question
 from jev_banking77.data import SPLIT_FILES, Expected, Message, Row, make_splits, source_file
-from jev_banking77.evaluation import Outcome, summarize
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,7 +31,7 @@ def distribution(label: str = INTENT) -> dict[str, float]:
 
 
 def prediction(label: str = INTENT) -> Prediction:
-    return Prediction(intent=label, probabilities=distribution(label), model=MODEL, input_tokens=100, latency_ms=25)
+    return Prediction(intent=label, probabilities=distribution(label), model=MODEL, input_tokens=100)
 
 
 def client_for(received: list[dict[str, object]]) -> AsyncTypeSafeClient:
@@ -84,7 +83,7 @@ def test_invalid_probabilities_are_rejected(bad: float) -> None:
     probabilities = distribution()
     probabilities[INTENT] = bad
     with pytest.raises(ValueError):
-        Prediction(intent=INTENT, probabilities=probabilities, model=MODEL, latency_ms=1)
+        Prediction(intent=INTENT, probabilities=probabilities, model=MODEL)
 
 
 def fake_csv(split: str) -> bytes:
@@ -118,53 +117,37 @@ def test_corrupt_cache_fails_closed(tmp_path: Path) -> None:
         source_file("train.csv", tmp_path)
 
 
-def test_metrics_include_request_failures_in_accuracy_and_f1() -> None:
-    metrics = summarize(
-        [
-            Outcome(id="1", expected=INTENT, prediction=prediction()),
-            Outcome(id="2", expected=INTENT, prediction=prediction("cash_withdrawal_charge")),
-            Outcome(id="3", expected=INTENT, error="TimeoutError"),
-        ]
-    )
-    assert metrics["accuracy"] == pytest.approx(1 / 3)
-    assert metrics["macro_f1_77_labels"] == pytest.approx(0.5 / 77)
-    assert metrics["errors"] == 1
-    assert metrics["calibration_cases"] == 2
-    assert metrics["brier_score"] == 1
-    assert metrics["ece_10_bins"] == 0.5
-    assert metrics["estimated_cost_usd"] is None
-
-
-def test_cost_requires_complete_usage() -> None:
-    result = prediction()
-    outcome = Outcome(id="1", expected=INTENT, prediction=result)
-    assert summarize([outcome])["estimated_cost_usd"] == pytest.approx(0.0000042)
-    result.input_tokens = None
-    assert summarize([outcome])["estimated_cost_usd"] is None
-
-
 @pytest.mark.asyncio
 async def test_cli_persists_errors_instead_of_silently_dropping_cases(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    row = Row(id="1", input=Message(text=TEXT), expected=Expected(intent=INTENT))
+    rows = [Row(id=str(i), input=Message(text=TEXT), expected=Expected(intent=INTENT)) for i in range(3)]
     source = tmp_path / SPLIT_FILES["validation"]
     source.parent.mkdir()
-    source.write_text(row.model_dump_json() + "\n")
+    source.write_text("".join(row.model_dump_json() + "\n" for row in rows))
     monkeypatch.setenv("TYPESAFE_API_KEY", "offline-test-key")
 
-    async def fail(*args: object, **kwargs: object) -> Prediction:
-        raise TimeoutError("request failed")
+    responses = iter([prediction(), prediction("cash_withdrawal_charge"), TimeoutError("request failed")])
 
-    monkeypatch.setattr(cli, "classify", fail)
+    async def classify_offline(*args: object, **kwargs: object) -> Prediction:
+        result = next(responses)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(cli, "classify", classify_offline)
     output = tmp_path / "result.jsonl"
     metrics = await cli.evaluate(
         argparse.Namespace(data=tmp_path, split="validation", limit=None, prompts=ROOT / "prompts", output=output)
     )
-    assert metrics["accuracy"] == 0
+    assert metrics["accuracy"] == pytest.approx(1 / 3)
+    assert metrics["cases"] == 3
     assert metrics["errors"] == 1
-    assert json.loads(output.read_text())["error"] == "TimeoutError"
-    assert output.with_suffix(".summary.json").exists()
+    records = [json.loads(line) for line in output.read_text().splitlines()]
+    assert len(records) == 3
+    assert records[-1]["error"] == "TimeoutError"
+    summary = json.loads(output.with_suffix(".summary.json").read_text())
+    assert summary == {"model": MODEL, "split": "validation", **metrics}
 
 
 @pytest.mark.asyncio

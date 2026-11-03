@@ -14,7 +14,3 @@ One real training message is reproduced in the offline client tests.
 The preparation command downloads the original CSV files and converts them to
 JSONL. It creates a validation split from the original training data and retains
 the complete official test split separately. It does not change the labels.
-
-This recipe's harness and Beaker integration are original code. It does not copy
-JevBench code or claim to reproduce its published scores. JevBench is a useful
-comparison: https://github.com/dhruvmehra/jevbench.
