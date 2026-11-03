@@ -5,7 +5,8 @@ import math
 import time
 from typing import Any
 
-from automationbench.clients import (
+from automationbench_skills.model_protocol import ModelError, OpenAIChatCompletionsClient, parse_reasoning_content
+from automationbench_skills.vendored.clients import (
     _NON_RETRYABLE_CHAT,
     _is_safety_classifier_error,
     _parse_retry_after,
@@ -13,9 +14,6 @@ from automationbench.clients import (
     _record_model_call,
     _record_safety_classifier_error,
 )
-from verifiers.clients import OpenAIChatCompletionsClient
-from verifiers.clients.openai_chat_completions_client import parse_reasoning_content
-from verifiers.errors import ModelError
 
 
 # Reasoning counts toward the completion cap on most providers, so the cap is a

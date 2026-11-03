@@ -3,11 +3,8 @@
 Samples come straight from ``automationbench.domains`` (in-process Python task
 builders — no network). The split files key tasks by ``task_name``
 (``<domain>.<name>``), the benchmark's only globally-unique stable id: the
-dataset's ``example_id`` column is only unique *within* a domain (e.g. sales
-and marketing both start at different offsets but collide across the combined
-600-task set), so it cannot key a cross-domain split. verifiers assigns its
-own positional integer ``example_id`` at rollout time; we carry the sample's
-global index for that.
+dataset's numeric ``example_id`` values collide across domains. The recipe
+assigns a global positional index for each rollout.
 """
 
 from __future__ import annotations
@@ -19,17 +16,17 @@ from pathlib import Path
 from typing import Any
 
 
-PUBLIC_DOMAINS = ["sales", "marketing", "operations", "support", "finance", "hr"]
+PUBLIC_DOMAINS = ["sales", "marketing", "operations", "support", "finance", "hr", "simple"]
 SPLITS_DIR = Path(__file__).parent.parent / "splits"
 
 
 @dataclass(frozen=True)
 class Sample:
-    """One AutomationBench task, ready to run as a single verifiers rollout."""
+    """One AutomationBench task, ready to run as a single PI rollout."""
 
     task_name: str  # globally-unique stable id, e.g. "sales.multi_hop_lookup"
     domain: str
-    index: int  # global position in the combined public dataset (verifiers example_id)
+    index: int  # global position in the combined public dataset (rollout example_id)
     prompt: list[dict[str, Any]]
     answer: str
     info: dict[str, Any]  # zapier_tools / initial_state / assertions / task_name
@@ -44,8 +41,9 @@ def task_family(task_name: str) -> str:
 
 @cache
 def load_samples() -> tuple[Sample, ...]:
-    """Build the 600 public tasks in the benchmark's own deterministic order."""
+    """Build all 800 published PI tasks in the benchmark's own deterministic order."""
     from automationbench.domains import get_combined_dataset
+    from automationbench.schema.world import WorldMeta
 
     dataset = get_combined_dataset(PUBLIC_DOMAINS)
     samples: list[Sample] = []
@@ -53,6 +51,9 @@ def load_samples() -> tuple[Sample, ...]:
         info = row["info"]
         if isinstance(info, str):
             info = json.loads(info)
+        meta = info.setdefault("initial_state", {}).setdefault("meta", {})
+        if not meta.get("current_time"):
+            meta["current_time"] = WorldMeta().current_time.isoformat()
         task_name = info["task_name"]
         samples.append(
             Sample(

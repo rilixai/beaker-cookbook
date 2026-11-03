@@ -22,7 +22,7 @@ from automationbench_skills.data.tasks import PUBLIC_DOMAINS, Sample, load_split
 
 TRAIN_PER_DOMAIN = 6
 TEST_PER_DOMAIN = 3
-DATASET_NAME = "automationbench-skills-quickstart"
+DATASET_NAME = "automationbench-pi-skills-quickstart"
 BEAKER_YAML = Path(__file__).resolve().parent / "beaker.yaml"
 
 
@@ -60,7 +60,11 @@ def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
                     # case; ``score_case`` evaluates them against the end state
                     # and emits one Check per assertion.
                     "expected": {"assertions": sample.info["assertions"]},
-                    "metadata": {"domain": domain, "source_split": split},
+                    "metadata": {
+                        "domain": domain,
+                        "source_split": split,
+                        "benchmark_commit": "858718b19e5d66c74451432783d34ee64a550a15",
+                    },
                     "group_key": domain,
                 }
             )

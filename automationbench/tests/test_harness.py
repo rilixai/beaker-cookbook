@@ -48,24 +48,25 @@ async def _rollout(
 class TestSplits:
     def test_filtered_split_shape(self) -> None:
         train, test = load_split("train"), load_split("test")
-        assert len(train) == 374 and len(test) == 104
+        assert len(train) == 584 and len(test) == 191
         assert not {s.task_name for s in train} & {s.task_name for s in test}
         from automationbench_skills.data.tasks import read_split_names
 
         excluded = read_split_names("excluded_cases")
         retained = {s.task_name for s in train + test}
-        assert len(excluded) == len(set(excluded)) == 122
+        assert len(excluded) == len(set(excluded)) == 25
         assert not retained & set(excluded)
         assert retained | set(excluded) == {s.task_name for s in load_samples()}
         for split, samples in (("train", train), ("test", test)):
             assert [s.task_name for s in samples] == [name for name in read_split_names(split) if name not in excluded]
         expected = {
-            "sales": (64, 20),
-            "marketing": (68, 19),
-            "operations": (59, 11),
-            "support": (48, 12),
-            "finance": (69, 22),
-            "hr": (66, 20),
+            "sales": (72, 24),
+            "marketing": (73, 24),
+            "operations": (72, 23),
+            "support": (70, 21),
+            "finance": (74, 25),
+            "hr": (73, 24),
+            "simple": (150, 50),
         }
         for domain in PUBLIC_DOMAINS:
             assert (sum(s.domain == domain for s in train), sum(s.domain == domain for s in test)) == expected[domain]
@@ -80,7 +81,7 @@ class TestSplits:
 
     def test_task_names_globally_unique(self) -> None:
         samples = load_samples()
-        assert len({s.task_name for s in samples}) == len(samples) == 600
+        assert len({s.task_name for s in samples}) == len(samples) == 800
 
     def test_task_family(self) -> None:
         assert task_family("sales.docusign_contract_send") == "docusign"
@@ -312,7 +313,7 @@ class TestRunner:
         assert len(client.calls) == 2  # the second call is the one that hangs
         assert result.error is None
         assert result.end_state is not None
-        assert [m["role"] for m in result.trajectory] == ["assistant"]
+        assert [m["role"] for m in result.trajectory] == ["assistant", "tool"]
         assert 0.0 <= result.partial_credit <= 1.0
 
     async def test_result_records_latency_and_usage(self, monkeypatch: Any) -> None:
@@ -363,7 +364,7 @@ class TestRunner:
         import sys
         from types import SimpleNamespace
 
-        from automationbench.clients import StreamingAnthropicClient
+        from automationbench_skills.vendored.clients import StreamingAnthropicClient
 
         sys.path.insert(0, str(RECIPE_ROOT / ".beaker"))
         import beaker_integration
@@ -420,11 +421,8 @@ class TestRunner:
 
     async def test_tool_executions_become_tool_spans(self, tmp_path: Path) -> None:
         from beaker.tracing import local_capture
-        from beaker.tracing.integrations import verifiers as beaker_verifiers
         from beaker.tracing.projection import parse_jsonl, project
 
-        env = get_env(skills=True)
-        assert beaker_verifiers.is_instrumented(env)
         client = ScriptedClient(
             turns=[
                 {"tool_calls": [{"name": "list_skills"}]},
@@ -456,8 +454,9 @@ class TestRunner:
 
         from anthropic import AsyncAnthropic
         from anthropic.types import Message, TextBlock, Usage
-        from automationbench.clients import StreamingAnthropicClient
         from beaker.tracing import local_capture
+
+        from automationbench_skills.vendored.clients import StreamingAnthropicClient
 
         sys.path.insert(0, str(RECIPE_ROOT / ".beaker"))
         from beaker_integration import _TracedAnthropicClient
