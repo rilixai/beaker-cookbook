@@ -93,7 +93,8 @@ def build_agent(
     settings["parallel_tool_calls"] = False
     agent = Agent(
         name="Assistant",
-        model=profile.name,
+        # Keep namespaced OpenRouter IDs intact through the SDK's provider router.
+        model=f"openai/{profile.name}" if profile.api_type == "chat_completions" else profile.name,
         model_settings=ModelSettings(**settings),
         instructions=instructions,
         tools=[execute_python],

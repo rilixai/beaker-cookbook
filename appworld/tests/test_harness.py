@@ -6,6 +6,7 @@ prompt, and example configs are wired up and importable.
 """
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from agents.model_settings import ModelSettings
@@ -80,11 +81,14 @@ def test_invalid_effort_rejected() -> None:
 def test_example_configs_load() -> None:
     config = RECIPE_DIR / "configs" / "model.toml"
     default = ModelProfile.from_toml(config)
-    assert default.name == "gpt-6-astra"
-    assert default.family == "reasoning" and default.reasoning_effort == "xhigh"
+    assert default.name == "xiaomi/mimo-v2.6-flash"
+    assert default.family == "reasoning" and default.reasoning_effort == "medium"
+    assert default.api_type == "chat_completions"
     cli_default = _profile_from_args(_parse_args(["run"]))
     assert cli_default.name == default.name
-    assert cli_default.settings()["reasoning"].effort == "xhigh"
+    assert cli_default.settings()["reasoning"].effort == "medium"
+    assert cli_default.api_type == default.api_type
+    assert cli_default.settings() == default.settings()
     standard = ModelProfile.from_toml(config, model="gpt-4.1")
     assert standard.family == "standard" and standard.temperature == 0.0
     with pytest.raises(ValueError):
@@ -92,10 +96,18 @@ def test_example_configs_load() -> None:
 
 
 def test_agent_wiring() -> None:
-    from appworld_openai_agents_sdk.code_agent import run_code_agent_on_tasks  # noqa: F401
+    from agents.models.multi_provider import MultiProvider
+
+    from appworld_openai_agents_sdk.code_agent import build_agent
 
     assert MAX_STEPS == 50
     assert (PROMPTS_DIR / "react_code_agent" / "instructions.txt").is_file()
+    profile = ModelProfile.from_toml(RECIPE_DIR / "configs" / "model.toml")
+    agent, _ = build_agent(MagicMock(), profile, "Test instructions", MagicMock())
+    assert isinstance(agent.model, str)
+    provider = MultiProvider(openai_api_key="test", openai_use_responses=False)
+    resolved = provider.get_model(agent.model)
+    assert resolved.model == profile.name
 
 
 def test_vendored_files_self_contained() -> None:
