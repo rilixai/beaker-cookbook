@@ -44,7 +44,7 @@ def execute(command: list[str], *, cwd: Path, env: dict[str, str], log: Path, ti
 
 def stage_task(source: Path, cache: Path, output: Path, task: str, system_prompt: Path | None) -> Path:
     if task not in QUICKSTART_TASKS:
-        raise ValueError(f"Choose one of the supported quickstart tasks: {', '.join(QUICKSTART_TASKS)}")
+        raise ValueError("This task needs --environment PATH and the containerized runner; see the full setup guide")
     checkout = output / "source"
     checkout.mkdir()
     for directory in ("utils", "scripts"):

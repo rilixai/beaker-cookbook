@@ -26,12 +26,14 @@ def require_command(name: str) -> str:
     return command
 
 
-def verify_source(source: Path) -> None:
+def verify_source(source: Path, *, require_clean: bool = True) -> None:
     revision = subprocess.check_output(
         [require_command("git"), "-C", str(source), "rev-parse", "HEAD"], text=True
     ).strip()
     if revision != UPSTREAM_REVISION:
         raise RuntimeError(f"Expected Toolathlon {UPSTREAM_REVISION}, found {revision}; use a fresh cache directory")
+    if not require_clean:
+        return
     # Config examples are copied only into each run, never into the source cache.
     dirty = subprocess.check_output(
         ["git", "-C", str(source), "status", "--porcelain", "--untracked-files=no"], text=True
