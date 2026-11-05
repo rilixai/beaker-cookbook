@@ -13,8 +13,8 @@ from beaker import (
     CaseScore,
     Check,
     Integration,
-    RepositoryRunSetup,
     RepositoryRunSetupResult,
+    RunSetup,
     repository,
 )
 from pydantic import BaseModel, Field, model_validator
@@ -42,13 +42,13 @@ class Row(BaseModel):
         return self
 
 
-class Setup(RepositoryRunSetup[Row]):
+class Setup(RunSetup[Row]):
     row_model = Row
 
     @asynccontextmanager
     async def prepare_run(self, *, runtime):
         self.root = prepare_appworld()
-        yield RepositoryRunSetupResult()
+        yield {"repository": RepositoryRunSetupResult()}
 
     async def load_cases(self, row: Row, *, runtime) -> AsyncIterator[Case]:
         import json
