@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from appworld_setup import prepare_appworld
-from beaker import Case, CaseScore, Integration, RepositoryRunSetup, RepositoryRunSetupResult
+from beaker import Case, CaseScore, Integration, RepositoryRunSetupResult, RunSetup
 from beaker_integration import TaskInput
 from beaker_integration import integration as scenario_integration
 from beaker_integration import run_case as run_tasks
@@ -18,13 +18,13 @@ class Row(BaseModel):
     expected: list[dict]
 
 
-class Setup(RepositoryRunSetup[Row]):
+class Setup(RunSetup[Row]):
     row_model = Row
 
     @asynccontextmanager
     async def prepare_run(self, *, runtime):
         self.root = prepare_appworld()
-        yield RepositoryRunSetupResult()
+        yield {"repository": RepositoryRunSetupResult()}
 
     async def load_cases(self, row: Row, *, runtime) -> AsyncIterator[Case]:
         import json

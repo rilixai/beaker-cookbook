@@ -29,7 +29,8 @@ export UV_GIT_LFS=1                 # uv skips LFS smudge by default; without th
 uv sync --group dev                 # install (appworld + openai-agents, pinned)
 uv run appworld install             # AppWorld's one-time self-setup
 uv run appworld download data       # benchmark data, all splits (~few hundred MB)
-export OPENAI_API_KEY=sk-...        # or: cp .env.example .env and fill it in
+export OPENAI_API_KEY=sk-or-...     # OpenRouter API key for the default MiMo model
+export OPENAI_BASE_URL=https://openrouter.ai/api/v1
 
 # Smoke run: 3 dev tasks (add --model gpt-4.1 etc. to pick another block of configs/model.toml)
 uv run appworld-openai-agents-sdk run --config configs/model.toml --split dev --max-tasks 3
@@ -93,11 +94,17 @@ parameters get sent — a model never receives a parameter it doesn't support:
 
 [`configs/model.toml`](configs/model.toml) has one block per model, each
 holding just the parameters that model supports; `--model <name>` picks the
-block. Both the file and the CLI default to `gpt-6-astra` with xhigh reasoning.
+block. Both the file and the CLI default to `xiaomi/mimo-v2.6-flash`
+([MiMo-V2.6-Flash](https://openrouter.ai/xiaomi/mimo-v2.6-flash)) with medium
+reasoning via OpenRouter's Chat Completions API. Its profile explicitly selects
+the reasoning family because its name is outside the OpenAI naming convention.
+Set `OPENAI_API_KEY` to an OpenRouter key and `OPENAI_BASE_URL` to
+`https://openrouter.ai/api/v1`. For direct OpenAI models, use an OpenAI key and
+unset `OPENAI_BASE_URL`.
 Or skip the config and use flags:
 
 ```bash
-uv run appworld-openai-agents-sdk run --model gpt-6-astra --reasoning-effort xhigh --split dev --max-tasks 3
+uv run appworld-openai-agents-sdk run --model xiaomi/mimo-v2.6-flash --reasoning-effort medium --split dev --max-tasks 3
 uv run appworld-openai-agents-sdk run --model gpt-4.1 --temperature 0 --split dev --max-tasks 3
 ```
 

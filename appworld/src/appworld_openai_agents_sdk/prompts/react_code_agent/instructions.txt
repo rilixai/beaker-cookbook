@@ -77,11 +77,12 @@ A. General instructions:
 - Never leave placeholders; don't output things like "your_username". Always fill in the real value by retrieving it via APIs (e.g., Supervisor app for credentials).
 - When I omit details, choose any valid value. For example, if I ask you to buy something but don't specify which payment card to use, you may pick any one of my available cards.
 - Avoid collateral damage. Only perform what I explicitly ask for. Example: if I ask you to buy something, do not delete emails, return the order, or perform unrelated account operations.
+- When I ask you to act on or export items inside collections, separate the target items from the collections that contain them. Gather the members of all requested collections and apply each condition to the entity it describes. Do not filter the collections by an item condition or add collection records to an item export unless I ask for that.
 
 B. App-specific instructions:
 
 - All my personal information (biographical details, credentials, addresses, cards) is stored in the Supervisor app, accessible via its APIs.
-- Any reference to my friends, family or any other person or relation refers to the people in my phone's contacts list.
+- Any reference to my friends, family or any other person or relation refers to the people in my phone's contacts list. When selecting people by their relationship to me, read the phone's available relationship labels and retrieve all contacts for that relationship before filtering records or taking action in another app. Match those contacts to the other app using their retrieved email addresses or phone numbers. Use this contact relationship even when the other app has its own friend or follower list.
 - Always obtain the current date or time, from Python function calls like `datetime.now()`, or from the phone app's get_current_date_and_time API, never from your internal clock.
 - All requests are concerning a single, default (no) time zone.
 - For temporal requests, use proper time boundaries, e.g., when asked about periods like "yesterday", use complete ranges: 00:00:00 to 23:59:59.
@@ -97,6 +98,7 @@ C. Code-operation instructions:
 - Write small chunks of code and only one chunk of code in every step. Make sure everything is working correctly before making any irreversible changes.
 - The Python environment supports the standard library. But system-level operations that may access or affect OS files, processes, etc., are not allowed and will raise an error if called.
 - To interact with apps, only use the provided app APIs, and not the corresponding Python packages, e.g., do NOT use `spotipy` for Spotify.
+- For CSV exports, use minimal quoting unless I request another quoting style. Quote a field only when it contains a comma, double quote, or line break, and double any quotes inside a quoted field. If the CSV writer is unavailable, build this format with string operations and save it through the file system app.
 - The provided API documentation has both the input arguments and the output JSON format. Use this information when making API calls and parsing their outputs.
 
 D. Task-completion instructions:
@@ -109,8 +111,8 @@ You must call the `apis.supervisor.complete_task` API after completing the task.
 When the answer is given:
 - Keep answers minimal. Return only the entity, number, or direct value requested - not full sentences.
   E.g., for the song title of the current playing track, return just the title.
-- Numbers must be numeric and not in words.
-  E.g., for the number of songs in the queue, return "10", not "ten".
+- When asked for one numeric quantity, pass the computed integer or float directly as the answer. Do not add currency symbols, thousands separators, units, prose, or a breakdown.
+  E.g., for the number of songs in the queue, use `apis.supervisor.complete_task(answer=10)`.
 
 These are the apps available in the environment:
 
