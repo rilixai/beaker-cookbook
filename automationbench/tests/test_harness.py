@@ -312,7 +312,7 @@ class TestRunner:
         assert len(client.calls) == 2  # the second call is the one that hangs
         assert result.error is None
         assert result.end_state is not None
-        assert [m["role"] for m in result.trajectory] == ["assistant"]
+        assert [m["role"] for m in result.trajectory] == ["assistant", "tool"]
         assert 0.0 <= result.partial_credit <= 1.0
 
     async def test_result_records_latency_and_usage(self, monkeypatch: Any) -> None:
@@ -354,26 +354,32 @@ class TestRunner:
         # Independent of ModelSpec's defaults, so the CLI default can change freely.
         spec = default_model_spec()
         assert (spec.name, spec.resolved_api(), spec.sampling_args()) == (
-            "claude-haiku-5-5",
-            "anthropic",
-            {"thinking": {"type": "adaptive"}, "output_config": {"effort": "medium"}, "max_tokens": 64000},
+            "gpt-5.6-luna",
+            "chat_completions",
+            {"reasoning_effort": "low", "max_completion_tokens": 32768},
         )
 
     async def test_beaker_no_model_uses_traced_anthropic_client(self, monkeypatch: Any) -> None:
         import sys
         from types import SimpleNamespace
 
-        from automationbench.clients import StreamingAnthropicClient
+        from automationbench_skills.vendored.clients import StreamingAnthropicClient
 
         sys.path.insert(0, str(RECIPE_ROOT / ".beaker"))
+        import beaker_integration
         from beaker_integration import _client_for, _TracedAnthropicClient
 
+        monkeypatch.setattr(
+            beaker_integration,
+            "default_model_spec",
+            lambda: ModelSpec(name="claude-sonnet-5-5", api="anthropic", reasoning_effort="max"),
+        )
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
         client, model = _client_for(SimpleNamespace(model=None))
         try:
             assert isinstance(client, _TracedAnthropicClient)
             assert isinstance(client, StreamingAnthropicClient)
-            assert model.name == "claude-haiku-5-5"
+            assert model.name == "claude-sonnet-5-5"
         finally:
             await client.close()
 
@@ -414,11 +420,8 @@ class TestRunner:
 
     async def test_tool_executions_become_tool_spans(self, tmp_path: Path) -> None:
         from beaker.tracing import local_capture
-        from beaker.tracing.integrations import verifiers as beaker_verifiers
         from beaker.tracing.projection import parse_jsonl, project
 
-        env = get_env(skills=True)
-        assert beaker_verifiers.is_instrumented(env)
         client = ScriptedClient(
             turns=[
                 {"tool_calls": [{"name": "list_skills"}]},
@@ -450,8 +453,9 @@ class TestRunner:
 
         from anthropic import AsyncAnthropic
         from anthropic.types import Message, TextBlock, Usage
-        from automationbench.clients import StreamingAnthropicClient
         from beaker.tracing import local_capture
+
+        from automationbench_skills.vendored.clients import StreamingAnthropicClient
 
         sys.path.insert(0, str(RECIPE_ROOT / ".beaker"))
         from beaker_integration import _TracedAnthropicClient

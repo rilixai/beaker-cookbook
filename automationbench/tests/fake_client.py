@@ -9,8 +9,7 @@ import json
 import time
 from typing import Any
 
-from verifiers.clients import Client
-from verifiers.legacy.types import Response, ResponseMessage, ToolCall, Usage
+from automationbench_skills.model_protocol import Client, Response, ResponseMessage, ToolCall, Usage
 
 
 class ScriptedClient(Client):
@@ -26,7 +25,7 @@ class ScriptedClient(Client):
         return object()
 
     async def to_native_tool(self, tool: Any) -> Any:
-        return tool
+        return tool.model_dump()
 
     async def to_native_prompt(self, messages: Any) -> tuple[Any, dict]:
         return messages, {}

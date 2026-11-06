@@ -1,15 +1,15 @@
 """The core export: a single agent inference on a single task, as a function.
 
 ``run_one(sample, model=..., skills_dir=..., prompts_dir=...)`` executes ONE
-verifiers rollout (``env.run_rollout`` — generate + deterministic rubric
+PI rollout (``env.run_rollout`` — generate + deterministic rubric
 scoring) and returns both metrics plus the trajectory and end-of-rollout world
 state. The Beaker optimizer calls it in a loop: run a train sample, inspect
 trajectory+score, edit files in ``skills_dir`` and ``prompts_dir``, repeat,
 then run held-out test.
 
 The ``AutomationBenchEnv`` is built once per (toolset, skills on/off,
-max_turns) and reused across calls — its ``setup_state`` resets the per-task
-world every rollout. Only the sample, the ``skills_dir`` contents and the
+max_turns) and reused across calls — each rollout creates its own per-task
+world. Only the sample, the ``skills_dir`` contents and the
 prompt file in ``prompts_dir`` vary per call; both are read live, so editing
 them between calls changes agent behavior with no env rebuild.
 """
@@ -24,10 +24,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from verifiers.clients import Client
-from verifiers.legacy.types import ClientConfig
-from verifiers.types import RolloutInput
-
 from automationbench_skills.clients import (
     DEFAULT_MAX_ANSWER_TOKENS,
     DEFAULT_MAX_REASONING_TOKENS,
@@ -35,6 +31,7 @@ from automationbench_skills.clients import (
     CostTrackingChatCompletionsClient,
 )
 from automationbench_skills.data.tasks import Sample
+from automationbench_skills.model_protocol import Client, ClientConfig, RolloutInput
 from automationbench_skills.prompts import load_system_prompt, task_clock, with_system_prompt
 from automationbench_skills.skills_tools import SKILL_TOOLS, set_skills_dir
 from automationbench_skills.vendored.model_setup import (
@@ -138,7 +135,7 @@ class RunResult:
     end_state: dict[str, Any] | None  # final WorldState dump (debugging)
     assertion_results: list[dict[str, Any]] = field(default_factory=list)
     error: Any | None = None
-    raw: dict[str, Any] = field(default_factory=dict)  # full verifiers RolloutOutput
+    raw: dict[str, Any] = field(default_factory=dict)  # full rollout output
     latency_s: float | None = None
     cost_usd: float | None = None
     usage: dict[str, Any] = field(default_factory=dict)
@@ -173,11 +170,9 @@ def get_env(
 ) -> Any:
     """Build (once) and return the shared AutomationBenchEnv.
 
-    The skill tools are registered via the env's ``tools=`` parameter; under
-    the ``zapier`` (meta-tools) and ``api`` toolsets, added tools survive
-    ``setup_state``'s per-task filtering. ``limited_zapier`` filters to each
-    task's declared tool list and would drop them — so this recipe pins
-    ``zapier``/``api`` and refuses ``limited_zapier`` when skills are on.
+    The skill tools are added to PI's MCP server for each rollout. The recipe
+    retains its existing policy of using skills with ``zapier`` or ``api``;
+    ``limited_zapier`` remains a baseline-only condition.
 
     ``timeout`` (seconds) bounds the rollout loop inside the env: the loop
     stops on expiry and the rubric still scores the world the agent has
@@ -185,46 +180,19 @@ def get_env(
     """
     if toolset == "limited_zapier" and skills:
         raise ValueError(
-            "toolset='limited_zapier' filters tools to each task's declared list at "
-            "setup_state, which drops the skill tools. Use toolset='zapier' (default)."
+            "toolset='limited_zapier' is reserved for the baseline without skill tools. "
+            "Use toolset='zapier' (default) with skills."
         )
     key = (toolset, skills, max_steps, timeout)
     if key not in _ENV_CACHE:
-        import json
+        from automationbench_skills.environment import AutomationBenchEnv
 
-        from automationbench.rubric import create_rubric
-        from automationbench.runner import AutomationBenchEnv
-        from beaker.tracing.integrations import verifiers as beaker_verifiers
-        from datasets import Dataset
-
-        from automationbench_skills.data.tasks import load_samples
-
-        # The env's own dataset only backs env.evaluate(); this recipe drives
-        # rollouts explicitly through run_rollout, so a 1-row placeholder
-        # satisfies the constructor without materializing 800 tasks into a
-        # HuggingFace Dataset (whose schema normalization mangles task infos).
-        first = load_samples()[0]
-        dataset = Dataset.from_list(
-            [
-                {
-                    "example_id": first.index,
-                    "prompt": first.prompt,
-                    "answer": first.answer,
-                    "info": json.dumps(first.info),
-                }
-            ]
-        )
-        env = AutomationBenchEnv(
-            dataset=dataset,
-            rubric=create_rubric(),
-            tools=list(SKILL_TOOLS) if skills else None,
+        _ENV_CACHE[key] = AutomationBenchEnv(
+            tools=list(SKILL_TOOLS) if skills else [],
             max_turns=max_steps,
             toolset=toolset,
             timeout_seconds=timeout,
         )
-        # One ``tool_call`` span per tool execution, under whichever Beaker
-        # capture is active at call time; the hidden ``world`` arg stays out.
-        _ENV_CACHE[key] = beaker_verifiers.instrument(env)
     return _ENV_CACHE[key]
 
 
@@ -305,7 +273,7 @@ async def run_rollout_raw(
     max_steps: int = DEFAULT_MAX_STEPS,
     timeout: float | None = None,
 ) -> dict[str, Any]:
-    """Run ONE agent rollout with ``client`` and return verifiers' raw output.
+    """Run ONE agent rollout with ``client`` and return the raw rollout output.
 
     The shared execution path behind :func:`run_one_async` and the Beaker
     integration: environment, skills directory, system prompt, sampling

@@ -2,11 +2,48 @@
 
 [AutomationBench](https://github.com/zapier/AutomationBench) ([paper](https://arxiv.org/abs/2604.18934)) is Zapier's benchmark for business automation agents: 600 public tasks in six domains (sales, marketing, operations, support, finance, hr). The agent works in a simulated workspace of SaaS tools (Gmail, Sheets, Slack, CRMs, ...) and is scored by deterministic assertions on the final state of that workspace.
 
-This present recipe runs the benchmark one task at a time (`run_one`). The agent uses a system prompt in `prompts/`, and a `skills/` folder it reads through with two tools, `list_skills` and `read_skill`. Both are read from disk on every call, so Beaker can improve the agent by editing those files between rollouts. The optimizer itself is not part of this recipe.
+This recipe uses [AutomationBench-PI](https://github.com/xeophon/AutomationBench-PI/tree/858718b19e5d66c74451432783d34ee64a550a15) for tools, world models and deterministic grading. The agent uses a system prompt in `prompts/`, and a `skills/` folder it reads through with two tools, `list_skills` and `read_skill`. Both are read from disk on every call, so Beaker can improve the agent by editing those files between rollouts. The optimizer itself is not part of this recipe.
 
 > **The Beaker integration is already present in this recipe.** `.beaker/` holds a
 > working `beaker.yaml` and `beaker_integration.py`; there is nothing to write
 > before pointing Beaker at it.
+
+### Frozen cases and the shared PI API interface
+
+Hosted evaluation always uses PI's `api_search`, `api_fetch` and `base64_encode`,
+plus the skill tools. Search returns descriptions and JSON schemas for path,
+query and body fields. The same PI catalog and rendering apply to every case;
+the endpoints available for execution depend on the case's connected services.
+The hosted model remains **Claude Haiku 5.5**.
+
+Each row must include `runtime_fixture: {task, scenario}`. The task contains
+`example_id`, `prompt`, `answer`, and `info` with `task_name`, `initial_state`,
+`assertions`, and `zapier_tools`. The scenario records source provenance,
+fallback time, an optional controlled tool fault, and trace capture policy.
+`metadata.benchmark_commit` identifies the task's source, while execution and
+scoring always use the pinned PI revision above. This intentionally re-evaluates
+original-source fixtures under PI; it does not reproduce their original runtime.
+
+Rows must carry matching task/scenario SHA-256 hashes, and `expected.assertions`
+must equal the frozen task's assertions. Missing fixtures and inconsistent rows
+fail validation. Task names are never used to replace the supplied fixture.
+The scorer reads initial state from the trusted case and end state from the
+rollout. Gold faulty/valid labels remain outside model inputs.
+
+The controlled empty-email-lookup fault suppresses a successful Gmail list result;
+the opportunity fault drops the forwarded amount. Neither edits task data.
+Incomplete trace capture omits alternating tool spans while preserving all tool
+execution, model messages, state and grading. Missing spans are an observability
+control, not a data defect.
+
+Existing name-only datasets must be regenerated with `.beaker/upload_splits.py`.
+The mixed 11/11 dataset contains the required frozen fixtures. Train and test
+may contain identical tasks, but each row must have a unique ID across both
+splits (for example, `train:case-123` and `test:case-123`). Store the shared local
+label key as `metadata.reference_id` so predictions can be joined to reference
+labels without treating the two copies as independent examples. Its label
+audit must use this PI API execution condition, not the earlier native Zapier
+condition. Local smoke validation does not execute a model rollout.
 
 Beaker displays assertion conditions as **Checks**, without Expected/Predicted
 value pairs. Check names include the assertion type and complete parameter values,
@@ -70,7 +107,9 @@ the tasks' `zapier_tools`.
 ## Splits
 
 We reviewed AutomationBench's task instructions, metadata, and grader code and
-identified **122 cases with data-integrity defects**. The loader excludes these
+identified **122 original-source cases with data-integrity defects**. These historical
+exclusions are retained for ordinary CLI splits; they are not claims about PI's repairs.
+The split loader excludes these
 cases before use, yielding **374 train and 104 test cases**, with case order and
 split membership preserved. Exclusions address defective tasks or grading, not
 case difficulty or agent performance.
