@@ -9,7 +9,8 @@
 # invoking the whole-suite CLI. The batch-API client paths were dropped
 # (single-rollout usage has no batching); the logic itself is unchanged.
 # _resolve_api / _resolve_adaptive_models / _warn_if_unmatched_preview are
-# imported from the upstream module rather than copied.
+# imported from the upstream module rather than copied. Haiku 5.5 is added
+# to the adaptive models because the pinned upstream revision predates it.
 
 """Model routing reused from AutomationBench's own eval entry point.
 
@@ -54,9 +55,8 @@ def build_sampling_args(
     sampling_args = None
     if reasoning_effort:
         if resolved_api == "anthropic":
-            # Opus 4.6+ and Sonnet 4.6 support adaptive thinking with output_config effort.
-            # Older models (Haiku 4.5, Sonnet 4.5, etc.) require manual budget_tokens.
-            _adaptive_models = _resolve_adaptive_models()
+            # Newer models use adaptive thinking; older models require budget_tokens.
+            _adaptive_models = (*_resolve_adaptive_models(), "haiku-5-5")
             _warn_if_unmatched_preview(model, _adaptive_models)
             if any(m in model for m in _adaptive_models):
                 sampling_args = {

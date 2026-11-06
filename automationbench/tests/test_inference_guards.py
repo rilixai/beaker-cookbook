@@ -204,7 +204,7 @@ async def test_hosted_trace_preserves_retry_and_malformed_tool_response(tmp_path
 
 
 @pytest.mark.parametrize("selected_model", [False, True])
-async def test_hosted_client_creation_uses_the_limits(monkeypatch: Any, selected_model: bool) -> None:
+async def test_hosted_chat_client_creation_uses_the_limits(monkeypatch: Any, selected_model: bool) -> None:
     sys.path.insert(0, str(Path(__file__).parents[1] / ".beaker"))
     import beaker_integration
 
@@ -219,6 +219,11 @@ async def test_hosted_client_creation_uses_the_limits(monkeypatch: Any, selected
 
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     monkeypatch.setattr(beaker_integration, "AsyncOpenAI", sdk)
+    monkeypatch.setattr(
+        beaker_integration,
+        "default_model_spec",
+        lambda: ModelSpec(name="gpt-5.6-luna", api="chat_completions", reasoning_effort="medium"),
+    )
     monkeypatch.setattr(
         beaker_integration,
         "inference_target",

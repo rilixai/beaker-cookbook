@@ -238,7 +238,7 @@ def default_model_spec() -> ModelSpec:
     app's (and CLI's) default model never changes what Beaker optimizes. Chat
     Completions and Anthropic Messages requests are both traced.
     """
-    return ModelSpec(name="gpt-5.6-luna", api="chat_completions", reasoning_effort="medium")
+    return ModelSpec(name="claude-haiku-5-5", api="anthropic", reasoning_effort="medium")
 
 
 def _client_for(runtime: RolloutRuntime[Any]) -> tuple[Client, ModelSpec]:
@@ -247,8 +247,8 @@ def _client_for(runtime: RolloutRuntime[Any]) -> tuple[Client, ModelSpec]:
     A run started with a model choice (model-swap runs) resolves to a gateway
     endpoint, a run-scoped token and a canonical model name; the gateway applies
     the run's reasoning effort, so none is sent. With no selection the app's
-    default model and ``OPENAI_API_KEY`` are used as-is, which inside a hosted
-    rollout is Beaker's provider proxy. No key is ever asked of the user.
+    default model and its provider key are used as-is, which inside a hosted
+    rollout routes through Beaker's provider proxy.
     """
     if runtime.model:
         target = inference_target(runtime)

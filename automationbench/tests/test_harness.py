@@ -354,9 +354,9 @@ class TestRunner:
         # Independent of ModelSpec's defaults, so the CLI default can change freely.
         spec = default_model_spec()
         assert (spec.name, spec.resolved_api(), spec.sampling_args()) == (
-            "gpt-5.6-luna",
-            "chat_completions",
-            {"reasoning_effort": "medium", "max_completion_tokens": 32768},
+            "claude-haiku-5-5",
+            "anthropic",
+            {"thinking": {"type": "adaptive"}, "output_config": {"effort": "medium"}, "max_tokens": 64000},
         )
 
     async def test_beaker_no_model_uses_traced_anthropic_client(self, monkeypatch: Any) -> None:
@@ -366,20 +366,14 @@ class TestRunner:
         from automationbench.clients import StreamingAnthropicClient
 
         sys.path.insert(0, str(RECIPE_ROOT / ".beaker"))
-        import beaker_integration
         from beaker_integration import _client_for, _TracedAnthropicClient
 
-        monkeypatch.setattr(
-            beaker_integration,
-            "default_model_spec",
-            lambda: ModelSpec(name="claude-sonnet-5-5", api="anthropic", reasoning_effort="max"),
-        )
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
         client, model = _client_for(SimpleNamespace(model=None))
         try:
             assert isinstance(client, _TracedAnthropicClient)
             assert isinstance(client, StreamingAnthropicClient)
-            assert model.name == "claude-sonnet-5-5"
+            assert model.name == "claude-haiku-5-5"
         finally:
             await client.close()
 
