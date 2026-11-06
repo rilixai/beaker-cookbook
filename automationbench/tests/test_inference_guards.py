@@ -12,9 +12,9 @@ import httpx
 import pytest
 from beaker.tracing import local_capture
 from openai import APIStatusError, AsyncOpenAI
-from verifiers.errors import ModelError
 
 from automationbench_skills.clients import CostTrackingChatCompletionsClient
+from automationbench_skills.model_protocol import ModelError
 from automationbench_skills.runner import ModelSpec
 
 
@@ -204,7 +204,7 @@ async def test_hosted_trace_preserves_retry_and_malformed_tool_response(tmp_path
 
 
 @pytest.mark.parametrize("selected_model", [False, True])
-async def test_hosted_chat_client_creation_uses_the_limits(monkeypatch: Any, selected_model: bool) -> None:
+async def test_hosted_client_creation_uses_the_limits(monkeypatch: Any, selected_model: bool) -> None:
     sys.path.insert(0, str(Path(__file__).parents[1] / ".beaker"))
     import beaker_integration
 

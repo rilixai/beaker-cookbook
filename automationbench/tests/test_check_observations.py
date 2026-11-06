@@ -109,7 +109,11 @@ async def test_run_case_displays_changes_once_and_native_scoring_uses_full_conte
     end = WorldState(
         gmail={"messages": [{"to": ["target@example.com"], "label_ids": ["SENT"], "body_plain": "Total: $19,500"}]}
     ).model_dump(mode="json")
-    monkeypatch.setattr(integration, "_authored_initial_states", lambda: {"sample": initial})
+    monkeypatch.setattr(
+        integration,
+        "_fixture_for",
+        lambda _: SimpleNamespace(initial_state=lambda: initial, scenario=SimpleNamespace(trace_capture="complete")),
+    )
     monkeypatch.setattr(integration, "_sample_for", lambda _: SimpleNamespace(task_name="sample", domain="finance"))
     monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
     client = SimpleNamespace(close=AsyncMock())
@@ -168,7 +172,15 @@ async def test_large_scoring_state_takes_priority_over_display_output(
     end = WorldState(
         gmail={"messages": [{"to": ["target@example.com"], "label_ids": ["SENT"], "body_plain": ""}]}
     ).model_dump(mode="json")
-    context = {"task_name": "sample", "domain": "finance", "error": None, "end_state": end}
+    context = {
+        "task_name": "sample",
+        "domain": "finance",
+        "error": None,
+        "end_state": end,
+        "runtime_benchmark_commit": integration.PI_COMMIT,
+        "tool_interface": "pi_api",
+        "trace_capture": "complete",
+    }
     envelope = {"context": context, "output": None, "output_kind": "record"}
     padding_bytes = (
         integration._RESULT_MAX_BYTES - headroom - len(json.dumps(envelope, separators=(",", ":")).encode("utf-8"))
@@ -177,7 +189,11 @@ async def test_large_scoring_state_takes_priority_over_display_output(
     # UTF-8 with ensure_ascii=False would incorrectly retain the large diff.
     end["gmail"]["messages"][0]["body_plain"] = "界" * (padding_bytes // 6) + "x" * (padding_bytes % 6)
     observed = {"gmail.added": "change details " * 1_500}
-    monkeypatch.setattr(integration, "_authored_initial_states", lambda: {"sample": initial})
+    monkeypatch.setattr(
+        integration,
+        "_fixture_for",
+        lambda _: SimpleNamespace(initial_state=lambda: initial, scenario=SimpleNamespace(trace_capture="complete")),
+    )
     monkeypatch.setattr(integration, "_sample_for", lambda _: SimpleNamespace(task_name="sample", domain="finance"))
     monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
     monkeypatch.setattr(integration, "_client_for", lambda _: (SimpleNamespace(close=AsyncMock()), None))
@@ -348,7 +364,14 @@ def test_negative_alias_and_large_unicode_diagnostics_are_bounded() -> None:
     }
     world = WorldState(
         gmail={
-            "messages": [{"to": ["a@example.com"], "label_ids": ["SENT"], "body_plain": "forbidden " + "界" * 10000}]
+            "messages": [
+                {
+                    "to": ["a@example.com"],
+                    "label_ids": ["SENT"],
+                    "subject": "Diagnostic test",
+                    "body_plain": "forbidden " + "界" * 10000,
+                }
+            ]
         }
     )
     with capture_assertion_returns(world, [assertion]) as events:
