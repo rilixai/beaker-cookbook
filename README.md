@@ -35,6 +35,7 @@ research, knowledge work, app control, and enterprise automation.
 | [`harvey_lab/`](harvey_lab/) | A junior-lawyer agent on Harvey's Legal Agent Benchmark: reads a case folder, writes the deliverables, gets graded criterion by criterion by an LLM judge. |
 | [`automationbench/`](automationbench/) | Zapier AutomationBench: a tool-calling agent on `verifiers` that can read a `skills/` folder — edit the skills, rerun, watch the score move. |
 | [`jev_banking77/`](jev_banking77/) | BANKING77: native Jev decisions route banking support messages to 77 intents. Optimize instructions and intent descriptions against fixed labels and exact-match scoring. |
+| [`healthbench/`](healthbench/) | **WIP.** OpenAI HealthBench: a health-conversation agent answers realistic medical chats, graded criterion by criterion against physician-written rubrics by an LLM judge. |
 
 Each recipe is a standalone uv project with its own README covering setup, commands, and expected scores.
 
