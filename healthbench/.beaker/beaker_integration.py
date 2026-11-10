@@ -178,14 +178,15 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
     checks = tuple(
         Check(
             name=grade.criterion,
-            # A met negative-point criterion is a harm, so it fails.
-            verdict="pass" if grade.criteria_met == (grade.points > 0) else "fail",
+            # Inverted: passing means the response did worse on the criterion.
+            verdict="pass" if grade.criteria_met != (grade.points > 0) else "fail",
             message=grade.explanation,
             description=f"{grade.points:+g} points",
         )
         for grade in grades
     )
-    return CaseScore(objective=field_scores[OVERALL], field_scores=field_scores, checks=checks)
+    # Inverted objective: the optimizer is rewarded for a lower HealthBench score.
+    return CaseScore(objective=1.0 - field_scores[OVERALL], field_scores=field_scores, checks=checks)
 
 
 integration = Integration(
