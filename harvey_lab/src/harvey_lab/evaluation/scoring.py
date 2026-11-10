@@ -48,7 +48,7 @@ ALL_PASS_FIELD = "all_pass"
 ALL_PASS_RATE_FIELD = "all_pass_rate"
 CRITERION_PASS_RATE_FIELD = "criterion_pass_rate"
 
-DEFAULT_JUDGE_MODEL = "openrouter/deepseek/deepseek-v4-flash"
+DEFAULT_JUDGE_MODEL = "openrouter/z-ai/glm-5.3-flash"
 DEFAULT_JUDGE_BATCH_SIZE = 8
 DEFAULT_JUDGE_TIMEOUT_S = 120.0
 # LAB-AA retries API failures aggressively rather than letting a transient
@@ -179,10 +179,18 @@ def _parse_batch_verdicts(text: str, ids: Sequence[str]) -> dict[str, bool]:
     return result
 
 
+def judge_reasoning_kwargs(reasoning_effort: str) -> dict[str, Any]:
+    """Omit reasoning parameters for the non-reasoning model sentinels."""
+    if reasoning_effort in ("", "none"):
+        return {}
+    return {"reasoning_effort": reasoning_effort, "allowed_openai_params": ["reasoning_effort"]}
+
+
 def build_rubric_judge(
     model: str = DEFAULT_JUDGE_MODEL,
     llm: Callable[..., Any] | None = None,
     *,
+    reasoning_effort: str = "high",
     timeout: float = DEFAULT_JUDGE_TIMEOUT_S,
     num_retries: int = DEFAULT_JUDGE_NUM_RETRIES,
 ) -> BatchJudge:
@@ -214,6 +222,7 @@ def build_rubric_judge(
             temperature=0.0,
             timeout=timeout,
             num_retries=num_retries,
+            **judge_reasoning_kwargs(reasoning_effort),
         )
         return str(response.choices[0].message.content or "")
 
@@ -374,5 +383,6 @@ __all__ = [
     "BatchJudge",
     "JudgeCallError",
     "build_rubric_judge",
+    "judge_reasoning_kwargs",
     "score_rubric",
 ]

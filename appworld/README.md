@@ -58,12 +58,12 @@ Two agents, differing in what one Beaker case is and how it is scored. Both run 
 | Case | 1 scenario (3 tasks) | 1 task |
 | Objective | `0.8 * TGC + 0.2 * SGC` | 1 if the task passes, else 0 |
 | Full dataset | `appworld-sgc-full`: 30 train + 19 dev cases | `appworld-tgc-full`: 90 train + 57 dev cases |
-| Upload | `uv run python .beaker/upload_dataset.py --full` | `uv run python .beaker/upload_dataset.py --tgc` |
+| Upload | `uv run python .beaker/upload_dataset.py` | `uv run python .beaker/upload_dataset.py --tgc` |
 | CLI | `uv run beaker` | `uv run beaker --config-file .beaker/tgc.yaml` |
 
 Both draw on the same 147 train and dev tasks. The scenario objective gives a graded signal: TGC rewards partial progress, while SGC alone would be zero whenever any variant fails.
 
-`upload_dataset.py` without a flag uploads a quick-start set (`appworld-sgc-quickstart`): the first 4 train scenarios, 3 for optimization and 1 held out. Hosted datasets change only when uploaded, so pass the dataset revision explicitly to smoke and launch. Uploading `--full` replaces the earlier revision under the same name; existing runs keep their original immutable revisions.
+Hosted datasets change only when uploaded, so pass the dataset revision explicitly to smoke and launch. Re-uploading replaces the earlier revision under the same name; existing runs keep their original immutable revisions.
 
 Each evaluator requirement becomes a pass/fail check grouped by task ID, so the optimizer sees which requirements failed.
 
@@ -114,11 +114,9 @@ variants, and excludes the cost of optimization. Kimi K3 and Gemini 3.5 Flash
 Lite used earlier integration builds and optimization playbooks.
 
 **Try it yourself:** follow the [quick start](#quick-start), then use the scenario
-integration and upload the full dataset with
-`uv run python .beaker/upload_dataset.py --full`, as described in
-[Beaker integrations](#beaker-integrations). The default quick-start dataset
-checks the optimization workflow on a small set; these results use the full
-dataset.
+integration and upload the dataset with
+`uv run python .beaker/upload_dataset.py`, as described in
+[Beaker integrations](#beaker-integrations).
 
 ## Models
 

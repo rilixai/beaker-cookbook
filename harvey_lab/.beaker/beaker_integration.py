@@ -25,10 +25,11 @@ from beaker import (
     Check,
     Integration,
     JsonValue,
-    RepositoryRunSetup,
     RepositoryRunSetupResult,
     RetryableCaseError,
     RolloutRuntime,
+    RunSetup,
+    RunSetupResults,
     SetupRuntime,
     inference_target,
     repository,
@@ -46,13 +47,14 @@ from harvey_lab.evaluation.scoring import (
     JudgeCallError,
     _extract_verdicts_payload,
     build_rubric_judge,
+    judge_reasoning_kwargs,
     score_rubric,
 )
 
 
 BEAKER_JUDGE_BATCH_SIZE = 4
 SELECTED_CONTEXT_WINDOW_ENV = "HARVEY_BEAKER_CONTEXT_WINDOW_TOKENS"
-DEFAULT_SELECTED_CONTEXT_WINDOW = 128_000
+DEFAULT_SELECTED_CONTEXT_WINDOW = 1_000_000
 
 
 def relative_path(value: str) -> str:
@@ -120,16 +122,16 @@ class TaskRow(BaseModel):
         return self
 
 
-class TaskSetup(RepositoryRunSetup[TaskRow]):
+class TaskSetup(RunSetup[TaskRow]):
     row_model = TaskRow
 
     @asynccontextmanager
-    async def prepare_run(self, *, runtime: SetupRuntime) -> AsyncIterator[RepositoryRunSetupResult]:
+    async def prepare_run(self, *, runtime: SetupRuntime) -> AsyncIterator[RunSetupResults]:
         del runtime
         selected_context_window()
         with tempfile.TemporaryDirectory(prefix="harvey-beaker-corpus-") as cache:
             self.cache_dir = Path(cache)
-            yield RepositoryRunSetupResult()
+            yield {"repository": RepositoryRunSetupResult()}
 
     async def load_cases(self, row: TaskRow, *, runtime: SetupRuntime) -> AsyncIterator[Case]:
         # Optional local source avoids network in smoke; never forwarded to a candidate.
@@ -248,7 +250,7 @@ def selected_model_factory(runtime: RolloutRuntime[Any]) -> Any:
 
     def factory(
         model: str,
-        temperature: float,
+        temperature: float | None,
         max_tokens: int,
         context_window_tokens: int,
         timeout: float,
@@ -372,6 +374,7 @@ def grade(task: TaskInput, expected: Expected, deliverables: dict[str, str]) -> 
                 temperature=0.0,
                 timeout=config.judge_llm_timeout,
                 num_retries=config.judge_num_retries,
+                **judge_reasoning_kwargs(config.judge_reasoning_effort),
                 **routing,
             )
             text = str(response.choices[0].message.content or "")
