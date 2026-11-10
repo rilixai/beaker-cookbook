@@ -31,6 +31,7 @@ from healthbench.evaluation.grader import RubricGrader
 from healthbench.evaluation.scoring import OVERALL, case_metrics
 
 
+AGENT_MODEL = "gpt-6-luna"
 PROMPTS_FILE = Path("src/healthbench/agent/prompts.py")
 AXIS_TAG_PREFIX = "axis:"
 
@@ -87,7 +88,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
     else:
         # Hosted runs route this through Beaker's provider proxy; locally it uses OPENAI_API_KEY.
         client = AsyncOpenAI()
-        model = config.task_model
+        model = AGENT_MODEL
     agent = HealthBenchAgent(
         client,
         model=model,
