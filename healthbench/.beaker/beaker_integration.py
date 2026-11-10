@@ -27,7 +27,14 @@ from pydantic import BaseModel
 from healthbench.agent.agent import AgentOutput, HealthBenchAgent
 from healthbench.config import DEFAULT_GRADER_MODEL, HealthBenchConfig
 from healthbench.data.dataset import HealthBenchRecord, RubricItem
-from healthbench.evaluation.grader import RubricGrader
+from healthbench.evaluation.grader import (
+    GRADER_TEMPLATE,
+    CriterionGrade,
+    GraderError,
+    RubricGrader,
+    parse_verdict,
+    render_conversation,
+)
 from healthbench.evaluation.scoring import OVERALL, case_metrics
 
 
@@ -77,6 +84,30 @@ class LunaAgent(HealthBenchAgent):
         completion = await self.client.chat.completions.create(model=self.model, messages=messages)  # type: ignore[arg-type]
         usage = completion.usage.model_dump(include={"prompt_tokens", "completion_tokens"}) if completion.usage else {}
         return AgentOutput(response=completion.choices[0].message.content or "", usage=usage)
+
+
+class LunaGrader(RubricGrader):
+    """The reference grader without ``temperature``, which gpt-6-luna rejects."""
+
+    async def grade_criterion(self, conversation: list[dict[str, str]], item: RubricItem) -> CriterionGrade:
+        prompt = GRADER_TEMPLATE.replace("<<conversation>>", render_conversation(conversation)).replace(
+            "<<rubric_item>>", str(item)
+        )
+        for _ in range(self.max_retries):
+            async with self._semaphore:
+                completion = await self.client.chat.completions.create(
+                    model=self.model, messages=[{"role": "user", "content": prompt}]
+                )
+            verdict = parse_verdict(completion.choices[0].message.content or "")
+            if verdict is not None:
+                return CriterionGrade(
+                    criterion=item.criterion,
+                    points=item.points,
+                    tags=item.tags,
+                    criteria_met=verdict["criteria_met"],
+                    explanation=str(verdict.get("explanation", "")),
+                )
+        raise GraderError(f"No valid verdict after {self.max_retries} tries for criterion: {item.criterion[:80]!r}")
 
 
 def _candidate_system_prompt() -> str:
@@ -134,7 +165,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
     else:
         client, judge_model = AsyncOpenAI(base_url=target.base_url, api_key=target.api_key), target.model
     async with client:
-        grader = RubricGrader(client, model=judge_model, max_retries=HealthBenchConfig().grader_max_retries)
+        grader = LunaGrader(client, model=judge_model, max_retries=HealthBenchConfig().grader_max_retries)
         grades = await grader.grade(prompt, response, rubrics)
 
     metrics = case_metrics(grades, expected["example_tags"])
