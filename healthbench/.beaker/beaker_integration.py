@@ -24,7 +24,7 @@ from beaker import (
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from healthbench.agent.agent import HealthBenchAgent
+from healthbench.agent.agent import AgentOutput, HealthBenchAgent
 from healthbench.config import DEFAULT_GRADER_MODEL, HealthBenchConfig
 from healthbench.data.dataset import HealthBenchRecord, RubricItem
 from healthbench.evaluation.grader import RubricGrader
@@ -69,6 +69,16 @@ class Setup(RunSetup[Row]):
         )
 
 
+class LunaAgent(HealthBenchAgent):
+    """The app's agent without sampling params, which gpt-6-luna rejects."""
+
+    async def respond(self, record: HealthBenchRecord) -> AgentOutput:
+        messages = [{"role": "system", "content": self.system_prompt}, *record.prompt]
+        completion = await self.client.chat.completions.create(model=self.model, messages=messages)  # type: ignore[arg-type]
+        usage = completion.usage.model_dump(include={"prompt_tokens", "completion_tokens"}) if completion.usage else {}
+        return AgentOutput(response=completion.choices[0].message.content or "", usage=usage)
+
+
 def _candidate_system_prompt() -> str:
     # Repository candidates run with source_dir as the working directory; read the candidate's prompt, not the seed.
     spec = importlib.util.spec_from_file_location("candidate_healthbench_prompts", Path.cwd() / PROMPTS_FILE)
@@ -79,7 +89,6 @@ def _candidate_system_prompt() -> str:
 
 
 async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> CaseResult:
-    config = HealthBenchConfig()
     prompt = [Message.model_validate(m).model_dump() for m in case_input["prompt"]]  # type: ignore[index]
     if runtime.model:
         target = inference_target(runtime)
@@ -89,11 +98,9 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
         # Hosted runs route this through Beaker's provider proxy; locally it uses OPENAI_API_KEY.
         client = AsyncOpenAI()
         model = AGENT_MODEL
-    agent = HealthBenchAgent(
+    agent = LunaAgent(
         client,
         model=model,
-        temperature=config.task_temperature,
-        max_tokens=config.task_max_tokens,
         system_prompt=_candidate_system_prompt(),
     )
     record = HealthBenchRecord(prompt_id="", prompt=prompt, rubrics=[])
