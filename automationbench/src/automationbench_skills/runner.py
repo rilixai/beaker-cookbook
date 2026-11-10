@@ -222,6 +222,12 @@ def get_env(
             toolset=toolset,
             timeout_seconds=timeout,
         )
+        if skills and toolset == "zapier":
+            from automationbench_skills.gmail_context import with_gmail_context
+            from automationbench_skills.slack_recovery import with_slack_recovery
+
+            env.tool_map["execute_tool"] = with_slack_recovery(env.tool_map["execute_tool"])
+            env.tool_map["execute_tool"] = with_gmail_context(env.tool_map["execute_tool"])
         # One ``tool_call`` span per tool execution, under whichever Beaker
         # capture is active at call time; the hidden ``world`` arg stays out.
         _ENV_CACHE[key] = beaker_verifiers.instrument(env)
