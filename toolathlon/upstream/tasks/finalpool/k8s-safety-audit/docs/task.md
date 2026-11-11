@@ -1,0 +1,1 @@
+Perform a security audit on the Kubernetes cluster and append the results to the **`Kubernetes Security Audit`** Google Sheet under the **Week3** worksheet. The data must follow the same column order and formatting style used in **Week1** and **Week2**. You can find detailed requirements in `guidelines.md` in the workspace.

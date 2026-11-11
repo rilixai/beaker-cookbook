@@ -1,0 +1,2 @@
+Please read the content from localhost:30137 and summarize the information, providing each person's available time slots. Analyze team members' calendar availability and automatically recommend one 2-hour weekly meeting slot. Send the schedule arrangement to meeting administrator [jjones@mcp.com](mailto:jjones@mcp.com). The email content should include the meeting time (in a format like "Monday 9:00 AM to 11:00 AM every week") and the names of all participants. You need to follow the content format in `format.md`.
+

@@ -1,0 +1,1 @@
+请在我的 GitHub 仓库 fork https://github.com/academicpages/academicpages.github.io 并将其重命名为 `LJT-Homepage`，并填写记忆中的个人信息、学术背景、研究经历、发表论文、技能和联系方式，以构建我的个人主页。请勿添加或修改记忆中提供的信息以外的任何内容，也请勿添加其他页面。

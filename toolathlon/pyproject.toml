@@ -1,0 +1,64 @@
+[project]
+name = "toolathlon-beaker"
+version = "0.1.0"
+description = "Toolathlon (all 108 finalpool tasks) with its toolathlon_default harness, run in decoupled mode for Beaker harness optimization."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "rilixai" }]
+# The vendored harness under upstream/ has its own pinned uv project
+# (upstream/pyproject.toml + uv.lock); the integration syncs it in the sandbox
+# with `uv sync --frozen` and runs it in a subprocess, so its pins never mix
+# with the Beaker SDK environment.
+dependencies = [
+  "beaker-sdk>=0.6.5",
+  "pydantic>=2.11",
+  "uv>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# The integration code lives in .beaker/ (imported via package_import_root),
+# so the wheel only carries the dependency metadata.
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[tool.hatch.build.targets.sdist]
+exclude = ["upstream"]
+
+[dependency-groups]
+dev = [
+  "ruff",
+  "mypy",
+  "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+
+[tool.ruff]
+line-length = 119
+# upstream/ is Toolathlon verbatim; keep it out of lint/format so diffs
+# against upstream stay reviewable.
+extend-exclude = ["upstream"]
+
+[tool.ruff.lint]
+select = ["C", "E", "F", "I", "W", "UP006", "UP007", "UP045"]
+ignore = ["C901", "E501"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["beaker_integration", "toolathlon_setup"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+show_error_codes = true
+files = [".beaker"]
+mypy_path = ".beaker"
+explicit_package_bases = true

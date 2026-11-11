@@ -1,0 +1,54 @@
+# Paths are relative to the Git root; package_import_root is relative to source_dir.
+config_defaults:
+  # Cases share one sandbox's Docker daemon and self-hosted apps, and the
+  # account tasks share the same cloud accounts: keep parallelism low.
+  max_concurrency: 4
+default_integration: toolathlon
+integrations:
+  # All 108 tasks. Tasks that use external accounts read these platform
+  # secrets (set them on the agent in Beaker; values never live in Git).
+  toolathlon:
+    agent_key: toolathlon-default
+    entrypoint: beaker_integration:integration
+    package_import_root: .beaker
+    source_dir: toolathlon
+    environment_base: debian_slim:3.12
+    apt_install:
+      - docker.io
+      - iptables
+      - git
+      - curl
+      - ca-certificates
+    required_env:
+      - TOOLATHLON_SERPER_API_KEY
+      - TOOLATHLON_GITHUB_TOKEN
+      - TOOLATHLON_HUGGINGFACE_TOKEN
+      - TOOLATHLON_WANDB_API_KEY
+      - TOOLATHLON_NOTION_INTEGRATION_KEY
+      - TOOLATHLON_NOTION_INTEGRATION_KEY_EVAL
+      - TOOLATHLON_NOTION_SOURCE_PAGE_URL
+      - TOOLATHLON_NOTION_EVAL_PAGE_URL
+      - TOOLATHLON_SNOWFLAKE_ACCOUNT
+      - TOOLATHLON_SNOWFLAKE_USER
+      - TOOLATHLON_SNOWFLAKE_ROLE
+      - TOOLATHLON_SNOWFLAKE_PRIVATE_KEY
+      - TOOLATHLON_GCP_PROJECT_ID
+      - TOOLATHLON_GCP_SERVICE_ACCOUNT_JSON
+      - TOOLATHLON_GOOGLE_OAUTH_CREDENTIALS_JSON
+      - TOOLATHLON_GCP_OAUTH_KEYS_JSON
+      - TOOLATHLON_GOOGLE_CLOUD_CONSOLE_API_KEY
+  # Same harness, restricted to the tasks that need no account or API key
+  # (upload with `upload_dataset.py --no-secrets`).
+  toolathlon-no-secrets:
+    agent_key: toolathlon-default-no-secrets
+    entrypoint: beaker_integration:integration
+    package_import_root: .beaker
+    source_dir: toolathlon
+    environment_base: debian_slim:3.12
+    apt_install:
+      - docker.io
+      - iptables
+      - git
+      - curl
+      - ca-certificates
+    required_env: []
