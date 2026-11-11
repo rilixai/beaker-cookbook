@@ -12,9 +12,10 @@ import httpx
 import pytest
 from beaker.tracing import local_capture
 from openai import APIStatusError, AsyncOpenAI
+from openai.types.chat import ChatCompletion
 
 from automationbench_skills.clients import CostTrackingChatCompletionsClient
-from automationbench_skills.model_protocol import ModelError
+from automationbench_skills.model_protocol import ModelError, OpenAIChatCompletionsClient
 from automationbench_skills.runner import ModelSpec
 
 
@@ -129,6 +130,23 @@ async def test_empty_response_retry_retains_usage_and_cost() -> None:
     assert state["_usage"] == {"input_tokens": 11, "output_tokens": 7}
     assert state["_perf"]["model_calls"] == 2
     assert state["_perf"]["cost_usd"] == pytest.approx(0.02)
+
+
+@pytest.mark.parametrize("signal", ["refusal", "reasoning_content", "reasoning_tokens"])
+async def test_valid_nonempty_provider_signals_are_not_rejected(signal: str) -> None:
+    reply = _reply(empty=True)
+    if signal == "reasoning_tokens":
+        reply["usage"]["completion_tokens_details"] = {"reasoning_tokens": 7}
+    else:
+        reply["choices"][0]["message"][signal] = "Provider response"
+    native = ChatCompletion.model_validate(reply)
+    client = OpenAIChatCompletionsClient(object())
+    await client.raise_from_native_response(native)
+    response = await client.from_native_response(native)
+    if signal == "refusal":
+        assert response.message.content == "Provider response"
+    elif signal == "reasoning_content":
+        assert response.message.reasoning_content == "Provider response"
 
 
 async def test_safety_rejection_is_not_retried_and_remains_visible() -> None:

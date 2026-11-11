@@ -27,7 +27,8 @@ class Scenario(BaseModel):
 
 
 class TaskInfo(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Preserve upstream metadata in the frozen task and its hash.
+    model_config = ConfigDict(extra="allow")
 
     task_name: str = Field(min_length=1)
     initial_state: dict[str, Any]

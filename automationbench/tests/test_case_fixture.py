@@ -24,7 +24,7 @@ from automationbench_skills.runner import _rollout_input
 
 sys.path.insert(0, str(Path(__file__).parents[1] / ".beaker"))
 from beaker_integration import TaskRow, TaskSetup, score_case  # noqa: E402
-from case_fixture import PI_COMMIT, SOURCE_COMMITS  # noqa: E402
+from case_fixture import PI_COMMIT, SOURCE_COMMITS, CaseFixture  # noqa: E402
 
 
 @pytest.fixture
@@ -66,6 +66,40 @@ def test_exported_rows_satisfy_the_fixture_contract(split, per_domain, count):
     for raw in rows:
         TaskRow.model_validate(raw)
         assert hashes(raw["runtime_fixture"]).items() <= raw["metadata"].items()
+
+
+def test_all_pi_tasks_preserve_their_metadata_and_hashes(row):
+    from automationbench_skills.data.tasks import load_samples
+
+    samples = load_samples()
+    assert len(samples) == 600
+    for sample in samples:
+        raw = {
+            "task": {
+                "example_id": sample.index,
+                "prompt": sample.prompt,
+                "answer": sample.answer,
+                "info": sample.info,
+            },
+            "scenario": row["runtime_fixture"]["scenario"],
+        }
+        fixture = CaseFixture.model_validate(raw)
+        assert fixture.model_dump(mode="json") == raw, sample.task_name
+        fixture.validate_reference(
+            sample.task_name,
+            {"assertions": sample.info["assertions"]},
+            {"benchmark_commit": PI_COMMIT, **hashes(raw)},
+        )
+        assert fixture.sample().info.get("meta") == sample.info.get("meta")
+
+
+def test_task_metadata_is_covered_by_the_hash(row):
+    row["runtime_fixture"]["task"]["info"]["meta"] = {"current_time": "2026-02-10T09:00:00"}
+    row["metadata"].update(hashes(row["runtime_fixture"]))
+    TaskRow.model_validate(row)
+    row["runtime_fixture"]["task"]["info"]["meta"]["current_time"] = "2026-02-11T09:00:00"
+    with pytest.raises(ValueError, match="task_sha256"):
+        TaskRow.model_validate(row)
 
 
 @pytest.mark.parametrize("mutation", ["missing", "task", "assertions", "source"])
@@ -150,7 +184,7 @@ async def test_lookup_fault_preserves_emails_and_trace_gap_preserves_execution(r
 
 
 @pytest.mark.parametrize(
-    "failure", ["provider_timeout", "task_deadline", "context_code", "context_message", "bad_request"]
+    "failure", ["provider_timeout", "task_deadline", "context_code", "context_message", "bad_request", "empty"]
 )
 async def test_hosted_failure_after_a_successful_write(row, tmp_path, monkeypatch, failure):
     import beaker_integration as integration
@@ -203,6 +237,19 @@ async def test_hosted_failure_after_a_successful_write(row, tmp_path, monkeypatc
             )
         assert payload["messages"][-1]["role"] == "tool"
         assert payload["messages"][-1]["tool_call_id"] == "update-contact"
+        if failure == "empty":
+            return httpx.Response(
+                200,
+                json={
+                    "id": "empty",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "gpt-5.6-luna",
+                    "choices": [
+                        {"index": 0, "message": {"role": "assistant", "content": None}, "finish_reason": "stop"}
+                    ],
+                },
+            )
         if failure in {"provider_timeout", "task_deadline"}:
             try:
                 await asyncio.Event().wait()
@@ -224,8 +271,9 @@ async def test_hosted_failure_after_a_successful_write(row, tmp_path, monkeypatc
     monkeypatch.setattr(integration, "DEFAULT_TIMEOUT_SECONDS", 2 if failure == "task_deadline" else 10)
     with local_capture(tmp_path, case_id=case.id, candidate_id="test", strict_evidence=False):
         runtime = SimpleNamespace(trace=current_trace())
-        if failure in {"provider_timeout", "bad_request"}:
-            with pytest.raises(RetryableCaseError, match="ModelError"):
+        if failure in {"provider_timeout", "bad_request", "empty"}:
+            message = "no content" if failure == "empty" else "ModelError"
+            with pytest.raises(RetryableCaseError, match=message):
                 await integration.run_case(case_input=case.input, runtime=runtime)
         else:
             result = await integration.run_case(case_input=case.input, runtime=runtime)
@@ -236,7 +284,7 @@ async def test_hosted_failure_after_a_successful_write(row, tmp_path, monkeypatc
             score = await score_case(case=case, result=result, case_files_dir=tmp_path)
             assert score.field_scores["partial_credit"] == 1
             assert score.field_scores["task_completed_correctly"] == 1
-    assert len(requests) == 2
+    assert len(requests) == (4 if failure == "empty" else 2)
     assert client.client.is_closed()
     if failure in {"provider_timeout", "task_deadline"}:
         assert cancelled.is_set()

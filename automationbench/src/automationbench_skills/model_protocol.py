@@ -215,6 +215,21 @@ class OpenAIChatCompletionsClient(Client):
                 raise OverlongPromptError(str(exc)) from exc
             raise
 
+    async def raise_from_native_response(self, response: Any) -> None:
+        choices = getattr(response, "choices", None)
+        if not choices or len(choices) != 1:
+            raise ModelError("Model must return exactly one response choice")
+        message = choices[0].message
+        details = getattr(getattr(response, "usage", None), "completion_tokens_details", None)
+        if not (
+            message.content
+            or message.tool_calls
+            or getattr(message, "refusal", None)
+            or parse_reasoning_content(message)
+            or getattr(details, "reasoning_tokens", 0)
+        ):
+            raise ModelError("Model returned no content and did not call any tools")
+
     async def from_native_response(self, response: Any) -> Response:
         choice = response.choices[0]
         msg = choice.message
@@ -231,7 +246,7 @@ class OpenAIChatCompletionsClient(Client):
             if usage
             else None,
             message=ResponseMessage(
-                content=msg.content,
+                content=msg.content or getattr(msg, "refusal", None),
                 reasoning_content=parse_reasoning_content(msg),
                 tool_calls=[
                     ToolCall(id=c.id, name=c.function.name, arguments=c.function.arguments)
