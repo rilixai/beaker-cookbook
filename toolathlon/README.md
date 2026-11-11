@@ -61,6 +61,7 @@ Two integrations share the same code:
   (see `upstream/tasks/finalpool/task_conflict.json`). `max_concurrency` defaults to 4.
 - Time: upstream allows up to 5,400 s per task. Override with `TOOLATHLON_CASE_TIMEOUT_SECONDS` and
   `TOOLATHLON_MAX_STEPS`.
+- Debugging: set `TOOLATHLON_DUMP_ROOT` to keep each case's dump (trajectory, gateway, preprocess and evaluation logs).
 - License: the upstream repository has no license file. Confirm redistribution with the authors before publishing.
 
 ## Quickstart

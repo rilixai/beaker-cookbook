@@ -125,6 +125,8 @@ def _run(command: list[str], *, log: Path, env: Mapping[str, str] | None = None,
 
 def tool_env() -> dict[str, str]:
     env = dict(os.environ)
+    # The harness runs in upstream's own uv project, not the integration's venv.
+    env.pop("VIRTUAL_ENV", None)
     env["PATH"] = f"{BIN}{os.pathsep}{env.get('PATH', '')}"
     return env
 

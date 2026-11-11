@@ -100,7 +100,11 @@ async def run_case(*, case_input: Any, runtime: Any) -> CaseResult:
         "TOOLATHLON_OPENAI_API_KEY": target.api_key,
     }
     with (
-        tempfile.TemporaryDirectory(prefix="toolathlon-case-") as dump,
+        tempfile.TemporaryDirectory(
+            prefix="toolathlon-case-",
+            dir=os.environ.get("TOOLATHLON_DUMP_ROOT"),
+            delete=not os.environ.get("TOOLATHLON_DUMP_ROOT"),
+        ) as dump,
         runtime.trace.stage("toolathlon.run_case", inputs={"task": task.task, "model": target.model}) as stage,
     ):
         process = await asyncio.create_subprocess_exec(
