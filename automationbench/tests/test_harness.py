@@ -356,7 +356,7 @@ class TestRunner:
         assert (spec.name, spec.resolved_api(), spec.sampling_args()) == (
             "gpt-5.6-luna",
             "chat_completions",
-            {"reasoning_effort": "low", "max_completion_tokens": 32768},
+            {"reasoning_effort": "medium", "max_completion_tokens": 32768},
         )
 
     async def test_beaker_no_model_uses_traced_anthropic_client(self, monkeypatch: Any) -> None:

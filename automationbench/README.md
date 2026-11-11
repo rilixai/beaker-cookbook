@@ -14,7 +14,7 @@ Hosted evaluation always uses PI's `api_search`, `api_fetch` and `base64_encode`
 plus the skill tools. Search returns descriptions and JSON schemas for path,
 query and body fields. The same PI catalog and rendering apply to every case;
 the endpoints available for execution depend on the case's connected services.
-The hosted model remains **Claude Haiku 5.5**.
+The hosted default matches `main`: **GPT-5.6 Luna** with **medium reasoning effort**.
 
 Each row must include `runtime_fixture: {task, scenario}`. The task contains
 `example_id`, `prompt`, `answer`, and `info` with `task_name`, `initial_state`,

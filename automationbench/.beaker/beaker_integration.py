@@ -206,7 +206,7 @@ def default_model_spec() -> ModelSpec:
     app's (and CLI's) default model never changes what Beaker optimizes. Chat
     Completions and Anthropic Messages requests are both traced.
     """
-    return ModelSpec(name="gpt-5.6-luna", api="chat_completions", reasoning_effort="low")
+    return ModelSpec(name="gpt-5.6-luna", api="chat_completions", reasoning_effort="medium")
 
 
 def _client_for(runtime: RolloutRuntime[Any]) -> tuple[Client, ModelSpec]:
