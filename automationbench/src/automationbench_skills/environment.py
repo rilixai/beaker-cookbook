@@ -144,11 +144,16 @@ class AutomationBenchEnv:
                 state["stop_condition"] = "max_turns"
 
             # Expiry stops inference but preserves the world for deterministic scoring.
+            deadline = asyncio.timeout(self.timeout_seconds)
             try:
-                async with asyncio.timeout(self.timeout_seconds):
+                async with deadline:
                     await loop()
-            except TimeoutError:
-                state["stop_condition"] = "timeout_reached"
+            except TimeoutError as exc:
+                if deadline.expired():
+                    state["stop_condition"] = "timeout_reached"
+                else:
+                    # A provider turn can expire before the task budget is exhausted.
+                    state["error"] = ModelError(f"Provider turn timed out: {exc}")
             except Error as exc:
                 state["error"] = exc
             except Exception as exc:

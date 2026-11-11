@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import json
@@ -9,10 +10,13 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from automationbench.domains import get_combined_dataset
-from beaker import CaseResult
+from beaker import CaseResult, RetryableCaseError
+from beaker.tracing import current_trace, local_capture
 from fake_client import ScriptedClient
+from openai import AsyncOpenAI
 
 from automationbench_skills.environment import AutomationBenchEnv
 from automationbench_skills.runner import _rollout_input
@@ -132,3 +136,96 @@ async def test_lookup_fault_preserves_emails_and_trace_gap_preserves_execution(r
     assert base["metrics"] == broken["metrics"] == gap["metrics"]
     assert tool_counts["base"] == tool_counts["broken"] == {"api_fetch": 1}
     assert tool_counts["gap"] == {}
+
+
+@pytest.mark.parametrize(
+    "failure", ["provider_timeout", "task_deadline", "context_code", "context_message", "bad_request"]
+)
+async def test_hosted_failure_after_a_successful_write(row, tmp_path, monkeypatch, failure):
+    import beaker_integration as integration
+
+    parsed = TaskRow.model_validate(row)
+    case = await anext(TaskSetup().load_cases(parsed, runtime=SimpleNamespace()))
+    requests = []
+    cancelled = asyncio.Event()
+
+    async def handler(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        if len(requests) == 1:
+            if failure == "provider_timeout":
+                # Apply the short deadline only to the next turn, after the write.
+                client.turn_timeout = 0.05
+            return httpx.Response(
+                200,
+                json={
+                    "id": "write-contact",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "gpt-5.6-luna",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "tool_calls",
+                            "message": {
+                                "role": "assistant",
+                                "tool_calls": [
+                                    {
+                                        "id": "update-contact",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "api_fetch",
+                                            "arguments": json.dumps(
+                                                {
+                                                    "endpoint": "salesforce.sobjects.contact.update",
+                                                    "path": {"id": "003002"},
+                                                    "body": {"Email": "maria.santos@brightwave-global.example.com"},
+                                                }
+                                            ),
+                                        },
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                },
+            )
+        assert payload["messages"][-1]["role"] == "tool"
+        assert payload["messages"][-1]["tool_call_id"] == "update-contact"
+        if failure in {"provider_timeout", "task_deadline"}:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+        error = {"message": "Invalid request", "type": "invalid_request_error"}
+        if failure == "context_code":
+            error["code"] = "context_length_exceeded"
+        elif failure == "context_message":
+            error["message"] = "This model's maximum context length is 8192 tokens. You requested 9000 tokens."
+        return httpx.Response(400, json={"error": error})
+
+    client = integration._TracedChatCompletionsClient(
+        AsyncOpenAI(api_key="test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))),
+        turn_timeout=60,
+    )
+    monkeypatch.setattr(integration, "_client_for", lambda _: (client, integration.default_model_spec()))
+    monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
+    monkeypatch.setattr(integration, "DEFAULT_TIMEOUT_SECONDS", 2 if failure == "task_deadline" else 10)
+    with local_capture(tmp_path, case_id=case.id, candidate_id="test", strict_evidence=False):
+        runtime = SimpleNamespace(trace=current_trace())
+        if failure in {"provider_timeout", "bad_request"}:
+            with pytest.raises(RetryableCaseError, match="ModelError"):
+                await integration.run_case(case_input=case.input, runtime=runtime)
+        else:
+            result = await integration.run_case(case_input=case.input, runtime=runtime)
+            if failure == "task_deadline":
+                assert result.context["error"] is None
+            else:
+                assert str(result.context["error"]).startswith("OverlongPromptError:")
+            score = await score_case(case=case, result=result, case_files_dir=tmp_path)
+            assert score.field_scores["partial_credit"] == 1
+            assert score.field_scores["task_completed_correctly"] == 1
+    assert len(requests) == 2
+    assert client.client.is_closed()
+    if failure in {"provider_timeout", "task_deadline"}:
+        assert cancelled.is_set()

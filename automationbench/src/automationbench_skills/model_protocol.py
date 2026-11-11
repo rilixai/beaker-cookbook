@@ -11,7 +11,7 @@ import os
 from typing import Any, Generic, Literal, TypeVar
 
 from anthropic import AsyncAnthropic
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -200,13 +200,30 @@ class OpenAIChatCompletionsClient(Client):
         self, prompt: Any, model: str, sampling_args: Any, tools: Any = None, **kwargs: Any
     ) -> Any:
         kwargs.pop("state", None)
-        return await self.client.chat.completions.create(
-            model=model,
-            messages=prompt,
-            **({"tools": tools} if tools else {}),
-            **sampling_args,
-            **kwargs,
-        )
+        try:
+            return await self.client.chat.completions.create(
+                model=model,
+                messages=prompt,
+                **({"tools": tools} if tools else {}),
+                **sampling_args,
+                **kwargs,
+            )
+        except BadRequestError as exc:
+            # Preserve the legacy client's distinction between candidate context
+            # overflow and provider failures, including compatible gateway responses.
+            error_text = exc.response.text.lower()
+            if any(
+                marker in error_text
+                for marker in (
+                    "context_length_exceeded",
+                    "prompt_too_long",
+                    "context length",
+                    "maximum model length",
+                    "prompt is too long",
+                )
+            ):
+                raise OverlongPromptError(str(exc)) from exc
+            raise
 
     async def from_native_response(self, response: Any) -> Response:
         choice = response.choices[0]
