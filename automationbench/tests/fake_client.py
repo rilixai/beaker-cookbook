@@ -1,4 +1,4 @@
-"""Hermetic test helpers: a scripted verifiers Client that never touches the
+"""Hermetic test helpers: a scripted recipe Client that never touches the
 network. Each ScriptedClient instance replays a fixed sequence of assistant
 turns (optionally with tool calls); the rollout, tool execution, state reset,
 and rubric scoring all run for real in-process."""

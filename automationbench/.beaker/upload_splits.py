@@ -8,7 +8,6 @@ The dataset is uploaded to the agent recorded in ``.beaker/beaker.yaml`` (the ke
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import shutil
 import subprocess
@@ -17,7 +16,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import yaml
-from case_fixture import PI_COMMIT
+from case_fixture import PI_COMMIT, CaseFixture
 
 from automationbench_skills.data.tasks import PUBLIC_DOMAINS, Sample, load_split
 
@@ -58,12 +57,7 @@ def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
                 "tool_fault": None,
                 "trace_capture": "complete",
             }
-            hashes = {
-                f"{name}_sha256": hashlib.sha256(
-                    (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
-                ).hexdigest()
-                for name, value in {"task": task, "scenario": scenario}.items()
-            }
+            fixture = CaseFixture.model_validate({"task": task, "scenario": scenario})
             rows.append(
                 {
                     "id": sample.task_name,
@@ -79,9 +73,9 @@ def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
                         "benchmark_commit": PI_COMMIT,
                         "runtime_benchmark_commit": PI_COMMIT,
                         "tool_interface": "pi_api",
-                        **hashes,
+                        **fixture.hashes(),
                     },
-                    "runtime_fixture": {"task": task, "scenario": scenario},
+                    "runtime_fixture": fixture.model_dump(mode="json"),
                     "group_key": domain,
                 }
             )

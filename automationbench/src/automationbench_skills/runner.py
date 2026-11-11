@@ -31,7 +31,7 @@ from automationbench_skills.clients import (
     CostTrackingChatCompletionsClient,
 )
 from automationbench_skills.data.tasks import Sample
-from automationbench_skills.model_protocol import Client, ClientConfig, RolloutInput
+from automationbench_skills.model_protocol import Client, ClientConfig
 from automationbench_skills.prompts import load_system_prompt, task_clock, with_system_prompt
 from automationbench_skills.skills_tools import SKILL_TOOLS, set_skills_dir
 from automationbench_skills.vendored.model_setup import (
@@ -50,8 +50,6 @@ DEFAULT_MAX_STEPS = 50  # upstream eval.py's --max-turns default
 # Scoring and cleanup run after the env's own timeout stops the loop; the outer
 # guard only catches a rollout stuck outside that loop.
 TIMEOUT_GRACE_SECONDS = 60.0
-# State fields upstream's eval exports alongside each rollout.
-STATE_COLUMNS = ["_usage", "_debug", "_assertion_results", "_end_state", "_perf"]
 
 
 @dataclass(frozen=True)
@@ -228,13 +226,13 @@ def get_client(model: ModelSpec) -> Client:
     return _CLIENT_CACHE[key]
 
 
-def _rollout_input(sample: Sample, system_prompt: str | None = None) -> RolloutInput:
-    return RolloutInput(
-        prompt=with_system_prompt(sample.prompt, system_prompt, clock=task_clock(sample.info)),
-        example_id=sample.index,
-        answer=sample.answer,
-        info=sample.info,
-    )
+def _rollout_input(sample: Sample, system_prompt: str | None = None) -> dict[str, Any]:
+    return {
+        "prompt": with_system_prompt(sample.prompt, system_prompt, clock=task_clock(sample.info)),
+        "example_id": sample.index,
+        "answer": sample.answer,
+        "info": sample.info,
+    }
 
 
 def _to_result(sample: Sample, output: dict[str, Any], latency_s: float | None = None) -> RunResult:
@@ -288,7 +286,6 @@ async def run_rollout_raw(
         client,
         model.name,
         sampling_args or {},
-        state_columns=STATE_COLUMNS,
     )
     output = await (asyncio.wait_for(rollout, timeout + TIMEOUT_GRACE_SECONDS) if timeout else rollout)
     return dict(output)

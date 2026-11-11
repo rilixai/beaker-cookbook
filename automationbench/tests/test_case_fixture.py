@@ -57,6 +57,17 @@ def hashes(fixture: dict) -> dict:
     }
 
 
+@pytest.mark.parametrize(("split", "per_domain", "count"), [("train", 6, 36), ("test", 3, 18)])
+def test_exported_rows_satisfy_the_fixture_contract(split, per_domain, count):
+    from upload_splits import _take_per_domain
+
+    rows = _take_per_domain(split, per_domain)
+    assert len(rows) == count
+    for raw in rows:
+        TaskRow.model_validate(raw)
+        assert hashes(raw["runtime_fixture"]).items() <= raw["metadata"].items()
+
+
 @pytest.mark.parametrize("mutation", ["missing", "task", "assertions", "source"])
 def test_rejects_missing_or_inconsistent_fixture(row, mutation):
     if mutation == "missing":

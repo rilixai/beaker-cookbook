@@ -50,6 +50,12 @@ class CaseFixture(BaseModel):
     task: Task
     scenario: Scenario
 
+    def hashes(self) -> dict[str, str]:
+        return {
+            f"{name}_sha256": hashlib.sha256((json.dumps(value, indent=2, sort_keys=True) + "\n").encode()).hexdigest()
+            for name, value in self.model_dump(mode="json").items()
+        }
+
     def validate_reference(self, task_name: str, expected: dict, metadata: dict) -> None:
         if self.task.info.task_name != task_name:
             raise ValueError("input.task_name disagrees with runtime_fixture")
@@ -57,11 +63,9 @@ class CaseFixture(BaseModel):
             raise ValueError("expected.assertions disagrees with runtime_fixture")
         if metadata.get("benchmark_commit") != SOURCE_COMMITS[self.scenario.source]:
             raise ValueError("benchmark_commit must identify the fixture's source revision")
-        for name in ("task", "scenario"):
-            value = getattr(self, name).model_dump(mode="json")
-            digest = hashlib.sha256((json.dumps(value, indent=2, sort_keys=True) + "\n").encode()).hexdigest()
-            if metadata.get(f"{name}_sha256") != digest:
-                raise ValueError(f"{name}_sha256 disagrees with runtime_fixture")
+        for name, digest in self.hashes().items():
+            if metadata.get(name) != digest:
+                raise ValueError(f"{name} disagrees with runtime_fixture")
         WorldState.model_validate(self.initial_state())
         for assertion in self.task.info.assertions:
             if assertion.get("type") not in AssertionRegistry._handlers:

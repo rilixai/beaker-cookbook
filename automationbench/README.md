@@ -36,7 +36,9 @@ Incomplete trace capture omits alternating tool spans while preserving all tool
 execution, model messages, state and grading. Missing spans are an observability
 control, not a data defect.
 
-Existing name-only datasets must be regenerated with `.beaker/upload_splits.py`.
+Existing name-only datasets must be regenerated. Use `.beaker/upload_splits.py`
+for the PI quickstart splits; retain the original task contents when rebuilding
+original-source rows.
 The mixed 11/11 dataset contains the required frozen fixtures. Train and test
 may contain identical tasks, but each row must have a unique ID across both
 splits (for example, `train:case-123` and `test:case-123`). Store the shared local
@@ -58,6 +60,36 @@ diagnostic is partial; it does not infer a cause from the last comparisons alone
 Display output is reduced or omitted when the combined result approaches Beaker's
 transport limit, preserving the complete scoring state before display details.
 The full final state remains in `context` for native scoring.
+
+## Implementation and maintenance
+
+| Owner | Responsibility |
+| --- | --- |
+| Pinned PI dependency | Tasks, API catalog, MCP tools, simulated services, world models, and scalar grading. |
+| Recipe `src/` | In-process model/tool loop, skills, tracing, and provider-message conversion. Beaker can edit this code. |
+| `src/automationbench_skills/vendored/` | Original AutomationBench provider clients and routing. Source revisions are recorded in [ATTRIBUTION.md](ATTRIBUTION.md). |
+| Trusted `.beaker/` | Fixture validation, dataset export, and scoring from the supplied assertions and returned world. |
+
+The local runtime preserves the recipe's `run_one` interface and provider clients
+while using PI's MCP toolset. Adopting PI's native Verifiers V1 runtime would be a
+separate migration. The adapter currently accesses PI's private `_world` and `_api`
+attributes; review these calls when updating the dependency pin.
+
+Keep fixture serialization and hashes in `CaseFixture`; the exporter uses that
+same contract. Runtime errors stay as exception objects until the integration
+classifies them and serializes the result. Provider failures request retries;
+context overflow and task deadlines preserve earned credit.
+
+PI exposes a scalar score. The CLI and hosted scorer separately reconstruct
+assertion details for display. Keep both aligned with PI's exclusion rules.
+Do not make trusted grading depend on optimizer-editable `src/` code to remove
+this duplication. A shared upstream outcome API would be the preferred solution.
+
+After dependency or provider changes, run the commands in
+`.github/workflows/checks.yml` from this recipe directory, including
+`BEAKER_AGENT_KEY= uv run python -m pytest -q`. The tests cover frozen fixtures,
+all 54 quickstart rows, and error handling after a successful tool write. Keep
+vendored changes narrow so they remain comparable with the recorded upstream source.
 
 ## Quick start
 

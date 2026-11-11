@@ -112,9 +112,12 @@ async def test_run_case_displays_changes_once_and_native_scoring_uses_full_conte
     monkeypatch.setattr(
         integration,
         "_fixture_for",
-        lambda _: SimpleNamespace(initial_state=lambda: initial, scenario=SimpleNamespace(trace_capture="complete")),
+        lambda _: SimpleNamespace(
+            initial_state=lambda: initial,
+            scenario=SimpleNamespace(trace_capture="complete"),
+            sample=lambda: SimpleNamespace(task_name="sample", domain="finance"),
+        ),
     )
-    monkeypatch.setattr(integration, "_sample_for", lambda _: SimpleNamespace(task_name="sample", domain="finance"))
     monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
     client = SimpleNamespace(close=AsyncMock())
     monkeypatch.setattr(integration, "_client_for", lambda _: (client, None))
@@ -192,9 +195,12 @@ async def test_large_scoring_state_takes_priority_over_display_output(
     monkeypatch.setattr(
         integration,
         "_fixture_for",
-        lambda _: SimpleNamespace(initial_state=lambda: initial, scenario=SimpleNamespace(trace_capture="complete")),
+        lambda _: SimpleNamespace(
+            initial_state=lambda: initial,
+            scenario=SimpleNamespace(trace_capture="complete"),
+            sample=lambda: SimpleNamespace(task_name="sample", domain="finance"),
+        ),
     )
-    monkeypatch.setattr(integration, "_sample_for", lambda _: SimpleNamespace(task_name="sample", domain="finance"))
     monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
     monkeypatch.setattr(integration, "_client_for", lambda _: (SimpleNamespace(close=AsyncMock()), None))
     monkeypatch.setattr(

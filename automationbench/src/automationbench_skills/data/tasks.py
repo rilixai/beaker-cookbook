@@ -5,9 +5,8 @@ builders — no network). The split files key tasks by ``task_name``
 (``<domain>.<name>``), the benchmark's only globally-unique stable id: the
 dataset's ``example_id`` column is only unique *within* a domain (e.g. sales
 and marketing both start at different offsets but collide across the combined
-600-task set), so it cannot key a cross-domain split. verifiers assigns its
-own positional integer ``example_id`` at rollout time; we carry the sample's
-global index for that.
+600-task set), so it cannot key a cross-domain split. The recipe uses the
+sample's global position as its integer ``example_id``.
 """
 
 from __future__ import annotations
@@ -25,11 +24,11 @@ SPLITS_DIR = Path(__file__).parent.parent / "splits"
 
 @dataclass(frozen=True)
 class Sample:
-    """One AutomationBench task, ready to run as a single verifiers rollout."""
+    """One AutomationBench task, ready for a single rollout."""
 
     task_name: str  # globally-unique stable id, e.g. "sales.multi_hop_lookup"
     domain: str
-    index: int  # global position in the combined public dataset (verifiers example_id)
+    index: int  # global position in the combined public dataset
     prompt: list[dict[str, Any]]
     answer: str
     info: dict[str, Any]  # zapier_tools / initial_state / assertions / task_name

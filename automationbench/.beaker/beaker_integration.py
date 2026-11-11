@@ -65,15 +65,13 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, model_validator
 from world_diff import ServiceDiffs, service_for
 
-from automationbench_skills import model_protocol as vf
 from automationbench_skills.clients import DEFAULT_MODEL_REQUEST_TIMEOUT, CostTrackingChatCompletionsClient
-from automationbench_skills.data.tasks import Sample
 from automationbench_skills.model_protocol import (
     Client,
     ClientConfig,
+    InfraError,
+    ModelError,
     OpenAIChatCompletionsClient,
-    error_from_data,
-    is_error_data,
 )
 from automationbench_skills.prompts import load_system_prompt
 from automationbench_skills.runner import (
@@ -195,10 +193,6 @@ def _fixture_for(case_input: JsonValue) -> CaseFixture:
     return CaseFixture.model_validate(payload.get("runtime_fixture"))
 
 
-def _sample_for(case_input: JsonValue) -> Sample:
-    return _fixture_for(case_input).sample()
-
-
 def default_model_spec() -> ModelSpec:
     """The model a run without a model choice evaluates, through Beaker's provider proxy.
 
@@ -237,20 +231,9 @@ def _client_for(runtime: RolloutRuntime[Any]) -> tuple[Client, ModelSpec]:
     return _TracedChatCompletionsClient(client), model
 
 
-def _rollout_error(raw: Any) -> BaseException | None:
-    # ``run_rollout`` returns the serialized ``ErrorData`` mapping, not the
-    # exception; rebuild the most specific ``vf.Error`` from its error chain.
-    if raw is None:
-        return None
-    if isinstance(raw, BaseException):
-        return raw
-    if is_error_data(raw):
-        return error_from_data(raw)
-    return vf.Error(str(raw))
-
-
 async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> CaseResult:
-    sample = _sample_for(case_input)
+    fixture = _fixture_for(case_input)
+    sample = fixture.sample()
     root = _candidate_root()
     skills_dir = root / "skills"
     prompts_dir = root / "prompts"
@@ -290,7 +273,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             await client.close()
 
         completion = output.get("completion") or []
-        result_error = _rollout_error(output.get("error"))
+        result_error = output.get("error")
         end_state = output.get("_end_state")
         # The recipe stores rollout exceptions into ``state["error"]`` and
         # still grades the world as the agent left it. A model, provider, or
@@ -298,7 +281,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
         # the candidate's fault, so the case is re-run rather than scored on
         # what the agent did before it; an agent-side failure (bad tool call,
         # overlong prompt) is the candidate's fault and keeps its earned score.
-        if isinstance(result_error, vf.ModelError | vf.InfraError):
+        if isinstance(result_error, ModelError | InfraError):
             message = f"{type(result_error).__name__}: {result_error}"
             stage.output({"error": message})
             raise RetryableCaseError(message) from result_error
@@ -317,7 +300,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
         stage.output({"error": error, "messages": len(completion)})
         observed = None
         if isinstance(end_state, Mapping):
-            initial = _fixture_for(case_input).initial_state()
+            initial = fixture.initial_state()
             initial_world = WorldState(**initial) if initial else None
             observed = ServiceDiffs(initial, initial_world, end_state).to_output()
         context: dict[str, JsonValue] = {
@@ -325,7 +308,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             "domain": sample.domain,
             "runtime_benchmark_commit": PI_COMMIT,
             "tool_interface": "pi_api",
-            "trace_capture": _fixture_for(case_input).scenario.trace_capture,
+            "trace_capture": fixture.scenario.trace_capture,
             "error": error,
             "end_state": to_json_safe(end_state),
         }

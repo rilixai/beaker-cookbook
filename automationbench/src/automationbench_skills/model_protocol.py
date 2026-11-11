@@ -31,15 +31,6 @@ class OverlongPromptError(Error):
     """The candidate exceeded the model context limit."""
 
 
-def is_error_data(value: Any) -> bool:
-    return isinstance(value, dict) and "error" in value
-
-
-def error_from_data(value: dict[str, Any]) -> Error:
-    classes = {c.__name__: c for c in (Error, ModelError, InfraError, OverlongPromptError)}
-    return classes.get(value.get("type", ""), Error)(str(value["error"]))
-
-
 class ClientConfig(BaseModel):
     api_key_var: str = "OPENAI_API_KEY"
     api_base_url: str = "https://api.openai.com/v1"
@@ -115,7 +106,6 @@ class Response(BaseModel):
 Messages = list[Message]
 SamplingArgs = dict[str, Any]
 FinishReason = str
-RolloutInput = dict
 
 
 A = TypeVar("A")

@@ -51,10 +51,8 @@ class AutomationBenchEnv:
         client: Client,
         model: str,
         sampling_args: dict[str, Any],
-        *,
-        state_columns: list[str] | None = None,
     ) -> dict[str, Any]:
-        del state_columns
+        """Return the final state; rollout errors remain exception objects in-process."""
         info = strip_none_values(copy.deepcopy(row["info"]))
         scenario = info.pop("_case_scenario", {})
         initial = info["initial_state"]
