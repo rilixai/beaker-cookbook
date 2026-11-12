@@ -2,6 +2,8 @@
 # YDC_API_KEY is a You.com API key: keep it in .beaker/.env locally and in the
 # agent's encrypted settings for hosted runs. LIVENEWSBENCH_MODEL (optional)
 # picks the Inference Router model; it defaults to deepseek-v4.1-flash.
+# livenewsbench-openai is the baseline: GPT with OpenAI's built-in web search, through
+# Beaker's provider proxy. It needs no key; LIVENEWSBENCH_MODEL defaults to gpt-6-luna there.
 default_integration: livenewsbench
 integrations:
   livenewsbench:
@@ -11,4 +13,12 @@ integrations:
     package_import_root: .beaker
     environment_base: debian_slim:3.12
     required_env: [YDC_API_KEY]
+    scorer_model: openai:gpt-4.1
+  livenewsbench-openai:
+    agent_key: livenewsbench-openai
+    entrypoint: beaker_integration:openai_integration
+    source_dir: livenewsbench
+    package_import_root: .beaker
+    environment_base: debian_slim:3.12
+    required_env: []
     scorer_model: openai:gpt-4.1

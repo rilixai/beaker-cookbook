@@ -1,4 +1,8 @@
-"""Optimize the LiveNewsBench web-search agent; the model, web rules and grader stay fixed."""
+"""Optimize the LiveNewsBench web-search agent; the model, web rules and grader stay fixed.
+
+`integration` runs an open model on the You.com router with You.com search.
+`openai_integration` runs GPT with OpenAI's built-in web search, as a baseline.
+"""
 
 from __future__ import annotations
 
@@ -25,17 +29,25 @@ from beaker import (
 )
 from openai import AsyncOpenAI
 
-from livenewsbench import youcom
+from livenewsbench import openai_search, youcom
 from livenewsbench.chat import ChatModel, TransientServiceError
 from livenewsbench.data import Expected, Question, Row
 from livenewsbench.grading import GRADER_MODEL, grade
-from livenewsbench.runner import MAX_MODEL_CALLS, MODEL_ENV, load_agent, run_rollout
+from livenewsbench.runner import (
+    MAX_MODEL_CALLS,
+    MODEL_ENV,
+    load_agent,
+    load_openai_agent,
+    run_openai_rollout,
+    run_rollout,
+)
 from livenewsbench.tools import WebTools
 
 
 # Repository candidates run with source_dir as the working directory. Load the
 # candidate's agent from there, never the seed installed in the environment.
 AGENT_DIR = Path("src/livenewsbench/agent")
+OPENAI_AGENT_DIR = Path("src/livenewsbench/openai_agent")
 
 
 class Setup(RunSetup[Row]):
@@ -89,6 +101,30 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
     return CaseResult(output=rollout.answer, output_kind="value")
 
 
+async def run_openai_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> CaseResult:
+    if runtime.model:
+        # Beaker's gateway accepts built-in web search only from its sandbox provider proxy.
+        raise RuntimeError(
+            "livenewsbench-openai calls OpenAI directly for its built-in web search. Launch it without "
+            f"--optimization-model, and set {MODEL_ENV} on the agent to change the model."
+        )
+    question = Question.model_validate(case_input)
+    agent = load_openai_agent(Path.cwd() / OPENAI_AGENT_DIR)
+    model = openai_search.ResponsesModel(
+        client=openai_search.openai_client(),
+        model=os.environ.get(MODEL_ENV) or openai_search.DEFAULT_MODEL,
+        max_calls=MAX_MODEL_CALLS,
+        trace=runtime.trace,
+    )
+    async with model.client:
+        try:
+            rollout = await run_openai_rollout(question.question, agent=agent, model=model)
+        except TransientServiceError as exc:
+            raise RetryableCaseError(str(exc)) from exc
+    runtime.trace.evidence("usage", rollout.usage())
+    return CaseResult(output=rollout.answer, output_kind="value")
+
+
 async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) -> CaseScore:
     del case_files_dir
     question = Question.model_validate(case.input)
@@ -121,5 +157,12 @@ integration = Integration(
     targets=repository(paths=(str(AGENT_DIR),)),
     run_setup=Setup,
     run_case=run_case,
+    score_case=score_case,
+)
+
+openai_integration = Integration(
+    targets=repository(paths=(str(OPENAI_AGENT_DIR),)),
+    run_setup=Setup,
+    run_case=run_openai_case,
     score_case=score_case,
 )

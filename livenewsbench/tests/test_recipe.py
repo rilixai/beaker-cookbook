@@ -18,7 +18,7 @@ from beaker import Case, CaseResult, RetryableCaseError, RolloutRuntime
 from beaker.tracing import current_trace
 from openai import AsyncOpenAI
 
-from livenewsbench import cli, data, grading, runner, youcom
+from livenewsbench import cli, data, grading, openai_search, runner, youcom
 from livenewsbench.chat import RATE_LIMIT_WAITS, ChatModel, TransientServiceError
 from livenewsbench.tools import BLOCKED_DOMAINS, Page, RequestRejected, SearchHit, ToolRefused, WebTools, blocked
 
@@ -517,18 +517,156 @@ async def test_evaluate_stops_before_rollouts_when_the_grader_key_is_rejected() 
 
 
 def test_summary_keeps_rollouts_the_grader_failed_on() -> None:
-    usage = {"seconds": 10.0, "model": {"calls": 3}, "web": {"searches": 2, "page_visits": 1}}
+    usage = {"finish": "answered", "seconds": 10.0, "model": {"calls": 3}, "web": {"searches": 2, "page_visits": 1}}
     outcomes = [
         {"correct": True, "grade": "CORRECT", "usage": usage, "list_price_usd": {"total": 0.02}},
         {"correct": False, "error": "AuthenticationError", "error_stage": "grading", "usage": usage,
          "list_price_usd": {"total": 0.04}},
         {"correct": False, "error": "TransientServiceError", "error_stage": "rollout"},
     ]  # fmt: skip
-    args = argparse.Namespace(model=youcom.DEFAULT_MODEL, base_url=youcom.ROUTER_BASE_URL, split="val")
+    args = argparse.Namespace(
+        search="youcom", model=youcom.DEFAULT_MODEL, base_url=youcom.ROUTER_BASE_URL, split="val"
+    )
     summary = cli.summarize(outcomes, args)
     assert (summary["errors"], summary["grading_errors"], summary["accuracy"]) == (2, 1, pytest.approx(1 / 3))
     assert summary["list_price_usd_total"] == pytest.approx(0.06)
     assert summary["list_price_usd_per_question"] == pytest.approx(0.03)
+
+
+# --- OpenAI built-in web search -------------------------------------------------------------
+
+
+def web_search_call(index: int, action: dict[str, Any]) -> dict[str, Any]:
+    return {"type": "web_search_call", "id": f"ws_{index}", "status": "completed", "action": action}
+
+
+def reply_message(text: str, citations: tuple[str, ...] = ()) -> dict[str, Any]:
+    annotations = [
+        {"type": "url_citation", "url": url, "title": "Source", "start_index": 0, "end_index": 1} for url in citations
+    ]
+    return {
+        "type": "message",
+        "id": "msg_1",
+        "role": "assistant",
+        "status": "completed",
+        "content": [{"type": "output_text", "text": text, "annotations": annotations}],
+    }
+
+
+def openai_response(output: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "id": "resp_test",
+        "object": "response",
+        "created_at": 0,
+        "model": "gpt-6-luna",
+        "status": "completed",
+        "output": output,
+        "parallel_tool_calls": True,
+        "tool_choice": "auto",
+        "tools": [],
+        "usage": {
+            "input_tokens": 1000,
+            "input_tokens_details": {"cached_tokens": 200},
+            "output_tokens": 300,
+            "output_tokens_details": {"reasoning_tokens": 100},
+            "total_tokens": 1300,
+        },
+    }
+
+
+def scripted_openai(replies: list[dict[str, Any]], requests: list[dict[str, Any]]) -> AsyncOpenAI:
+    script = iter(replies)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://api.openai.com/v1/responses"
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=openai_response(next(script)))
+
+    return AsyncOpenAI(api_key="offline-key", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+
+
+def responses_model(client: AsyncOpenAI) -> openai_search.ResponsesModel:
+    return openai_search.ResponsesModel(
+        client=client, model=openai_search.DEFAULT_MODEL, max_calls=runner.MAX_MODEL_CALLS, trace=current_trace()
+    )
+
+
+SEARCHED = {"type": "search", "query": "summit host city", "sources": [
+    {"type": "url", "url": "https://news.example/a"},
+    {"type": "url", "url": "https://huggingface.co/datasets/livenewsbench"},
+]}  # fmt: skip
+
+
+async def test_openai_seed_agent_searches_within_the_shared_budget_and_meters_it() -> None:
+    requests: list[dict[str, Any]] = []
+    replies = [
+        [
+            web_search_call(1, SEARCHED),
+            web_search_call(2, {"type": "open_page", "url": "https://news.example/a"}),
+            reply_message("Geneva hosted it.\nFinal answer: Geneva", citations=("https://news.example/a",)),
+        ]
+    ]
+    model = responses_model(scripted_openai(replies, requests))
+    agent = runner.load_openai_agent(runner.SEED_OPENAI_AGENT_DIR)
+    rollout = await runner.run_openai_rollout(QUESTION, agent=agent, model=model)
+
+    assert (rollout.answer, rollout.finish) == ("Geneva", "answered")
+    request = requests[0]
+    assert request["model"] == "gpt-6-luna" and request["reasoning"] == {"effort": "medium"}
+    assert request["tools"] == [{"type": "web_search"}] and request["max_tool_calls"] == 10
+    assert request["include"] == ["web_search_call.action.sources"] and QUESTION in request["input"]
+    web = model.web
+    assert (web.searches, web.page_visits, web.blocked_in_results, web.blocked_used) == (1, 1, 1, [])
+    usage = model.usage
+    assert (usage.input_tokens, usage.cached_input_tokens, usage.reasoning_tokens) == (1000, 200, 100)
+
+
+async def test_openai_answers_that_used_a_blocked_host_are_withheld() -> None:
+    replies = [
+        [
+            web_search_call(1, {"type": "open_page", "url": "https://huggingface.co/datasets/livenewsbench"}),
+            reply_message("Final answer: Geneva", citations=("https://www.braintrust.dev/evals/x",)),
+        ]
+    ]
+    model = responses_model(scripted_openai(replies, []))
+    agent = runner.load_openai_agent(runner.SEED_OPENAI_AGENT_DIR)
+    rollout = await runner.run_openai_rollout(QUESTION, agent=agent, model=model)
+    assert (rollout.answer, rollout.finish) == ("", "blocked_host")
+    assert model.web.blocked_used == [
+        "https://huggingface.co/datasets/livenewsbench",
+        "https://www.braintrust.dev/evals/x",
+    ]
+
+
+async def test_openai_budget_shrinks_across_requests_and_the_follow_up_has_no_search() -> None:
+    requests: list[dict[str, Any]] = []
+    searches = [web_search_call(index, SEARCHED) for index in range(4)]
+    finds = [web_search_call(9, {"type": "find_in_page", "url": "https://news.example/a", "pattern": "host"})]
+    replies = [[*searches, reply_message("Still unsure.")], [*finds, reply_message("Hmm")], [reply_message("Geneva")]]
+    model = responses_model(scripted_openai(replies, requests))
+    await model.respond("first")
+    await model.respond("second")
+    assert [request["max_tool_calls"] for request in requests] == [10, 6]
+    assert (model.web.searches, model.web.finds, model.remaining_web_actions) == (4, 1, 5)
+    await model.respond("answer", search=False)
+    assert "tools" not in requests[-1] and "max_tool_calls" not in requests[-1]
+
+
+async def test_openai_seed_agent_asks_once_more_for_a_missing_answer_line() -> None:
+    requests: list[dict[str, Any]] = []
+    replies = [[reply_message("It was probably Geneva.")], [reply_message("Final answer: Geneva")]]
+    model = responses_model(scripted_openai(replies, requests))
+    answer = await runner.load_openai_agent(runner.SEED_OPENAI_AGENT_DIR)(QUESTION, model=model)
+    assert answer == "Geneva" and "tools" not in requests[1]
+    assert requests[1]["input"][1] == {"role": "assistant", "content": "It was probably Geneva."}
+
+
+def test_list_price_uses_openai_rates_for_built_in_search() -> None:
+    chat = runner.ChatUsage(calls=1, input_tokens=1_000_000, cached_input_tokens=500_000, output_tokens=100_000)
+    web = openai_search.OpenAIWebUsage(searches=3, page_visits=4)
+    price = runner.list_price_usd("gpt-6-luna", chat, web)
+    assert price["model"] == pytest.approx(0.5 * 0.10 + 0.5 * 0.01 + 0.1 * 0.50)
+    assert (price["search"], price["pages"]) == (pytest.approx(0.03), 0.0)
 
 
 # --- Beaker integration -------------------------------------------------------------------
@@ -600,5 +738,29 @@ async def test_score_case_is_one_for_correct_and_explains_the_verdict(monkeypatc
 
 
 def test_integration_edits_only_the_agent_package() -> None:
-    targets = load_integration().integration.targets
-    assert [target.paths for target in targets] == [("src/livenewsbench/agent",)]
+    integration = load_integration()
+    assert [target.paths for target in integration.integration.targets] == [("src/livenewsbench/agent",)]
+    assert [target.paths for target in integration.openai_integration.targets] == [("src/livenewsbench/openai_agent",)]
+
+
+async def test_openai_run_case_uses_the_candidate_and_refuses_an_optimization_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    integration = load_integration()
+    agent_dir = tmp_path / "src/livenewsbench/openai_agent"
+    shutil.copytree(runner.SEED_OPENAI_AGENT_DIR, agent_dir, ignore=shutil.ignore_patterns("__pycache__"))
+    (agent_dir / "agent.py").write_text(
+        "async def answer_question(question, *, model):\n"
+        "    await model.respond(question)\n"
+        "    return 'Candidate answer'\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LIVENEWSBENCH_MODEL", raising=False)
+    requests: list[dict[str, Any]] = []
+    monkeypatch.setattr(openai_search, "openai_client", lambda: scripted_openai([[reply_message("ok")]], requests))
+    runtime = RolloutRuntime(case_files_dir=tmp_path, trace=current_trace())
+    result = await integration.run_openai_case(case_input={"question": QUESTION}, runtime=runtime)
+    assert result.output == "Candidate answer" and requests[0]["model"] == "gpt-6-luna"
+    gateway = RolloutRuntime(case_files_dir=tmp_path, trace=current_trace(), model="openai:gpt-6-luna")
+    with pytest.raises(RuntimeError, match="without --optimization-model"):
+        await integration.run_openai_case(case_input={"question": QUESTION}, runtime=gateway)

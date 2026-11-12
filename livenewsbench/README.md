@@ -104,9 +104,42 @@ case as worth retrying instead of scoring it 0. Ask You.com for your key's limit
 set `--config '{"max_concurrency": 8}'` on `run trigger`, so that latency measures the
 router, not its rate limit.
 
+## Baseline: GPT with OpenAI's built-in web search
+
+The `livenewsbench-openai` integration runs `gpt-6-luna` with OpenAI's built-in `web_search` tool
+on the Responses API. It uses the same data and grader, so it can be compared with runs on the
+You.com router and search. Its editable agent is a separate package,
+`src/livenewsbench/openai_agent/`. The fixed harness is `openai_search.py`.
+
+```bash
+uv run beaker agent setup "LiveNewsBench OpenAI" --integration-id livenewsbench-openai
+uv run beaker dataset upload data/optimization --agent livenewsbench-openai \
+  --name livenewsbench-jan2026 --split train=612 --split test=171
+uv run beaker run trigger --integration-id livenewsbench-openai --dataset 'livenewsbench-jan2026@<revision>'
+```
+
+- **Leave out `--optimization-model`.** The agent calls `api.openai.com` itself. Beaker's
+  provider proxy routes those calls through Beaker's gateway, which meters tokens and
+  searches; the gateway accepts built-in web search only on that route.
+- **Don't set `OPENAI_API_KEY` on this agent.** A key set there sends the calls straight to
+  OpenAI, outside Beaker's metering.
+- **To change the model,** set `LIVENEWSBENCH_MODEL` on the agent.
+
+OpenAI runs the search loop inside each request, so two rules work differently:
+- **Budget.** Searches, page opens and in-page finds share one budget of 10 per question,
+  the You.com side's 5 searches plus 5 page visits. Each request sets `max_tool_calls` to
+  what is left.
+- **Blocked hosts.** OpenAI's `filters` take only an allowlist, so the blocked hosts can't
+  be excluded up front. Every URL the model searched, opened or cited is checked afterwards.
+  - An answer from a question that opened, searched in or cited a blocked host is withheld,
+    so it scores as not attempted. `evaluate` reports these as `withheld_blocked_host`.
+  - Blocked hosts that only appeared among search results are counted in `blocked_in_results`.
+
+Reasoning effort is pinned to `medium`, the model's default.
+
 ## Evaluate locally
 
-`evaluate` makes paid API calls. It needs `YDC_API_KEY`, and `OPENAI_API_KEY` for the grader.
+`evaluate` makes paid API calls. It needs `YDC_API_KEY` (except with `--search openai`), and `OPENAI_API_KEY` for the grader.
 It stops before any rollout if OpenAI rejects the grader's key.
 
 ```bash
@@ -119,6 +152,11 @@ For the final report, use `--split test` or `--split human_verified_test`, witho
 To compare another endpoint on the same harness and You.com search, pass
 `--base-url`, `--api-key-env` and `--model`. For example, a frontier model:
 `--base-url https://api.openai.com/v1 --api-key-env OPENAI_API_KEY --model gpt-6.1-sol`.
+
+For the OpenAI baseline, pass `--search openai`. It uses `OPENAI_API_KEY` and doesn't need
+`YDC_API_KEY`; the model defaults to `gpt-6-luna`. Its cost uses OpenAI's list prices:
+`gpt-6-luna` tokens at the rates pinned in `openai_search.py`, and $10 per 1,000 searches.
+Page opens aren't billed.
 
 The command writes one JSON line per question: answer, grade, model calls,
 input/cached/output/reasoning tokens, searches, page visits, seconds, and an
