@@ -8,19 +8,21 @@ import json
 import math
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 from openai import AsyncOpenAI
 
-from clinc150_router.agent import OUT_OF_SCOPE, ChatModel, Prediction, route
+from clinc150_router.agent import ChatModel, route, system_prompt
+from clinc150_router.contracts import (
+    DEFAULT_MODEL,
+    DEFAULT_REASONING_EFFORT,
+    OUT_OF_SCOPE,
+    REQUEST_TIMEOUT_SECONDS,
+    Prediction,
+)
 from clinc150_router.data import SPLIT_FILES, Row, load_rows, prepare
-
-
-# Same model and effort the Beaker integration pins for runs without a model choice.
-MODEL = "gpt-5.6-luna"
-REASONING_EFFORT: Final = "low"
 
 
 class _NoSpan:
@@ -52,18 +54,18 @@ def _percentile(values: list[float], fraction: float) -> float | None:
 
 
 def summarize(outcomes: list[dict[str, Any]]) -> dict[str, Any]:
-    """Run-level metrics; request errors and invalid answers stay in every denominator."""
-    predicted = [o.get("prediction", {}).get("intent") for o in outcomes]
+    """Run-level metrics; request errors and invalid answers count as incorrect."""
+    predictions = [Prediction.model_validate(o["prediction"]) if "prediction" in o else None for o in outcomes]
+    predicted = [p.intent if p is not None and p.error is None else None for p in predictions]
     expected = [o["expected"] for o in outcomes]
     pairs = list(zip(expected, predicted, strict=True))
     in_scope = [(e, p) for e, p in pairs if e != OUT_OF_SCOPE]
-    predictions = [Prediction.model_validate(o["prediction"]) for o in outcomes if "prediction" in o]
-    costs = [p.cost_usd for p in predictions]
+    costs = [p.cost_usd for p in predictions if p is not None and p.cost_usd is not None]
     latencies = [o["latency_ms"] for o in outcomes if "latency_ms" in o]
     return {
         "cases": len(outcomes),
         "errors": sum("error" in o for o in outcomes),
-        "invalid_answers": sum(p.error is not None for p in predictions),
+        "invalid_answers": sum(p is not None and p.error is not None for p in predictions),
         "accuracy": _ratio(sum(e == p for e, p in pairs), len(pairs)),
         "in_scope_accuracy": _ratio(sum(e == p for e, p in in_scope), len(in_scope)),
         "oos_recall": _ratio(
@@ -74,26 +76,26 @@ def summarize(outcomes: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "latency_p50_ms": _percentile(latencies, 0.5),
         "latency_p95_ms": _percentile(latencies, 0.95),
-        "input_tokens": sum(p.input_tokens or 0 for p in predictions),
-        "output_tokens": sum(p.output_tokens or 0 for p in predictions),
+        "input_tokens": sum(p.input_tokens or 0 for p in predictions if p is not None),
+        "output_tokens": sum(p.output_tokens or 0 for p in predictions if p is not None),
         # Only when the provider reports a cost for every call.
         "cost_per_1000_messages_usd": (
-            1000 * sum(c for c in costs if c is not None) / len(costs) if costs and None not in costs else None
+            1000 * sum(costs) / len(outcomes) if costs and len(costs) == len(outcomes) else None
         ),
     }
 
 
-async def _evaluate_one(row: Row, *, chat: ChatModel, prompts: Path) -> dict[str, Any]:
+async def _evaluate_one(row: Row, *, chat: ChatModel, prompt: str) -> dict[str, Any]:
     outcome: dict[str, Any] = {"id": row.id, "expected": row.expected.intent}
     started = time.perf_counter()
     try:
-        prediction = await route(row.input.text, chat=chat, prompts_dir=prompts, trace=NoTrace())
-        outcome["latency_ms"] = round(1000 * (time.perf_counter() - started), 1)
+        prediction = await route(row.input.text, chat=chat, prompt=prompt, trace=NoTrace())
         outcome["prediction"] = prediction.model_dump(mode="json")
     except Exception as exc:
         # Keep errors in the denominator. Do not print provider response
         # bodies or credentials into benchmark artifacts.
         outcome["error"] = type(exc).__name__
+    outcome["latency_ms"] = round(1000 * (time.perf_counter() - started), 1)
     return outcome
 
 
@@ -101,16 +103,19 @@ async def evaluate(args: argparse.Namespace, chat: ChatModel | None = None) -> d
     rows = load_rows(args.data / SPLIT_FILES[args.split])
     if args.limit is not None:
         rows = rows[: args.limit]
-    chat = chat or ChatModel(
-        client=AsyncOpenAI(timeout=60), provider="openai", model=MODEL, reasoning_effort=REASONING_EFFORT
-    )
+    prompt = system_prompt(args.prompts)
     slots = asyncio.Semaphore(args.concurrency)
 
-    async def bounded(row: Row) -> dict[str, Any]:
+    async def bounded(row: Row, model: ChatModel) -> dict[str, Any]:
         async with slots:
-            return await _evaluate_one(row, chat=chat, prompts=args.prompts)
+            return await _evaluate_one(row, chat=model, prompt=prompt)
 
-    outcomes = await asyncio.gather(*(bounded(row) for row in rows))
+    client_context = AsyncOpenAI(timeout=REQUEST_TIMEOUT_SECONDS) if chat is None else nullcontext(chat.client)
+    async with client_context as client:
+        chat = chat or ChatModel(
+            client=client, provider="openai", model=DEFAULT_MODEL, reasoning_effort=DEFAULT_REASONING_EFFORT
+        )
+        outcomes = await asyncio.gather(*(bounded(row, chat) for row in rows))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("".join(json.dumps(outcome) + "\n" for outcome in outcomes))
     metrics = summarize(outcomes)

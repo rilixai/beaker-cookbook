@@ -12,11 +12,8 @@ from openai import AsyncOpenAI, omit
 from openai.types.chat import ChatCompletionMessageParam
 from openai.types.shared import ReasoningEffort
 from openai.types.shared_params import ResponseFormatJSONSchema
-from pydantic import BaseModel, ConfigDict
 
-
-LABELS: tuple[str, ...] = tuple(json.loads(Path(__file__).with_name("labels.json").read_text()))
-OUT_OF_SCOPE = "oos"
+from clinc150_router.contracts import LABELS, Prediction
 
 
 class InvalidAnswer(ValueError):
@@ -44,17 +41,6 @@ class ChatModel:
     provider: str
     model: str
     reasoning_effort: ReasoningEffort = None
-
-
-class Prediction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    intent: str | None
-    error: str | None = None
-    model: str
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    cost_usd: float | None = None
 
 
 def system_prompt(prompts_dir: Path) -> str:
@@ -85,22 +71,31 @@ RESPONSE_FORMAT: ResponseFormatJSONSchema = {
 }
 
 
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result = dict(pairs)
+    if len(result) != len(pairs):
+        raise InvalidAnswer("The model returned duplicate JSON keys.")
+    return result
+
+
 def parse_intent(content: str | None) -> str:
     try:
-        answer = json.loads(content or "")
+        answer = json.loads(content or "", object_pairs_hook=_unique_object)
     except json.JSONDecodeError as exc:
         raise InvalidAnswer("The model did not return JSON.") from exc
-    intent = answer.get("intent") if isinstance(answer, dict) else None
-    if intent not in LABELS:
-        raise InvalidAnswer(f"The model returned an unknown intent: {intent!r}.")
-    return str(intent)
+    if not isinstance(answer, dict) or answer.keys() != {"intent"}:
+        raise InvalidAnswer("The model must return an object with only an intent field.")
+    intent = answer["intent"]
+    if not isinstance(intent, str) or intent not in LABELS:
+        raise InvalidAnswer("The model returned an unknown intent.")
+    return intent
 
 
-async def route(text: str, *, chat: ChatModel, prompts_dir: Path, trace: Tracer) -> Prediction:
+async def route(text: str, *, chat: ChatModel, prompt: str, trace: Tracer) -> Prediction:
     if not text.strip():
         raise ValueError("User message cannot be empty.")
     messages: list[ChatCompletionMessageParam] = [
-        {"role": "system", "content": system_prompt(prompts_dir)},
+        {"role": "system", "content": prompt},
         {"role": "user", "content": text},
     ]
     traced_model = chat.model.removeprefix(f"{chat.provider}:")
@@ -114,22 +109,30 @@ async def route(text: str, *, chat: ChatModel, prompts_dir: Path, trace: Tracer)
             reasoning_effort=chat.reasoning_effort or omit,
         )
         usage = response.usage
-        content = response.choices[0].message.content if response.choices else None
+        choice = response.choices[0] if len(response.choices) == 1 else None
+        content = choice.message.content if choice is not None else None
         call.output(content)
         call.usage(
             input_tokens=usage.prompt_tokens if usage else None,
             output_tokens=usage.completion_tokens if usage else None,
         )
-    prediction = Prediction(
-        intent=None,
+    intent = None
+    error = None
+    try:
+        if choice is None:
+            raise InvalidAnswer("The model did not return exactly one choice.")
+        if choice.message.refusal:
+            raise InvalidAnswer("The model refused to answer.")
+        if choice.finish_reason != "stop":
+            raise InvalidAnswer("The model did not complete the answer.")
+        intent = parse_intent(content)
+    except InvalidAnswer as exc:
+        error = str(exc)
+    return Prediction(
+        intent=intent,
+        error=error,
         model=response.model,
         input_tokens=usage.prompt_tokens if usage else None,
         output_tokens=usage.completion_tokens if usage else None,
         cost_usd=getattr(usage, "cost", None),
     )
-    try:
-        prediction.intent = parse_intent(content)
-    except InvalidAnswer as exc:
-        # Observable and scored as wrong; never silently mapped to ``oos``.
-        prediction.error = str(exc)
-    return prediction

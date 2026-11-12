@@ -15,7 +15,8 @@ from beaker.tracing import current_trace
 from openai import AsyncOpenAI
 
 from clinc150_router import cli
-from clinc150_router.agent import LABELS, OUT_OF_SCOPE, ChatModel, InvalidAnswer, parse_intent, system_prompt
+from clinc150_router.agent import ChatModel, InvalidAnswer, parse_intent, route, system_prompt
+from clinc150_router.contracts import LABELS, OUT_OF_SCOPE, Prediction
 from clinc150_router.data import SPLIT_FILES, UPSTREAM, Expected, Message, Row, make_splits, source_file
 
 
@@ -33,7 +34,13 @@ def integration_module() -> ModuleType:
     return module
 
 
-def chat_client(received: list[dict[str, Any]], *, content: str = json.dumps({"intent": INTENT})) -> AsyncOpenAI:
+def chat_client(
+    received: list[dict[str, Any]],
+    *,
+    content: str = json.dumps({"intent": INTENT}),
+    finish_reason: str = "stop",
+    refusal: str | None = None,
+) -> AsyncOpenAI:
     def respond(request: httpx.Request) -> httpx.Response:
         received.append(
             {"url": str(request.url), "auth": request.headers["authorization"], **json.loads(request.content)}
@@ -46,7 +53,11 @@ def chat_client(received: list[dict[str, Any]], *, content: str = json.dumps({"i
                 "created": 0,
                 "model": json.loads(request.content)["model"],
                 "choices": [
-                    {"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": content}}
+                    {
+                        "index": 0,
+                        "finish_reason": finish_reason,
+                        "message": {"role": "assistant", "content": content, "refusal": refusal},
+                    }
                 ],
                 "usage": {"prompt_tokens": 900, "completion_tokens": 7, "total_tokens": 907},
             },
@@ -149,10 +160,31 @@ def test_empty_descriptions_and_instructions_fail(tmp_path: Path) -> None:
         system_prompt(write_prompts(tmp_path / "b", seed_intents(), instructions=" "))
 
 
-@pytest.mark.parametrize("content", ['{"intent": "none_of_these"}', '{"intent": null}', "translate", "", None, "[]"])
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"intent": "none_of_these"}',
+        '{"intent": null}',
+        '{"intent": "translate", "extra": 1}',
+        '{"intent": "oos", "intent": "translate"}',
+        "translate",
+        "",
+        None,
+        "[]",
+    ],
+)
 def test_unknown_answer_is_an_error_not_oos(content: str | None) -> None:
     with pytest.raises(InvalidAnswer):
         parse_intent(content)
+
+
+@pytest.mark.parametrize(("finish_reason", "refusal"), [("length", None), ("stop", "Refused")])
+async def test_incomplete_or_refused_answer_is_invalid(finish_reason: str, refusal: str | None) -> None:
+    async with chat_client([], finish_reason=finish_reason, refusal=refusal) as client:
+        prediction = await route(
+            TEXT, chat=ChatModel(client, "openai", "m"), prompt="Classify the message.", trace=cli.NoTrace()
+        )
+    assert prediction.intent is None and prediction.error
 
 
 # Integration
@@ -241,10 +273,27 @@ async def test_scoring_fills_scope_specific_field_scores(
     result = CaseResult(output={"intent": predicted, "model": "m"}, output_kind="record")
     case = Case(id="1", input={"text": TEXT}, expected={"intent": expected})
     scored = await integration.score_case(case=case, result=result, case_files_dir=tmp_path)
-    assert scored.objective == scores["accuracy"]
+    weight = 1 if expected == OUT_OF_SCOPE else 1 / 30
+    assert scored.objective == pytest.approx(scores["accuracy"] * weight)
     assert dict(scored.field_scores) == scores
     check = scored.checks[0]
     assert (check.name, check.expected, check.predicted) == ("intent", expected, predicted)
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        {"intent": INTENT, "model": "m", "error": "Incomplete answer."},
+        {"intent": INTENT, "model": "m", "extra": True},
+        {"intent": "unrecognized", "model": "m"},
+    ],
+)
+async def test_scorer_fails_error_and_invalid_records(tmp_path: Path, output: Any) -> None:
+    integration = integration_module()
+    case = Case(id="1", input={"text": TEXT}, expected={"intent": INTENT})
+    scored = await integration.score_case(case=case, result=CaseResult(output=output), case_files_dir=tmp_path)
+    assert scored.objective == scored.field_scores["accuracy"] == 0
+    assert scored.checks[0].verdict == "fail" and scored.checks[0].message
 
 
 # CLI
@@ -262,27 +311,39 @@ async def test_cli_keeps_errors_in_denominator_and_reports_oos_metrics(
     source.write_text("".join(row.model_dump_json() + "\n" for row in rows))
     # Predictions: correct, wrong as oos, correct oos, request error.
     answers = iter([INTENT, OUT_OF_SCOPE, OUT_OF_SCOPE, None])
+    prompts = []
+    timestamps = iter([0.0, 0.01, 1.0, 1.02, 2.0, 2.03, 3.0, 3.8])
+
+    def read_prompt(path: Path) -> str:
+        prompts.append(path)
+        return system_prompt(path)
 
     async def fake_route(text: str, **kwargs: Any) -> Any:
         answer = next(answers)
         if answer is None:
             raise TimeoutError
-        return cli.Prediction(intent=answer, model="m", input_tokens=10, output_tokens=1, cost_usd=0.001)
+        return Prediction(intent=answer, model="m", input_tokens=10, output_tokens=1, cost_usd=0.001)
 
     monkeypatch.setattr(cli, "route", fake_route)
+    monkeypatch.setattr(cli, "system_prompt", read_prompt)
+    monkeypatch.setattr(cli, "time", SimpleNamespace(perf_counter=lambda: next(timestamps)))
     output = tmp_path / "result.jsonl"
     args = argparse.Namespace(
         data=tmp_path, split="validation", limit=None, prompts=ROOT / "prompts", output=output, concurrency=1
     )
-    chat = ChatModel(client=chat_client([]), provider="openai", model="m")
-    metrics = await cli.evaluate(args, chat)
+    async with chat_client([]) as client:
+        metrics = await cli.evaluate(args, ChatModel(client, "openai", "m"))
+        assert not client.is_closed()
+    assert prompts == [ROOT / "prompts"]
     assert metrics["cases"] == 4 and metrics["errors"] == 1
     assert metrics["accuracy"] == pytest.approx(2 / 4)
     assert metrics["in_scope_accuracy"] == pytest.approx(1 / 2)
     assert metrics["oos_recall"] == pytest.approx(1 / 2)
     assert metrics["oos_precision"] == pytest.approx(1 / 2)
-    assert metrics["cost_per_1000_messages_usd"] == pytest.approx(1.0)
+    assert metrics["cost_per_1000_messages_usd"] is None
+    assert metrics["latency_p95_ms"] == pytest.approx(800)
     records = [json.loads(line) for line in output.read_text().splitlines()]
     assert len(records) == 4 and records[-1]["error"] == "TimeoutError"
     summary = json.loads(output.with_suffix(".summary.json").read_text())
     assert summary["split"] == "validation" and summary["oos_recall"] == metrics["oos_recall"]
+    assert cli.summarize(records[:-1])["cost_per_1000_messages_usd"] == pytest.approx(1)

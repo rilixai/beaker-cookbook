@@ -13,11 +13,18 @@ enum of the 151 IDs. An answer outside that set is recorded as an error and
 scored as wrong; it is never mapped to `oos`.
 
 Runs started with a model choice call that model through Beaker's inference
-gateway. Otherwise the router uses `gpt-5.6-luna` with `low` reasoning effort,
-pinned in `.beaker/beaker_integration.py`.
+gateway. Otherwise Beaker and the local CLI use `gpt-5.6-luna` with `low`
+reasoning effort, pinned in `src/clinc150_router/contracts.py`.
+
+Beaker gives each correct `oos` prediction 30 times the weight of a correct
+in-scope prediction. On the official validation split, the two groups
+contribute equally to the objective. With Beaker's 0–1 per-case scores,
+perfect validation predictions yield a mean objective of about 0.0645.
+Raw accuracy, in-scope accuracy, and `oos` recall are reported separately.
 
 Every model or decision call must be traced with `trace.model_call`. The chat
-call uses operation `chat` with the resolved provider and model. A decision
+call uses operation `chat` with the resolved provider and model. Beaker traces
+include the benchmark messages and model replies. A decision
 call must use provider `typesafe` with operation `systemone`, or provider
 `openai` for the Decisions endpoint, so Beaker can find and compare it.
 
@@ -66,8 +73,9 @@ uv run clinc150-router evaluate --data /tmp/clinc150-router-data \
 For final evaluation, use `--split test`, omit `--limit`, and select candidate
 prompts with `--prompts <directory>`. Output includes per-case predictions and a
 summary with accuracy, in-scope accuracy, `oos` recall and precision, p50/p95
-latency, tokens and cost per 1,000 messages (when the provider reports cost).
-Request errors count as incorrect and cause a nonzero exit.
+latency, tokens and cost per 1,000 messages (when cost is available for every
+message). Latency includes failed attempts. Request errors count as incorrect
+and cause a nonzero exit.
 Run offline tests with `BEAKER_AGENT_KEY= uv run python -m pytest -q`.
 
 ## Seed baseline

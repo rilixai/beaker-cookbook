@@ -1,10 +1,10 @@
-"""Optimize the CLINC150 router while keeping labels, data and exact-match scoring fixed."""
+"""Optimize the CLINC150 router against fixed labels, data and scoring."""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 from beaker import (
     Case,
@@ -20,17 +20,24 @@ from beaker import (
     repository,
 )
 from openai import AsyncOpenAI
+from pydantic import ValidationError
 
-from clinc150_router.agent import OUT_OF_SCOPE, ChatModel, Prediction, route
-from clinc150_router.data import Expected, Message, Row
+from clinc150_router.agent import ChatModel, route, system_prompt
+from clinc150_router.contracts import (
+    DEFAULT_MODEL,
+    DEFAULT_REASONING_EFFORT,
+    LABELS,
+    OUT_OF_SCOPE,
+    REQUEST_TIMEOUT_SECONDS,
+    Prediction,
+)
+from clinc150_router.data import UPSTREAM, Expected, Message, Row
 
 
-# Pinned here, not taken from the app, so editing the app never changes the
-# model a run without a model choice evaluates. Low effort: routing is
-# latency-sensitive.
-DEFAULT_MODEL = "gpt-5.6-luna"
-DEFAULT_REASONING_EFFORT: Final = "low"
-REQUEST_TIMEOUT_SECONDS = 60.0
+# Weight by inverse frequency on the official optimization validation split.
+# CaseScore caps each case at 1, so normalize to the rarer class's weight.
+_, _, VALIDATION_ROWS_PER_INTENT, VALIDATION_OOS_ROWS = UPSTREAM["validation"]
+IN_SCOPE_WEIGHT = VALIDATION_OOS_ROWS / ((len(LABELS) - 1) * VALIDATION_ROWS_PER_INTENT)
 
 
 class Setup(RunSetup[Row]):
@@ -68,7 +75,8 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
     try:
         # Repository candidates execute with source_dir as their working directory.
         # There is deliberately no fallback to seed prompts outside that candidate.
-        prediction = await route(message.text, chat=chat, prompts_dir=Path.cwd() / "prompts", trace=runtime.trace)
+        prompt = system_prompt(Path.cwd() / "prompts")
+        prediction = await route(message.text, chat=chat, prompt=prompt, trace=runtime.trace)
     finally:
         await chat.client.close()
     return CaseResult(output=prediction.model_dump(mode="json"), output_kind="record")
@@ -77,23 +85,23 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
 async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) -> CaseScore:
     del case_files_dir
     expected = Expected.model_validate(case.expected)
-    prediction = Prediction.model_validate(result.output)
-    correct = float(prediction.intent == expected.intent)
-    field_scores = {"accuracy": correct}
-    if expected.intent == OUT_OF_SCOPE:
-        field_scores["oos_recall"] = correct
-    else:
-        field_scores["in_scope_accuracy"] = correct
+    try:
+        prediction = Prediction.model_validate(result.output)
+        intent, error = prediction.intent, prediction.error
+    except ValidationError:
+        intent, error = None, "Invalid prediction record."
+    correct = float(error is None and intent == expected.intent)
+    is_oos = expected.intent == OUT_OF_SCOPE
     return CaseScore(
-        objective=correct,
-        field_scores=field_scores,
+        objective=correct * (1.0 if is_oos else IN_SCOPE_WEIGHT),
+        field_scores={"accuracy": correct, "oos_recall" if is_oos else "in_scope_accuracy": correct},
         checks=(
             Check(
                 name="intent",
                 verdict="pass" if correct else "fail",
                 expected=expected.intent,
-                predicted=prediction.intent,
-                message=prediction.error,
+                predicted=intent,
+                message=error,
             ),
         ),
     )

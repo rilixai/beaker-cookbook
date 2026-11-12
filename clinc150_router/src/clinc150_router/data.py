@@ -10,7 +10,7 @@ from urllib.request import urlopen
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from clinc150_router.agent import LABELS, OUT_OF_SCOPE
+from clinc150_router.contracts import LABELS, OUT_OF_SCOPE
 
 
 REVISION = "828f8093932c8fe6ca7936c3d2e52903b1c523de"
