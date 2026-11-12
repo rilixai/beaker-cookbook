@@ -11,6 +11,8 @@ connector (`beaker-sdk[openai-agents]==0.6.6`). Its separate environment is lock
 in `agent_runtime/uv.lock`; MCP 1.19.0 and Pydantic 2.12.3 preserve compatibility
 with the benchmark's older MCP servers. Remaining task libraries come from the
 original locked environment, after the upgraded dependencies on `sys.path`.
+The recipe pins Python 3.12.11 for local development and CI as well; newer Python
+releases are not assumed compatible with these historical dependency pins.
 The official graders and the standalone baseline CLI retain that original
 environment. This is an agent-framework migration, so onboarding results are a
 modernized variant, not an exact reproduction of the original 0.0.15 baseline.
