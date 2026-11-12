@@ -27,9 +27,9 @@ def stage_agent(source: Path, cache: Path, output: Path, task: str, system_promp
                 shutil.rmtree(path)
             else:
                 path.unlink()
-    for name in ("toolathlon_native_trace", "toolathlon_context", "toolathlon_tools"):
+    for name in ("toolathlon_native_trace",):
         shutil.copyfile(Path(__file__).with_name(f"{name}.py"), checkout / f"{name}.py")
-    shutil.copyfile(Path(__file__).with_name("toolathlon_agent.py"), checkout / "agent_main.py")
+    shutil.copyfile(Path(__file__).with_name("toolathlon_entry.py"), checkout / "agent_main.py")
     if "excel" in json.loads((task_dir / "task_config.json").read_text())["needed_mcp_servers"]:
         # This pinned server hardcodes its log beside site-packages. Relocate
         # its unmodified package so the log is per-case and the shared venv
@@ -58,7 +58,6 @@ def run_agent(
     output: Path,
     task: str,
     model: str,
-    agent_venv: Path,
     max_steps: int = 100,
     timeout: int = 1800,
     system_prompt: Path | None = None,
@@ -77,7 +76,7 @@ def run_agent(
     config["agent"]["model"] = {"short_name": model, "provider": "unified"}
     config_path = checkout / "eval_config.json"
     config_path.write_text(json.dumps(config, indent=2))
-    python = agent_venv / "bin/python"
+    python = source / ".venv/bin/python"
     python_prefix = Path(
         subprocess.check_output([str(python), "-c", "import sys; print(sys.base_prefix)"], text=True).strip()
     )
@@ -91,14 +90,14 @@ def run_agent(
             TMPDIR=str(output / "tmp"),
             UV_CACHE_DIR=str(output / "uv-cache"),
             UV_NO_SYNC="1",
-            UV_PROJECT_ENVIRONMENT=str(agent_venv),
+            UV_PROJECT_ENVIRONMENT=str(source / ".venv"),
             PYTHONPATH=f"{checkout / 'runtime/site-packages'}:{checkout}",
             TOOLATHLON_TELEMETRY_STATUS=str(output / "telemetry_status.json"),
         )
         read_paths = [Path(p) for p in ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc") if Path(p).exists()]
         read_paths += [
             source / ".venv",
-            agent_venv,
+            source / "utils/local_servers/excel_runtime/.venv",
             python_prefix,
             cache / "node",
             Path(require_command("node")),
@@ -122,6 +121,8 @@ def run_agent(
             str(policy_path),
             str(python),
             "agent_main.py",
+            "--agent_only",
+            "--debug",
             "--eval_config",
             str(config_path),
             "--task_dir",

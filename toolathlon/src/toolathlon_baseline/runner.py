@@ -49,7 +49,7 @@ def stage_task(source: Path, cache: Path, output: Path, task: str, system_prompt
     checkout.mkdir()
     for directory in ("utils", "scripts"):
         shutil.copytree(
-            source / directory, checkout / directory, ignore=shutil.ignore_patterns("__pycache__", "tests")
+            source / directory, checkout / directory, ignore=shutil.ignore_patterns("__pycache__", "tests", ".venv")
         )
     for name in ("main.py", "pyproject.toml", "uv.lock"):
         shutil.copyfile(source / name, checkout / name)
@@ -97,7 +97,12 @@ def stage_task(source: Path, cache: Path, output: Path, task: str, system_prompt
             ]
             params.setdefault("env", {})["PYTHONPATH"] = str(checkout)
         else:
-            params["command"] = str(bin_dir / entrypoints[name])
+            executable = (
+                source / "utils/local_servers/excel_runtime/.venv/bin/excel-mcp-server"
+                if name == "excel"
+                else bin_dir / entrypoints[name]
+            )
+            params["command"] = str(executable)
             params["args"] = ["stdio"] if name == "excel" else []
         (servers / path.name).write_text(yaml.safe_dump(config, sort_keys=False))
         found.add(name)

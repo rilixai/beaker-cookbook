@@ -5,13 +5,16 @@ SDK scaffold on **all 108 official tasks**, using Toolathlon's Linux
 containerized runner. Three official quickstart tasks also run natively without
 Docker or application accounts. Context/history management, tool-error recovery,
 MCP tools, task instructions, initial workspaces, and evaluation come from Toolathlon.
-There is no Beaker dependency or integration in this recipe.
+The original agent is migrated in place to OpenAI Agents **0.20.0**. The optional
+Beaker onboarding is documented in [.beaker/README.md](.beaker/README.md).
 
 ## Native quick start
 
 Use Linux or macOS with Python 3.12+, [uv](https://docs.astral.sh/uv/), Git, and
-Node.js 22+ with npm. `uv` installs **Python 3.12.11** for Toolathlon itself, in a
-separate environment because its OpenAI Agents SDK is pinned to **0.0.15**.
+Node.js 22+ with npm. `uv` installs **Python 3.12.11** for Toolathlon itself.
+Preparation applies the reviewed SDK migration to the original upstream files
+and upgrades their existing environment using the migrated `uv.lock`. The
+standalone CLI and onboarding both execute that same original agent.
 Preparation downloads the upstream repository and its full locked Python
 environment; allow several GB of disk space. It needs no sudo, Docker, or
 application accounts for these three tasks.
@@ -104,9 +107,10 @@ Keep the configured environment separate from the immutable native cache. On
 the Linux benchmark host, start a checkout at the same pinned revision:
 
 ```bash
-export TOOLATHLON_ENV="$PWD/.cache/toolathlon-full"
+export TOOLATHLON_ENV="$PWD/.cache/toolathlon-full/upstream"
 git clone https://github.com/hkust-nlp/Toolathlon.git "$TOOLATHLON_ENV"
 git -C "$TOOLATHLON_ENV" checkout 9be8d8fe07a497b18ee61e3f2ae694e9797f39eb
+uv run toolathlon-baseline prepare --cache "$PWD/.cache/toolathlon-full"
 ```
 
 Follow upstream's [full setup](https://toolathlon.xyz/docs/test) and
@@ -258,7 +262,10 @@ directories provide repeatable starting files, **not a security sandbox**. This
 mode is for quickstart execution. Full benchmark execution uses the configured
 Linux environment described above. The default container image is upstream's
 tag; pass `--image` with a digest to fix it immutably. The full-run summary records
-the resolved image ID. A future Beaker integration can call this recipe separately.
+the resolved image ID. The container runner copies the migrated source and
+lockfile into each container; upstream’s `uv run` installs those dependencies
+there. The full Docker/services path still requires its own validation on a
+configured benchmark host.
 
 ## Development
 

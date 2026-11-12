@@ -29,7 +29,6 @@ from beaker import (
     repository,
 )
 from pydantic import BaseModel, Field
-from toolathlon_agent_runtime import prepare_agent_runtime
 from toolathlon_native_trace import NativeTrace
 from toolathlon_setup import (
     build_quickstart_row,
@@ -65,7 +64,6 @@ summary = run_agent(
     timeout=int(request["timeout"]),
     model_params=model_params,
     system_prompt=pathlib.Path(request["system_prompt"]),
-    agent_venv=pathlib.Path(request["agent_venv"]),
 )
 pathlib.Path(sys.argv[2]).write_text(json.dumps(summary), encoding="utf-8")
 """
@@ -101,7 +99,6 @@ class Setup(RunSetup[Row]):
         del runtime
         verify_sandbox_support()
         self.cache, self.source = prepare_toolathlon()
-        prepare_agent_runtime(self.cache, self.source)
         yield {"repository": RepositoryRunSetupResult()}
 
     async def load_cases(self, row: Row, *, runtime: SetupRuntime) -> AsyncIterator[Case]:
@@ -181,7 +178,6 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
     payload = TaskInput.model_validate(case_input)
     task = payload.task
     cache, source = prepare_toolathlon()
-    agent_venv = prepare_agent_runtime(cache, source)
     base_url, api_key, model_name, is_gateway = _resolve_model_target(runtime)
 
     with (
@@ -206,7 +202,6 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
                 "max_steps": DEFAULT_MAX_STEPS,
                 "timeout": DEFAULT_TIMEOUT_SECONDS,
                 "system_prompt": str(Path(__file__).resolve().parents[1] / "prompts/agent_system_prompt.md"),
-                "agent_venv": str(agent_venv),
             }
             custom_params_file = os.environ.get("TOOLATHLON_MODEL_PARAMS_FILE")
             if custom_params_file and not is_gateway and Path(custom_params_file).is_file():
