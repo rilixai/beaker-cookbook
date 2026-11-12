@@ -31,14 +31,14 @@ from beaker import (
 from pydantic import BaseModel, Field
 from toolathlon_native_trace import NativeTrace
 from toolathlon_setup import (
-    build_quickstart_row,
+    build_task_row,
     collect_workspace_files,
     evaluate_workspace,
     prepare_toolathlon,
     verify_sandbox_support,
 )
 
-from toolathlon_baseline import QUICKSTART_TASKS, UPSTREAM_REVISION
+from toolathlon_baseline import UPSTREAM_REVISION
 
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -103,9 +103,9 @@ class Setup(RunSetup[Row]):
 
     async def load_cases(self, row: Row, *, runtime: SetupRuntime) -> AsyncIterator[Case]:
         del runtime
-        if row.id not in QUICKSTART_TASKS or row.input.task != row.id or row.expected.task != row.id:
-            raise ValueError(f"Unsupported or mismatched Toolathlon quickstart task id: {row.id!r}")
-        canonical = build_quickstart_row(self.source, row.id)
+        if row.input.task != row.id or row.expected.task != row.id:
+            raise ValueError(f"Mismatched Toolathlon task id: {row.id!r}")
+        canonical = build_task_row(self.source, row.id)
         if row.input.instruction != canonical["input"]["instruction"]:
             raise ValueError(f"Instruction mismatch for task {row.id!r}")
         if row.expected.model_dump() != canonical["expected"]:

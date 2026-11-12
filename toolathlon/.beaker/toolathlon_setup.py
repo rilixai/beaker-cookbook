@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -85,19 +86,33 @@ def _sha256(path: Path) -> str:
 
 
 def groundtruth_hashes(source: Path, task: str) -> dict[str, str]:
-    gt_dir = source / "tasks/finalpool" / task / "groundtruth_workspace"
-    if not gt_dir.is_dir():
-        raise ValueError(f"Missing groundtruth_workspace for {task}: {gt_dir}")
-    hashes = {path.name: _sha256(path) for path in sorted(gt_dir.iterdir()) if path.is_file()}
+    task_dir = source / "tasks/finalpool" / task
+    gt_dir = task_dir / "groundtruth_workspace"
+    if gt_dir.is_dir():
+        hashes = {
+            path.relative_to(gt_dir).as_posix(): _sha256(path)
+            for path in sorted(gt_dir.rglob("*"))
+            if path.is_file() and "__pycache__" not in path.parts
+        }
+        if hashes:
+            return hashes
+    eval_dir = task_dir / "evaluation"
+    if not eval_dir.is_dir():
+        raise ValueError(f"Missing evaluation directory for {task}: {eval_dir}")
+    hashes = {
+        f"evaluation/{path.relative_to(eval_dir).as_posix()}": _sha256(path)
+        for path in sorted(eval_dir.rglob("*"))
+        if path.is_file() and "__pycache__" not in path.parts
+    }
     if not hashes:
-        raise ValueError(f"No groundtruth files found in {gt_dir}")
+        raise ValueError(f"No groundtruth or evaluation files found in {task_dir}")
     return hashes
 
 
-def build_quickstart_row(source: Path, task: str) -> dict[str, Any]:
+def build_task_row(source: Path, task: str) -> dict[str, Any]:
     """Build a canonical dataset row from the pinned upstream Toolathlon checkout."""
-    if task not in QUICKSTART_TASKS:
-        raise ValueError(f"Unsupported quickstart task: {task}")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", task):
+        raise ValueError(f"Unsupported Toolathlon task: {task}")
     task_dir = source / "tasks/finalpool" / task
     instruction_path = task_dir / "docs/task.md"
     config_path = task_dir / "task_config.json"
@@ -109,7 +124,9 @@ def build_quickstart_row(source: Path, task: str) -> dict[str, Any]:
     gt_hashes = groundtruth_hashes(source, task)
     initial_dir = task_dir / "initial_workspace"
     initial_files = (
-        sorted(path.name for path in initial_dir.iterdir() if path.is_file()) if initial_dir.is_dir() else []
+        sorted(path.relative_to(initial_dir).as_posix() for path in initial_dir.rglob("*") if path.is_file())
+        if initial_dir.is_dir()
+        else []
     )
     return {
         "id": task,
@@ -127,10 +144,13 @@ def build_quickstart_row(source: Path, task: str) -> dict[str, Any]:
             "groundtruth_hashes": gt_hashes,
         },
         "metadata": {
-            "runner": "native",
+            "runner": "native" if task in QUICKSTART_TASKS else "containerized",
             "upstream_revision": UPSTREAM_REVISION,
         },
     }
+
+
+build_quickstart_row = build_task_row
 
 
 def collect_workspace_files(workspace: Path, *, max_total_bytes: int = 4 * 1024 * 1024) -> dict[str, str]:
@@ -173,8 +193,11 @@ def evaluate_workspace(
     timeout: int = 300,
 ) -> tuple[bool, str]:
     """Run the official Toolathlon task evaluator in the trusted upstream environment."""
-    if task not in QUICKSTART_TASKS:
-        raise ValueError(f"Unsupported quickstart task: {task}")
+    if (
+        not re.fullmatch(r"[A-Za-z0-9_-]+", task)
+        or not (source / "tasks/finalpool" / task / "task_config.json").is_file()
+    ):
+        raise ValueError(f"Unsupported Toolathlon task: {task}")
     actual_hashes = groundtruth_hashes(source, task)
     if actual_hashes != expected_hashes:
         raise ValueError(f"Groundtruth hash mismatch for {task}")
@@ -185,7 +208,10 @@ def evaluate_workspace(
     with tempfile.TemporaryDirectory(prefix=f"toolathlon-eval-{task}-") as temp_dir:
         root = Path(temp_dir)
         staged_gt_dir = root / "groundtruth_workspace"
-        shutil.copytree(gt_dir, staged_gt_dir)
+        if gt_dir.is_dir():
+            shutil.copytree(gt_dir, staged_gt_dir)
+        else:
+            staged_gt_dir.mkdir(parents=True, exist_ok=True)
         workspace = root / "workspace"
         workspace.mkdir(parents=True, exist_ok=True)
         (workspace / "arxiv_local_storage").mkdir(parents=True, exist_ok=True)
