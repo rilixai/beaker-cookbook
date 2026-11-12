@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
 import importlib.util
 import json
@@ -97,6 +98,51 @@ def test_prepare_writes_beaker_splits_and_human_verified_view(tmp_path: Path, mo
     assert data.load_rows(tmp_path, "val")[0].input.question == "val question"
     assert [row.input.question for row in data.load_rows(tmp_path, "human_verified_test")] == ["test b"]
     assert (tmp_path / "optimization/train.jsonl").exists() and (tmp_path / "optimization/test.jsonl").exists()
+
+
+def train_row(index: int, month: str, category: str) -> data.Row:
+    return data.Row(
+        id=f"lnb-{index:04d}",
+        input=data.Question(question=f"question {index}"),
+        expected=data.Expected(answer="Geneva"),
+        metadata=data.Metadata(
+            source_split="train", event_date=f"{month}-15", category=category, human_verified=False
+        ),
+    )
+
+
+def test_train_sample_keeps_each_month_and_category_share_and_is_fixed_by_the_seed() -> None:
+    groups = [
+        ("2025-05", "Sports", 40),
+        ("2025-05", "Law and crime", 30),
+        ("2025-06", "Law and Crime", 20),
+        ("2025-06", "Sports", 10),
+    ]
+    cells = [(month, category) for month, category, count in groups for _ in range(count)]
+    rows = [train_row(index, month, category) for index, (month, category) in enumerate(cells)]
+    sample = data.sample_train(rows, 30, seed=1)
+    assert len(sample) == 30 and len({row.id for row in sample}) == 30
+    assert [row.id for row in sample] == [row.id for row in rows if row in sample]
+    shares = collections.Counter((row.metadata.event_date[:7], row.metadata.category.casefold()) for row in sample)
+    assert shares == {
+        ("2025-05", "sports"): 12,
+        ("2025-05", "law and crime"): 9,
+        ("2025-06", "law and crime"): 6,
+        ("2025-06", "sports"): 3,
+    }
+    assert data.sample_train(rows, 30, seed=1) == sample
+    assert data.sample_train(rows, 30, seed=2) != sample
+    with pytest.raises(ValueError, match="between 1 and 100"):
+        data.sample_train(rows, 101)
+
+
+def test_prepare_records_the_train_sample(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(data, "EXPECTED_COUNTS", {"train": 1, "val": 1, "test": 2, "human_verified_test": 1})
+    fake = sources(["test a", "test b"], ["test b"])
+    monkeypatch.setattr(data, "source_file", lambda name, cache_dir: fake[name])
+    assert data.prepare(tmp_path, tmp_path / "cache", train_sample=1, seed=3)["train"] == 1
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["train_sample"] == {"size": 1, "seed": 3, "of": 1}
 
 
 # --- web rules ------------------------------------------------------------------------

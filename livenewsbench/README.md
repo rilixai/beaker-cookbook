@@ -52,6 +52,16 @@ The 200 human-verified questions are a **subset of test**. The release therefore
 
 `prepare` writes `optimization/` for upload and keeps `heldout/test.jsonl` out of Beaker.
 
+Every hypothesis re-runs the whole train split, so its size sets how long a run takes.
+`prepare --train-sample 300` keeps 300 train questions. Each month-and-category group keeps
+its share, and `--seed` (default 0) fixes which questions are kept. The manifest records
+the size and seed. Test stays at 171.
+
+Scores repeat closely between runs: in our first run, 2 of 95 questions changed when run
+twice. So 300 questions still show gains of about 1 point, while every evaluation takes
+half the time. Don't pick the subset from the questions the baseline failed: some of
+those failures are noise, and they "improve" on their own when run again.
+
 ## Run with Beaker
 
 From this directory, with Python 3.12 and uv:

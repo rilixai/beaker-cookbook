@@ -155,6 +155,12 @@ def main() -> None:
     prep = commands.add_parser("prepare", help="Download and verify the pinned LiveNewsBench release")
     prep.add_argument("--output", type=Path, required=True)
     prep.add_argument("--cache", type=Path, default=Path.home() / ".cache/livenewsbench/jan_2026_release_2")
+    prep.add_argument(
+        "--train-sample",
+        type=positive_int,
+        help="Keep this many train questions, stratified by month and category (default: all 612)",
+    )
+    prep.add_argument("--seed", type=int, default=0, help="Seed that fixes which questions --train-sample keeps")
     run = commands.add_parser(
         "evaluate", help="Run and grade the agent; uses YDC_API_KEY and OPENAI_API_KEY and incurs API charges"
     )
@@ -169,7 +175,7 @@ def main() -> None:
     run.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "prepare":
-        print(json.dumps(prepare(args.output, args.cache), indent=2))
+        print(json.dumps(prepare(args.output, args.cache, train_sample=args.train_sample, seed=args.seed), indent=2))
         return
     summary = asyncio.run(evaluate(args))
     print(json.dumps(summary, indent=2))

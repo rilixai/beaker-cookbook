@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import defaultdict
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -111,8 +112,36 @@ def make_rows(sources: dict[str, bytes]) -> dict[str, list[Row]]:
     return splits
 
 
-def prepare(output_dir: Path, cache_dir: Path) -> dict[str, int]:
+def sample_train(rows: list[Row], size: int, seed: int = 0) -> list[Row]:
+    """A stratified sample of `size` rows in which each month-and-category group keeps its share.
+
+    Each group gets its proportional share rounded down; the groups with the largest
+    remainders get one more row each. Within a group, rows are taken in an order fixed by
+    the seed, so the same seed always picks the same questions.
+    """
+    if not 0 < size <= len(rows):
+        raise ValueError(f"The sample size must be between 1 and {len(rows)}")
+    groups: dict[tuple[str, str], list[Row]] = defaultdict(list)
+    for row in rows:
+        # Upstream spells one category two ways ("Law and crime", "Law and Crime").
+        groups[(row.metadata.event_date[:7], row.metadata.category.casefold())].append(row)
+    shares = {key: size * len(members) / len(rows) for key, members in groups.items()}
+    counts = {key: int(share) for key, share in shares.items()}
+    by_remainder = sorted(shares, key=lambda key: (counts[key] - shares[key], key))
+    for key in by_remainder[: size - sum(counts.values())]:
+        counts[key] += 1
+
+    def order(row: Row) -> str:
+        return hashlib.sha256(f"{seed}:{row.id}".encode()).hexdigest()
+
+    chosen = {row.id for key, members in groups.items() for row in sorted(members, key=order)[: counts[key]]}
+    return [row for row in rows if row.id in chosen]
+
+
+def prepare(output_dir: Path, cache_dir: Path, *, train_sample: int | None = None, seed: int = 0) -> dict[str, int]:
     splits = make_rows({name: source_file(name, cache_dir) for name in SHA256})
+    if train_sample is not None:
+        splits["train"] = sample_train(splits["train"], train_sample, seed)
     for split, rows in splits.items():
         path = output_dir / SPLIT_FILES[split]
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,6 +155,8 @@ def prepare(output_dir: Path, cache_dir: Path) -> dict[str, int]:
         "counts": counts,
         "files": SPLIT_FILES,
     }
+    if train_sample is not None:
+        manifest["train_sample"] = {"size": train_sample, "seed": seed, "of": EXPECTED_COUNTS["train"]}
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return counts
 
