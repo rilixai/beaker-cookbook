@@ -35,6 +35,7 @@ research, knowledge work, app control, and enterprise automation.
 | [`harvey_lab/`](harvey_lab/) | A junior-lawyer agent on Harvey's Legal Agent Benchmark: reads a case folder, writes the deliverables, gets graded criterion by criterion by an LLM judge. |
 | [`automationbench/`](automationbench/) | Zapier AutomationBench: a tool-calling agent on `verifiers` that can read a `skills/` folder — edit the skills, rerun, watch the score move. |
 | [`jev_banking77/`](jev_banking77/) | BANKING77: native Jev decisions route banking support messages to 77 intents. Optimize instructions and intent descriptions against fixed labels and exact-match scoring. |
+| [`livenewsbench/`](livenewsbench/) | LiveNewsBench: a web-search agent answers questions about recent news with an open model on the You.com Inference Router and You.com search, within 5 searches and 5 page visits, graded by the SimpleQA judge. |
 
 Each recipe is a standalone uv project with its own README covering setup, commands, and expected scores.
 

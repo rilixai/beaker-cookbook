@@ -1,0 +1,48 @@
+[project]
+name = "livenewsbench"
+version = "0.1.0"
+description = "A news web-search agent on LiveNewsBench: open models on the You.com Inference Router, You.com web search, SimpleQA grading."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  # The agent model (You.com Inference Router or Beaker's gateway) and the
+  # GPT-4.1 grader are both OpenAI-compatible chat completions.
+  "openai>=1.50,<3",
+  # You.com Search and Contents APIs.
+  "httpx>=0.27,<1",
+  "pydantic>=2.11,<3",
+]
+
+[project.scripts]
+livenewsbench = "livenewsbench.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/livenewsbench"]
+
+[dependency-groups]
+dev = ["beaker-sdk>=0.6.6,<0.7", "ruff", "mypy", "pytest", "pytest-asyncio"]
+
+[tool.ruff]
+line-length = 119
+extend-include = [".beaker/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["livenewsbench"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/livenewsbench", ".beaker/beaker_integration.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
