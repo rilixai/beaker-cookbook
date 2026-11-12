@@ -102,6 +102,12 @@ def run_agent(
             Path(require_command("node")),
         ]
         read_paths.append(Path(require_command("uv")))
+        # Provider routing points these at a CA bundle beside its private key:
+        # grant the named files only, not their directory.
+        for name in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "NODE_EXTRA_CA_CERTS"):
+            if env.get(name) and Path(env[name]).is_file():
+                read_paths.append(Path(env[name]))
+        read_paths += [Path(p) for p in env.get("SSL_CERT_DIR", "").split(os.pathsep) if p and Path(p).is_dir()]
         write_paths = [output, Path("/dev/null"), Path("/dev/urandom"), Path("/dev/random"), Path("/dev/zero")]
         for path in read_paths + write_paths:
             if source.resolve().is_relative_to(path.resolve()):
