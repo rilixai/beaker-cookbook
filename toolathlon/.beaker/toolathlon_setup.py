@@ -57,6 +57,22 @@ def prepare_toolathlon() -> tuple[Path, Path]:
         return cache, source
 
 
+def verify_sandbox_support() -> None:
+    """Check actual enforcement in a disposable process before expensive setup."""
+    probe = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("toolathlon_sandbox.py")), "--check"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if probe.returncode:
+        raise RuntimeError(
+            "Toolathlon onboarding requires Linux with Landlock ABI >= 3 enabled. "
+            f"Refusing unrestricted execution: {probe.stderr[-2000:]}"
+        )
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -115,22 +131,32 @@ def build_quickstart_row(source: Path, task: str) -> dict[str, Any]:
 
 
 def collect_workspace_files(workspace: Path, *, max_total_bytes: int = 4 * 1024 * 1024) -> dict[str, str]:
-    """Serialize regular files in the agent workspace as base64 for trusted scoring."""
+    """Transfer the complete workspace, or fail explicitly without a quality score.
+
+    The raw-byte cap leaves room for base64 and JSON within Beaker's context
+    wire limit. Never silently drop a file to fit it.
+    """
+    if workspace.is_symlink():
+        raise ValueError("Workspace must not be a symlink")
     if not workspace.is_dir():
         return {}
     encoded: dict[str, str] = {}
     total_bytes = 0
     for path in sorted(workspace.rglob("*")):
+        if path.is_symlink():
+            raise ValueError(f"Workspace symlinks cannot be transferred: {path.relative_to(workspace)}")
         if not path.is_file():
             continue
         rel = path.relative_to(workspace).as_posix()
-        if rel.startswith(".") or "/." in rel:
-            continue
-        size = path.stat().st_size
-        if total_bytes + size > max_total_bytes:
-            continue
-        encoded[rel] = base64.b64encode(path.read_bytes()).decode("ascii")
-        total_bytes += size
+        remaining = max_total_bytes - total_bytes
+        if path.stat().st_size > remaining:
+            raise ValueError(f"Workspace exceeds the {max_total_bytes}-byte transfer limit at {rel!r}")
+        with path.open("rb") as stream:
+            data = stream.read(remaining + 1)
+        total_bytes += len(data)
+        if total_bytes > max_total_bytes:
+            raise ValueError(f"Workspace exceeds the {max_total_bytes}-byte transfer limit at {rel!r}")
+        encoded[rel] = base64.b64encode(data).decode("ascii")
     return encoded
 
 
@@ -163,10 +189,10 @@ def evaluate_workspace(
         for rel_path, b64_data in workspace_files.items():
             safe_rel = Path(rel_path)
             if safe_rel.is_absolute() or ".." in safe_rel.parts:
-                continue
+                raise ValueError(f"Invalid workspace path: {rel_path!r}")
             target = workspace / safe_rel
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(base64.b64decode(b64_data))
+            target.write_bytes(base64.b64decode(b64_data, validate=True))
 
         res_log_file = root / "traj_log.json"
         res_log_file.write_text(json.dumps({"status": agent_status}), encoding="utf-8")
