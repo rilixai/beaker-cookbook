@@ -71,9 +71,8 @@ including MCP servers.
 
 ## Verification without paid model calls
 
-Run `uv run pytest -q` from the recipe directory for transport and regression
-checks. The OTLP tests exercise native SDK spans in a subprocess, asymmetric
-token counts, real elapsed times, flush on failure, large bodies and token auth.
+Run `uv run pytest -q` from the recipe directory for standalone runner regression
+checks. The real framework, MCP and OTLP checks below are opt-in.
 
 For the real Toolathlon loop and MCP checks, prepare a cache once, then run:
 
