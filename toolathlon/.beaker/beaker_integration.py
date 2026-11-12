@@ -38,8 +38,8 @@ from toolathlon_setup import (
 from toolathlon_baseline import QUICKSTART_TASKS, UPSTREAM_REVISION
 
 
-DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
+DEFAULT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_MODEL = "gpt-6-luna"
 DEFAULT_MAX_STEPS = 100
 DEFAULT_TIMEOUT_SECONDS = 1800
 
@@ -48,11 +48,23 @@ import json
 import pathlib
 import sys
 
-from toolathlon_baseline.runner import run_task
+import toolathlon_baseline.runner as _runner
+
+_orig_execute = _runner.execute
+
+
+def _debug_execute(command, **kwargs):
+    cmd = list(command)
+    if "main.py" in cmd and "--debug" not in cmd:
+        cmd.append("--debug")
+    return _orig_execute(cmd, **kwargs)
+
+
+_runner.execute = _debug_execute
 
 request = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 model_params = pathlib.Path(request["model_params"]) if request.get("model_params") else None
-summary = run_task(
+summary = _runner.run_task(
     cache=pathlib.Path(request["cache"]),
     output=pathlib.Path(request["output"]),
     task=request["task"],
@@ -118,13 +130,16 @@ def _resolve_model_target(runtime: RolloutRuntime[Any]) -> tuple[str, str, str, 
     if runtime.model:
         target = inference_target(runtime)
         return target.base_url, target.api_key, target.model, True
-    base_url = os.environ.get("TOOLATHLON_OPENAI_BASE_URL") or DEFAULT_BASE_URL
-    api_key = (
-        os.environ.get("TOOLATHLON_OPENAI_API_KEY")
-        or os.environ.get("OPENROUTER_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-        or "fake-key"
-    )
+    base_url = os.environ.get("TOOLATHLON_OPENAI_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or DEFAULT_BASE_URL
+    if "openrouter.ai" in base_url:
+        api_key = os.environ.get("TOOLATHLON_OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY") or "fake-key"
+    else:
+        api_key = (
+            os.environ.get("TOOLATHLON_OPENAI_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("OPENROUTER_API_KEY")
+            or "fake-key"
+        )
     model = os.environ.get("TOOLATHLON_MODEL") or DEFAULT_MODEL
     return base_url, api_key, model, False
 
@@ -265,9 +280,12 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
                 "max_steps": DEFAULT_MAX_STEPS,
                 "timeout": DEFAULT_TIMEOUT_SECONDS,
             }
-            if is_gateway:
+            custom_params_file = os.environ.get("TOOLATHLON_MODEL_PARAMS_FILE")
+            if custom_params_file and not is_gateway and Path(custom_params_file).is_file():
+                request_payload["model_params"] = custom_params_file
+            else:
                 params_file = root / "gateway_model_params.json"
-                params_file.write_text(json.dumps({"parallel_tool_calls": True}), encoding="utf-8")
+                params_file.write_text(json.dumps({"tool_choice": "auto"}), encoding="utf-8")
                 request_payload["model_params"] = str(params_file)
             request_path.write_text(json.dumps(request_payload), encoding="utf-8")
 
@@ -292,9 +310,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             stdout_bytes, stderr_bytes = await process.communicate()
             if process.returncode != 0 or not response_path.is_file():
                 detail = (stderr_bytes or stdout_bytes).decode("utf-8", errors="replace")[-4000:]
-                raise RetryableCaseError(
-                    f"Toolathlon runner subprocess failed (exit {process.returncode}): {detail}"
-                )
+                raise RetryableCaseError(f"Toolathlon runner subprocess failed (exit {process.returncode}): {detail}")
 
             summary = json.loads(response_path.read_text(encoding="utf-8"))
             traj_path = output_dir / "artifacts/traj_log.json"
@@ -320,13 +336,9 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
 
             if llm_requests == 0 and agent_status != "success":
                 log_path = output_dir / "run.log"
-                log_tail = (
-                    log_path.read_text(encoding="utf-8", errors="replace")[-2000:] if log_path.is_file() else ""
-                )
+                log_tail = log_path.read_text(encoding="utf-8", errors="replace")[-2000:] if log_path.is_file() else ""
                 stage.output({"status": "error_before_first_turn", "log_tail": log_tail})
-                raise RetryableCaseError(
-                    f"Toolathlon task {task!r} exited before completing a model turn: {log_tail}"
-                )
+                raise RetryableCaseError(f"Toolathlon task {task!r} exited before completing a model turn: {log_tail}")
 
             workspace_dir = output_dir / "artifacts/workspace"
             workspace_files = collect_workspace_files(workspace_dir)

@@ -26,10 +26,22 @@ def _ensure_bin_on_path() -> None:
         os.environ["PATH"] = f"{bin_dir}{os.pathsep}{current_path}".rstrip(os.pathsep)
 
 
+def _cache_dir() -> Path:
+    configured = os.environ.get("BEAKER_TOOLATHLON_CACHE")
+    if configured:
+        return Path(configured)
+    # Candidate rollouts override TMPDIR per attempt; keep the prepared upstream
+    # checkout in shared /tmp so prepare_run, run_case, and score_case reuse it.
+    shared_tmp = Path("/tmp")
+    if shared_tmp.is_dir() and os.access(shared_tmp, os.W_OK | os.X_OK):
+        return shared_tmp / f"beaker-toolathlon-{UPSTREAM_REVISION}"
+    return Path(tempfile.gettempdir()) / f"beaker-toolathlon-{UPSTREAM_REVISION}"
+
+
 def prepare_toolathlon() -> tuple[Path, Path]:
     """Return (cache_dir, upstream_source_dir) for the pinned Toolathlon revision."""
     _ensure_bin_on_path()
-    cache = Path(tempfile.gettempdir()) / f"beaker-toolathlon-{UPSTREAM_REVISION}"
+    cache = _cache_dir()
     cache.mkdir(parents=True, exist_ok=True)
     with (cache / "setup.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -57,11 +69,7 @@ def groundtruth_hashes(source: Path, task: str) -> dict[str, str]:
     gt_dir = source / "tasks/finalpool" / task / "groundtruth_workspace"
     if not gt_dir.is_dir():
         raise ValueError(f"Missing groundtruth_workspace for {task}: {gt_dir}")
-    hashes = {
-        path.name: _sha256(path)
-        for path in sorted(gt_dir.iterdir())
-        if path.is_file()
-    }
+    hashes = {path.name: _sha256(path) for path in sorted(gt_dir.iterdir()) if path.is_file()}
     if not hashes:
         raise ValueError(f"No groundtruth files found in {gt_dir}")
     return hashes
