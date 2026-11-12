@@ -18,8 +18,8 @@ from beaker.tracing import current_trace
 from openai import AsyncOpenAI
 
 from livenewsbench import cli, data, grading, runner, youcom
-from livenewsbench.chat import ChatModel, TransientServiceError
-from livenewsbench.tools import BLOCKED_DOMAINS, Page, SearchHit, ToolRefused, WebTools, blocked
+from livenewsbench.chat import RATE_LIMIT_WAITS, ChatModel, TransientServiceError
+from livenewsbench.tools import BLOCKED_DOMAINS, Page, RequestRejected, SearchHit, ToolRefused, WebTools, blocked
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -153,6 +153,38 @@ def test_blocked_matches_subdomains_only() -> None:
     assert not blocked("https://notgithub.com/x") and not blocked("https://news.example/archive.org")
 
 
+async def test_over_long_queries_are_refused_before_any_request_and_use_no_search() -> None:
+    backend = FakeBackend(["https://news.example/a"])
+    web = WebTools(backend=backend, trace=current_trace())
+    with pytest.raises(ToolRefused, match="too long"):
+        await web.search(" ".join(["word"] * 51))
+    with pytest.raises(ToolRefused, match="too long"):
+        await web.search("x" * 401)
+    assert backend.searches == [] and web.usage.searches == 0 and web.usage.refused == 2
+
+
+class RejectingBackend(FakeBackend):
+    async def search(
+        self, query: str, *, count: int, extraction: str, exclude_domains: tuple[str, ...]
+    ) -> list[SearchHit]:
+        if query == "rejected":
+            raise RequestRejected("HTTP 422")
+        return await super().search(query, count=count, extraction=extraction, exclude_domains=exclude_domains)
+
+    async def fetch(self, url: str) -> Page:
+        raise RequestRejected("HTTP 422")
+
+
+async def test_service_rejections_reach_the_agent_as_refusals_and_use_the_budget() -> None:
+    web = WebTools(backend=RejectingBackend(["https://news.example/a"]), trace=current_trace())
+    with pytest.raises(ToolRefused, match=r"rejected this query \(HTTP 422\)"):
+        await web.search("rejected")
+    await web.search("summit city")
+    with pytest.raises(ToolRefused, match=r"could not be fetched \(HTTP 422\)"):
+        await web.open_page("https://news.example/a")
+    assert (web.usage.searches, web.usage.page_visits, web.usage.rejected, web.usage.refused) == (2, 1, 2, 0)
+
+
 # --- You.com client --------------------------------------------------------------------
 
 
@@ -232,6 +264,18 @@ async def test_rate_limits_are_retried_and_persistent_failures_are_transient() -
     async with youcom_web(lambda request: httpx.Response(401, json={"detail": "bad key"})) as web:
         with pytest.raises(RuntimeError, match="HTTP 401"):
             await web.search("q", count=1, extraction="snippets", exclude_domains=())
+
+
+async def test_request_errors_other_than_credentials_are_rejections_without_the_body() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"error": "Query too long: echoes the request"})
+
+    async with youcom_web(handler) as web:
+        with pytest.raises(RequestRejected) as search_error:
+            await web.search("q", count=1, extraction="snippets", exclude_domains=())
+        with pytest.raises(RequestRejected) as page_error:
+            await web.fetch("https://a.example")
+    assert str(search_error.value) == str(page_error.value) == "HTTP 422"
 
 
 # --- model and agent --------------------------------------------------------------------
@@ -329,6 +373,39 @@ async def test_agent_answers_within_the_call_cap_after_budget_refusals() -> None
     assert rollout.answer == "Geneva"
     assert len(requests) == runner.MAX_MODEL_CALLS and "tools" not in requests[-1]
     assert web.usage.searches == 5 and web.usage.refused == runner.MAX_MODEL_CALLS - 1 - 5
+
+
+def rate_limited_router(successes_after: int | None, requests: list[dict[str, Any]]) -> AsyncOpenAI:
+    """A router that answers 429 until `successes_after` requests have failed (None: always)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if successes_after is None or len(requests) <= successes_after:
+            return httpx.Response(429, json={"error": {"message": "Rate limit exceeded"}})
+        return httpx.Response(200, json=completion("Final answer: Geneva"))
+
+    return AsyncOpenAI(
+        base_url=youcom.ROUTER_BASE_URL,
+        api_key="offline-key",
+        max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+
+async def test_router_rate_limits_wait_longer_before_the_case_is_given_up() -> None:
+    requests: list[dict[str, Any]] = []
+    chat = chat_model(rate_limited_router(2, requests))
+    reply = await chat.complete([{"role": "user", "content": QUESTION}])
+    assert reply.choices[0].message.content == "Final answer: Geneva"
+    assert (len(requests), chat.usage.calls, chat.usage.rate_limit_waits) == (3, 1, 2)
+    assert chat.usage.rate_limit_seconds > 0
+
+    requests.clear()
+    throttled = chat_model(rate_limited_router(None, requests))
+    with pytest.raises(TransientServiceError, match="RateLimitError"):
+        await throttled.complete([{"role": "user", "content": QUESTION}])
+    assert len(requests) == len(RATE_LIMIT_WAITS) + 1
+    assert throttled.usage.rate_limit_waits == len(RATE_LIMIT_WAITS)
 
 
 def test_list_price_uses_router_rates() -> None:

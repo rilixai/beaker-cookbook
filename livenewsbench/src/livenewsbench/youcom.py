@@ -19,7 +19,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from livenewsbench.chat import TransientServiceError
-from livenewsbench.tools import Page, SearchExtraction, SearchHit
+from livenewsbench.tools import Page, RequestRejected, SearchExtraction, SearchHit
 
 
 API_KEY_ENV = "YDC_API_KEY"
@@ -58,6 +58,8 @@ SEARCH_PRICE = 5.00 / 1000
 PAGE_PRICE = 1.00 / 1000
 
 RETRY_STATUSES = {429, 500, 502, 503, 504}
+# A bad or unauthorized key fails the case; any other 4xx is about this one request.
+CREDENTIAL_STATUSES = {401, 403}
 ATTEMPTS = 6
 
 
@@ -123,9 +125,11 @@ class YouComWeb:
                 error: str = type(exc).__name__
             else:
                 if response.status_code not in RETRY_STATUSES:
-                    if response.status_code >= 400:
-                        # Keep the body out: it can echo the request. The status says enough.
+                    # Keep the body out: it can echo the request. The status says enough.
+                    if response.status_code in CREDENTIAL_STATUSES or response.status_code >= 500:
                         raise RuntimeError(f"You.com {url.rsplit('/', 1)[-1]} failed with HTTP {response.status_code}")
+                    if response.status_code >= 400:
+                        raise RequestRejected(f"HTTP {response.status_code}")
                     return response.json()
                 error = f"HTTP {response.status_code}"
                 retry_after = response.headers.get("retry-after", "")

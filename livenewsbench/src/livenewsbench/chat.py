@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import random
 import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -21,6 +23,13 @@ class CallLimitReached(RuntimeError):
     pass
 
 
+# Seconds to wait before each further attempt once the client's own retries end on a rate
+# limit (HTTP 429). Those retries back off for about 15 s in all, too short for a
+# throttled router; these add a few minutes before the case is given up as transient.
+RATE_LIMIT_WAITS = (15.0, 30.0, 60.0, 60.0)
+MAX_RETRY_AFTER_SECONDS = 60.0
+
+
 @dataclass
 class ChatUsage:
     calls: int = 0
@@ -29,6 +38,9 @@ class ChatUsage:
     output_tokens: int = 0
     reasoning_tokens: int = 0
     seconds: float = 0.0
+    # Waits after the client's own retries ended on HTTP 429; `seconds` includes them.
+    rate_limit_waits: int = 0
+    rate_limit_seconds: float = 0.0
 
 
 @dataclass
@@ -73,9 +85,7 @@ class ChatModel:
         ) as call:
             started = time.perf_counter()
             try:
-                completion: ChatCompletion = await self.client.chat.completions.create(**request)
-            except (openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError) as exc:
-                raise TransientServiceError(f"{self.provider} chat completion failed: {type(exc).__name__}") from exc
+                completion = await self._create(request)
             finally:
                 self.usage.seconds += time.perf_counter() - started
             call.output(completion)
@@ -87,3 +97,28 @@ class ChatModel:
             self.usage.cached_input_tokens += (prompt_details.cached_tokens or 0) if prompt_details else 0
             self.usage.reasoning_tokens += (completion_details.reasoning_tokens or 0) if completion_details else 0
         return completion
+
+    async def _create(self, request: dict[str, Any]) -> ChatCompletion:
+        for wait in (*RATE_LIMIT_WAITS, None):
+            try:
+                completion: ChatCompletion = await self.client.chat.completions.create(**request)
+                return completion
+            except openai.RateLimitError as exc:
+                if wait is None:
+                    raise TransientServiceError(f"{self.provider} chat completion failed: RateLimitError") from exc
+                pause = _retry_after(exc) or wait * (0.5 + random.random())
+                self.usage.rate_limit_waits += 1
+                self.usage.rate_limit_seconds += pause
+                await asyncio.sleep(pause)
+            except (openai.APIConnectionError, openai.InternalServerError) as exc:
+                raise TransientServiceError(f"{self.provider} chat completion failed: {type(exc).__name__}") from exc
+        raise AssertionError("unreachable")
+
+
+def _retry_after(exc: openai.RateLimitError) -> float | None:
+    value = exc.response.headers.get("retry-after", "")
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None
+    return min(seconds, MAX_RETRY_AFTER_SECONDS) if seconds > 0 else None

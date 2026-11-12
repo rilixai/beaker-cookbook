@@ -23,6 +23,8 @@ These follow upstream's reference agent and are enforced in `src/livenewsbench/t
 - A page can be opened only if a search in the same question returned it.
 - Search excludes Internet archive sites (upstream's rule) and the hosts that publish this benchmark's questions with answers: Hugging Face, GitHub, arXiv, Braintrust. `BLOCKED_DOMAINS` lists them. Results from these hosts are also dropped after the search.
 - At most **12 model calls** per question (`MAX_MODEL_CALLS`). The seed agent keeps the last one for its answer.
+- A search query may have at most 50 words and 400 characters, You.com Search's limit. A longer one is refused before it is sent and uses no search.
+- If You.com rejects a search or page itself (an HTTP 4xx other than a key error), the agent is told and the search or page visit counts. The question goes on.
 
 The model is `deepseek-v4.1-flash` by default. Set `LIVENEWSBENCH_MODEL` to another
 [router model ID](https://you.com/product/inference-router/models), such as `glm-5.3`
@@ -78,9 +80,19 @@ tokens, and the search and page-visit counts. Use `evaluate` below for dollar
 figures.
 
 **Rate limits.** The Search and Contents APIs default to 10 requests per second. The
-client retries 429s with `Retry-After` and backs off on 5xx. A provider failure that
-outlasts six attempts raises `RetryableCaseError`, which marks the case as worth
-retrying instead of scoring it 0.
+client retries their 429s with `Retry-After` and backs off on 5xx.
+
+The router throttles too. Our first hosted run used Beaker's default of 32 cases at
+once: cases finished at a flat ~25 a minute, and the median rollout took 44 s, against
+6 s in a local run at 8 at once. When the OpenAI client's own retries end on a router
+429, the agent's model call waits up to four more times, about 3 minutes in all
+(`RATE_LIMIT_WAITS`). Each case's usage records these waits as `rate_limit_waits` and
+`rate_limit_seconds`.
+
+A provider failure that outlasts all retries raises `RetryableCaseError`. That marks the
+case as worth retrying instead of scoring it 0. Ask You.com for your key's limits, and
+set `--config '{"max_concurrency": 8}'` on `run trigger`, so that latency measures the
+router, not its rate limit.
 
 ## Evaluate locally
 
