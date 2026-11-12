@@ -8,6 +8,7 @@ English language binding (as every upstream 2.0 run does), so retail uses its
 from __future__ import annotations
 
 import sys
+from collections import Counter
 from collections.abc import Callable
 from contextvars import ContextVar
 from functools import cache
@@ -129,7 +130,7 @@ def evaluate(simulation: SimulationRun, domain: Domain, task_id: str) -> RewardI
     selected = task(domain, task_id)
     context = task_context(config, selected)
     env_kwargs = language_environment_kwargs(reload_call_language(context, domain)) or None
-    return evaluate_simulation(
+    reward = evaluate_simulation(
         simulation=simulation,
         task=selected,
         evaluation_type=EvaluationType.ALL,
@@ -139,3 +140,10 @@ def evaluate(simulation: SimulationRun, domain: Domain, task_id: str) -> RewardI
         communicate_scoring=COMMUNICATE_SCORING,
         customer_language=context.provider_language,
     )
+    criteria = selected.evaluation_criteria
+    if criteria is not None and RewardType.NL_ASSERTION in (reward.reward_basis or []):
+        expected = Counter(criteria.nl_assertions or [])
+        actual = Counter(check.nl_assertion for check in reward.nl_assertions or [])
+        if actual != expected:
+            raise ValueError(f"tau2 judge must return one verdict per expected assertion for {domain} task {task_id}")
+    return reward

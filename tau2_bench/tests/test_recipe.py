@@ -12,9 +12,11 @@ from typing import Any
 import httpx
 import openai
 import pytest
+import tau2.evaluator.evaluator_nl_assertions as upstream_judge
 import tau2.user.user_simulator as upstream_user
 from beaker import Case, CaseResult, RetryableCaseError
 from beaker.tracing import current_trace
+from litellm import ServiceUnavailableError
 from pydantic import ValidationError
 from tau2.data_model.message import AssistantMessage
 from tau2.data_model.simulation import (
@@ -238,19 +240,58 @@ async def test_provider_outage_retries_and_agent_errors_fail_visibly(
     assert scored.checks[0].verdict == "fail" and "BadRequestError" in str(scored.checks[0].message)
 
 
+async def test_simulator_outage_retries(
+    integration: ModuleType, stubbed: dict[str, list[Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unavailable(**kwargs: Any) -> AssistantMessage:
+        raise ServiceUnavailableError(message="simulator unavailable", llm_provider="openai", model=kwargs["model"])
+
+    monkeypatch.setattr(upstream_user, "generate", unavailable)
+    with pytest.raises(RetryableCaseError, match="simulator unavailable"):
+        await run(integration, "openai:gpt-test")
+    assert not stubbed["agent"]
+
+
 # --- scoring map -------------------------------------------------------------------------------
 
 
-def simulation(reason: TerminationReason) -> SimulationRun:
+def simulation(reason: TerminationReason, task_id: str = "1") -> SimulationRun:
     return SimulationRun(
         id="s",
-        task_id="1",
+        task_id=task_id,
         start_time="t",
         end_time="t",
         duration=0.0,
         termination_reason=reason,
         messages=[AssistantMessage(role="assistant", content="Done.")],
     )
+
+
+@pytest.mark.parametrize("verdicts", ["missing", "duplicate", "unrelated", "complete"])
+async def test_retail_requires_one_verdict_per_assertion(
+    integration: ModuleType, monkeypatch: pytest.MonkeyPatch, verdicts: str
+) -> None:
+    # This pinned retail task requires an assertion and no database changes.
+    task_id = "24"
+    (assertion,) = benchmark.task("retail", task_id).evaluation_criteria.nl_assertions
+    matching = {"expectedOutcome": assertion, "metExpectation": True, "reasoning": "Stub verdict."}
+    judge_results = {
+        "missing": [],
+        "duplicate": [matching, matching],
+        "unrelated": [{**matching, "expectedOutcome": "Unrelated assertion."}],
+        "complete": [matching],
+    }[verdicts]
+    reply = AssistantMessage(role="assistant", content=json.dumps({"results": judge_results}))
+    monkeypatch.setattr(upstream_judge, "generate", lambda **_: reply)
+    case = Case(id=f"retail-{task_id}", input={"domain": "retail", "task_id": task_id}, expected={})
+    recorded = scoring.to_context(simulation(TerminationReason.USER_STOP, task_id))
+    result = CaseResult(output=None, output_kind="none", context={"simulation": recorded})
+    if verdicts == "complete":
+        scored = await integration.score_case(case=case, result=result, case_files_dir=Path())
+        assert scored.objective == 1.0
+    else:
+        with pytest.raises(ValueError, match="one verdict per expected assertion"):
+            await integration.score_case(case=case, result=result, case_files_dir=Path())
 
 
 def test_retail_reward_maps_db_and_nl_assertions() -> None:

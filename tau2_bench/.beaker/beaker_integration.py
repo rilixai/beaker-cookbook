@@ -33,10 +33,6 @@ from tau2_bench.data import Row, TaskRef
 from tau2_bench.llm import ChatModel
 
 
-# Provider outages are not the candidate's fault: retry the case instead of scoring it.
-PROVIDER_ERRORS = (openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError)
-
-
 class Setup(RunSetup[Row]):
     row_model = Row
 
@@ -75,15 +71,15 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
                 lambda tools, policy: Agent(tools, policy, chat=chat, instructions=instructions),
                 agent_model=chat.model,
             )
-        except PROVIDER_ERRORS as exc:
+        except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             stage.output({"error": message})
-            raise RetryableCaseError(message) from exc
-        except Exception as exc:
-            # An agent or simulator failure is a failed case with a visible error.
-            context["error"] = f"{type(exc).__name__}: {exc}"
-            stage.output({"error": context["error"]})
-            return CaseResult(output={"error": context["error"]}, output_kind="record", context=context)
+            # LiteLLM's simulator errors share the SDK base classes, but use different subclasses for 5xx.
+            if isinstance(exc, openai.APIConnectionError) or (
+                isinstance(exc, openai.APIStatusError) and (exc.status_code == 429 or 500 <= exc.status_code < 600)
+            ):
+                raise RetryableCaseError(message) from exc
+            return CaseResult(output={"error": message}, output_kind="record", context={**context, "error": message})
         finally:
             chat.client.close()
         output = scoring.summary(simulation)
