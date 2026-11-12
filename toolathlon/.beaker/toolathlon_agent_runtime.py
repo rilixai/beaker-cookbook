@@ -1,4 +1,4 @@
-"""Build a locked modern agent environment above the pinned benchmark deps."""
+"""Create the locked runtime for the native OpenAI Agents implementation."""
 
 from __future__ import annotations
 
@@ -41,10 +41,5 @@ def prepare_agent_runtime(cache: Path, source: Path) -> Path:
             check=True,
             env=env,
         )
-        site = next((root / ".venv/lib").glob("python*/site-packages"))
-        original_site = next((source / ".venv/lib").glob("python*/site-packages"))
-        # Modern locked dependencies take precedence; remaining task libraries
-        # come from the original locked environment, also mounted read-only.
-        (site / "toolathlon_upstream.pth").write_text(f"{original_site}\n")
         marker.write_text(digest)
         return root / ".venv"

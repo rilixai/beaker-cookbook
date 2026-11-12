@@ -9,22 +9,35 @@ requires a separate, explicit integration change.
 The onboarding agent uses **OpenAI Agents 0.20.0** and Beaker's native Agents
 connector (`beaker-sdk[openai-agents]==0.6.6`). Its separate environment is locked
 in `agent_runtime/uv.lock`; MCP 1.19.0 and Pydantic 2.12.3 preserve compatibility
-with the benchmark's older MCP servers. Remaining task libraries come from the
-original locked environment, after the upgraded dependencies on `sys.path`.
+with the benchmark's older MCP servers. The agent has its own locked dependencies;
+it does not inherit the original agent's Python packages. MCP executables and
+Python data-processing tools still use the benchmark's original environment.
 The recipe pins Python 3.12.11 for local development and CI as well; newer Python
 releases are not assumed compatible with these historical dependency pins.
 The official graders and the standalone baseline CLI retain that original
 environment. This is an agent-framework migration, so onboarding results are a
 modernized variant, not an exact reproduction of the original 0.0.15 baseline.
 
-The agent still uses Toolathlon's single-turn `TaskRunner`, without evaluation
-in its process. Its staged task contains instructions, initial files and
-preprocessing only. `toolathlon_sdk_compat.py` applies checked replacements to
-the staged source: it removes `set_tracing_disabled(True)`, adapts model/MCP
-signatures and moves context/history bookkeeping onto the new SDK's execution
-path. The original truncation/history helpers and local-tool output limit are
-retained. Scoring runs the official evaluator separately, against trusted
-reference hashes and the complete returned workspace.
+The onboarding entrypoint directly builds an `Agent` with
+`OpenAIChatCompletionsModel` and calls `Runner.run`. It does not execute or patch
+the legacy `TaskRunner`, `TaskAgent`, model provider or SDK internals.
+`toolathlon_context.py` implements history, turn accounting and context truncation
+with public `RunHooks` and `RunConfig.call_model_input_filter`. Task completion
+via `claim_done` uses the SDK's `stop_at_tool_names` behavior. Context-length
+errors reset the model context with the task and recent history, within the
+remaining turn budget.
+
+`toolathlon_tools.py` registers the original local Toolathlon tools and the
+real MCP tools as `FunctionTool` instances, with canonical tool names, structured
+argument coercion and bounded outputs saved for the overlong-output tools.
+Model settings are passed through the SDK's public `ModelSettings`; the normal
+SDK model request, retry and tracing behavior applies. There are no generated
+source replacements, global SDK method assignments or runtime monkey-patches.
+
+The staged task contains instructions, initial files and preprocessing only.
+Scoring runs the official evaluator separately, against trusted reference hashes
+and the complete returned workspace. The task assets and tool implementations
+are upstream; this native agent is a modernized execution harness for them.
 
 ## Native traces
 

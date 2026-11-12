@@ -6,7 +6,10 @@ The agent scaffold, tasks, MCP configurations, and evaluators are provided by
 
 This recipe downloads upstream into an ignored local cache. No Toolathlon source,
 task data, or ground-truth files are vendored into the cookbook. The recipe's
-launch-path adaptations are described in its README. Cite the original work
+standalone runner uses the upstream agent. The Beaker onboarding entrypoint uses
+a native OpenAI Agents 0.20 implementation with Toolathlon's prompts, local tools,
+MCP servers and history format. Its execution boundaries are described in
+`.beaker/README.md`. Cite the original work
 when reporting benchmark results:
 
 Junlong Li et al. *The Tool Decathlon: Benchmarking Language Agents for Diverse,

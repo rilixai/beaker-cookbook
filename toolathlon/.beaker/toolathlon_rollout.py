@@ -1,22 +1,23 @@
-"""Trusted native launch adapter; only the system prompt is candidate-editable."""
+"""Stage and launch the native agent; only its system prompt is editable."""
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import yaml
-from toolathlon_sdk_compat import patch_source
 
-from toolathlon_baseline import runner
-from toolathlon_baseline.prepare import prepared_source, require_command
+from toolathlon_baseline import UPSTREAM_REVISION
+from toolathlon_baseline.prepare import native_path, prepared_source, require_command, runtime_env
+from toolathlon_baseline.runner import stage_task
 
 
 def stage_agent(source: Path, cache: Path, output: Path, task: str, system_prompt: Path | None) -> Path:
-    checkout = _stage_task(source, cache, output, task, system_prompt)
+    checkout = stage_task(source, cache, output, task, system_prompt)
     task_dir = checkout / "tasks/finalpool" / task
     # Keep only solver inputs. References and evaluator code stay in the trusted
     # cache, which the Landlock policy does not grant the agent access to.
@@ -26,8 +27,7 @@ def stage_agent(source: Path, cache: Path, output: Path, task: str, system_promp
                 shutil.rmtree(path)
             else:
                 path.unlink()
-    patch_source(checkout)
-    for name in ("toolathlon_native_trace", "toolathlon_sdk_compat"):
+    for name in ("toolathlon_native_trace", "toolathlon_context", "toolathlon_tools"):
         shutil.copyfile(Path(__file__).with_name(f"{name}.py"), checkout / f"{name}.py")
     shutil.copyfile(Path(__file__).with_name("toolathlon_agent.py"), checkout / "agent_main.py")
     if "excel" in json.loads((task_dir / "task_config.json").read_text())["needed_mcp_servers"]:
@@ -52,18 +52,38 @@ def stage_agent(source: Path, cache: Path, output: Path, task: str, system_promp
     return checkout
 
 
-_stage_task = runner.stage_task
-
-
-def run_agent(*, agent_venv: Path, **kwargs: Any) -> dict[str, Any]:
-    source = prepared_source(kwargs["cache"])
+def run_agent(
+    *,
+    cache: Path,
+    output: Path,
+    task: str,
+    model: str,
+    agent_venv: Path,
+    max_steps: int = 100,
+    timeout: int = 1800,
+    system_prompt: Path | None = None,
+    model_params: Path | None = None,
+) -> dict[str, Any]:
+    if max_steps < 1 or timeout < 1:
+        raise ValueError("max_steps and timeout must be positive")
+    if not os.environ.get("TOOLATHLON_OPENAI_BASE_URL"):
+        raise ValueError("Set TOOLATHLON_OPENAI_BASE_URL first")
+    cache, output = native_path(cache), native_path(output)
+    source = prepared_source(cache)
+    output.mkdir(parents=True, exist_ok=False)
+    checkout = stage_agent(source, cache, output, task, system_prompt)
+    config = json.loads((source / "scripts/formal_run_v0.json").read_text())
+    config["global_task_config"].update(dump_path=str(output / "artifacts"), direct_to_dumps=True)
+    config["agent"]["model"] = {"short_name": model, "provider": "unified"}
+    config_path = checkout / "eval_config.json"
+    config_path.write_text(json.dumps(config, indent=2))
     python = agent_venv / "bin/python"
     python_prefix = Path(
         subprocess.check_output([str(python), "-c", "import sys; print(sys.base_prefix)"], text=True).strip()
     )
 
-    def execute(command: list[str], *, cwd: Path, env: dict[str, str], log: Path, timeout: int) -> int:
-        output = cwd.parent
+    def execute() -> int:
+        env = runtime_env(source)
         for name in ("home", "tmp", "uv-cache"):
             (output / name).mkdir()
         env.update(
@@ -72,7 +92,7 @@ def run_agent(*, agent_venv: Path, **kwargs: Any) -> dict[str, Any]:
             UV_CACHE_DIR=str(output / "uv-cache"),
             UV_NO_SYNC="1",
             UV_PROJECT_ENVIRONMENT=str(agent_venv),
-            PYTHONPATH=f"{cwd / 'runtime/site-packages'}:{cwd}",
+            PYTHONPATH=f"{checkout / 'runtime/site-packages'}:{checkout}",
             TOOLATHLON_TELEMETRY_STATUS=str(output / "telemetry_status.json"),
         )
         read_paths = [Path(p) for p in ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc") if Path(p).exists()]
@@ -80,7 +100,7 @@ def run_agent(*, agent_venv: Path, **kwargs: Any) -> dict[str, Any]:
             source / ".venv",
             agent_venv,
             python_prefix,
-            kwargs["cache"] / "node",
+            cache / "node",
             Path(require_command("node")),
         ]
         read_paths.append(Path(require_command("uv")))
@@ -90,24 +110,51 @@ def run_agent(*, agent_venv: Path, **kwargs: Any) -> dict[str, Any]:
                 raise ValueError(f"Sandbox allowlist would expose the trusted benchmark cache via {path}")
         policy_path = output / "sandbox.json"
         policy_path.write_text(json.dumps({"read": list(map(str, read_paths)), "write": list(map(str, write_paths))}))
-        # Avoid a second process session: the onboarding supervisor owns the
-        # entire group and can kill the agent and MCP servers on cancellation.
-        main_index = command.index("main.py")
+        env["PYTHONUNBUFFERED"] = "1"
+        env.pop("TOOLATHLON_MODEL_PARAMS_FILE", None)
+        if model_params is not None:
+            params_path = output / "model_params.json"
+            params_path.write_bytes(model_params.read_bytes())
+            env["TOOLATHLON_MODEL_PARAMS_FILE"] = str(params_path)
         launch = [
             str(python),
             str(Path(__file__).with_name("toolathlon_sandbox.py")),
             str(policy_path),
             str(python),
             "agent_main.py",
-            *command[main_index + 1 :],
+            "--eval_config",
+            str(config_path),
+            "--task_dir",
+            f"finalpool/{task}",
+            "--model_short_name",
+            model,
+            "--max_steps_under_single_turn_mode",
+            str(max_steps),
         ]
-        with log.open("w") as stream:
-            return subprocess.run(launch, cwd=cwd, env=env, stdout=stream, stderr=stream, timeout=timeout).returncode
+        # The case supervisor owns this process group, including all MCPs.
+        with (output / "run.log").open("w") as stream:
+            return subprocess.run(
+                launch, cwd=checkout, env=env, stdout=stream, stderr=stream, timeout=timeout
+            ).returncode
 
-    original_execute, original_stage = runner.execute, runner.stage_task
+    summary: dict[str, Any] = {
+        "upstream_revision": UPSTREAM_REVISION,
+        "task": f"finalpool/{task}",
+        "model": model,
+        "pass": None,
+        "status": "error",
+        "log": str(output / "run.log"),
+    }
     try:
-        runner.stage_task = stage_agent
-        runner.execute = execute
-        return runner.run_task(**kwargs)
+        summary["exit_code"] = execute()
+        trajectory_path = output / "artifacts/traj_log.json"
+        if trajectory_path.is_file():
+            trajectory = json.loads(trajectory_path.read_text())
+            summary["agent_status"] = trajectory.get("status")
+            summary["key_stats"] = trajectory.get("key_stats")
+            summary["status"] = "completed" if trajectory.get("status") == "success" else "failed"
+    except subprocess.TimeoutExpired:
+        summary["status"] = "timeout"
     finally:
-        runner.execute, runner.stage_task = original_execute, original_stage
+        (output / "result.json").write_text(json.dumps(summary, indent=2))
+    return summary
