@@ -70,8 +70,8 @@ def test_zero_counter_turn_limit_is_scored_without_retry(tmp_path: Path, monkeyp
         trace = Trace()
 
     monkeypatch.setattr(integration, "prepare_toolathlon", lambda: (tmp_path, tmp_path))
+    monkeypatch.setattr(integration, "prepare_agent_runtime", lambda cache, source: tmp_path)
     monkeypatch.setattr(integration, "_resolve_model_target", lambda runtime: ("http://local", "test", "test", False))
-    monkeypatch.setattr(integration, "_emit_trajectory_trace", lambda **kwargs: None)
     monkeypatch.setattr(
         integration,
         "_SUBPROCESS_SCRIPT",
@@ -122,7 +122,8 @@ def test_missing_context_does_not_become_a_zero_score(tmp_path: Path, monkeypatc
         asyncio.run(integration.score_case(case=case, result=CaseResult(output={}), case_files_dir=tmp_path))
 
 
-def test_staged_solver_has_inputs_but_no_answers(tmp_path: Path) -> None:
+def test_staged_solver_has_inputs_but_no_answers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("toolathlon_rollout.patch_source", lambda checkout: None)
     source = tmp_path / "source"
     for directory in ("utils", "scripts", "configs/mcp_servers", "tasks/finalpool/find-alita-paper/docs"):
         (source / directory).mkdir(parents=True)

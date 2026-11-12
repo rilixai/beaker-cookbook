@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from toolathlon_sdk_compat import patch_source
 
 from toolathlon_baseline import runner
 from toolathlon_baseline.prepare import prepared_source, require_command
@@ -25,6 +26,9 @@ def stage_agent(source: Path, cache: Path, output: Path, task: str, system_promp
                 shutil.rmtree(path)
             else:
                 path.unlink()
+    patch_source(checkout)
+    for name in ("toolathlon_native_trace", "toolathlon_sdk_compat"):
+        shutil.copyfile(Path(__file__).with_name(f"{name}.py"), checkout / f"{name}.py")
     shutil.copyfile(Path(__file__).with_name("toolathlon_agent.py"), checkout / "agent_main.py")
     if "excel" in json.loads((task_dir / "task_config.json").read_text())["needed_mcp_servers"]:
         # This pinned server hardcodes its log beside site-packages. Relocate
@@ -51,9 +55,9 @@ def stage_agent(source: Path, cache: Path, output: Path, task: str, system_promp
 _stage_task = runner.stage_task
 
 
-def run_agent(**kwargs: Any) -> dict[str, Any]:
+def run_agent(*, agent_venv: Path, **kwargs: Any) -> dict[str, Any]:
     source = prepared_source(kwargs["cache"])
-    python = source / ".venv/bin/python"
+    python = agent_venv / "bin/python"
     python_prefix = Path(
         subprocess.check_output([str(python), "-c", "import sys; print(sys.base_prefix)"], text=True).strip()
     )
@@ -67,10 +71,18 @@ def run_agent(**kwargs: Any) -> dict[str, Any]:
             TMPDIR=str(output / "tmp"),
             UV_CACHE_DIR=str(output / "uv-cache"),
             UV_NO_SYNC="1",
+            UV_PROJECT_ENVIRONMENT=str(agent_venv),
             PYTHONPATH=f"{cwd / 'runtime/site-packages'}:{cwd}",
+            TOOLATHLON_TELEMETRY_STATUS=str(output / "telemetry_status.json"),
         )
         read_paths = [Path(p) for p in ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc") if Path(p).exists()]
-        read_paths += [source / ".venv", python_prefix, kwargs["cache"] / "node", Path(require_command("node"))]
+        read_paths += [
+            source / ".venv",
+            agent_venv,
+            python_prefix,
+            kwargs["cache"] / "node",
+            Path(require_command("node")),
+        ]
         read_paths.append(Path(require_command("uv")))
         write_paths = [output, Path("/dev/null"), Path("/dev/urandom"), Path("/dev/random"), Path("/dev/zero")]
         for path in read_paths + write_paths:

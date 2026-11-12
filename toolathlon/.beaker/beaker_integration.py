@@ -29,6 +29,8 @@ from beaker import (
     repository,
 )
 from pydantic import BaseModel, Field
+from toolathlon_agent_runtime import prepare_agent_runtime
+from toolathlon_native_trace import NativeTrace
 from toolathlon_setup import (
     build_quickstart_row,
     collect_workspace_files,
@@ -63,6 +65,7 @@ summary = run_agent(
     timeout=int(request["timeout"]),
     model_params=model_params,
     system_prompt=pathlib.Path(request["system_prompt"]),
+    agent_venv=pathlib.Path(request["agent_venv"]),
 )
 pathlib.Path(sys.argv[2]).write_text(json.dumps(summary), encoding="utf-8")
 """
@@ -98,6 +101,7 @@ class Setup(RunSetup[Row]):
         del runtime
         verify_sandbox_support()
         self.cache, self.source = prepare_toolathlon()
+        prepare_agent_runtime(self.cache, self.source)
         yield {"repository": RepositoryRunSetupResult()}
 
     async def load_cases(self, row: Row, *, runtime: SetupRuntime) -> AsyncIterator[Case]:
@@ -136,131 +140,22 @@ def _resolve_model_target(runtime: RolloutRuntime[Any]) -> tuple[str, str, str, 
     return base_url, api_key, model, False
 
 
-def _provider_name(model_name: str, base_url: str) -> str:
-    if ":" in model_name:
-        return model_name.split(":", 1)[0]
-    if "/" in model_name:
-        return model_name.split("/", 1)[0]
-    if "openrouter.ai" in base_url:
-        return "openrouter"
-    if "anthropic.com" in base_url:
-        return "anthropic"
-    return "openai"
-
-
-def _parse_tool_arguments(raw_args: Any) -> Any:
-    if isinstance(raw_args, str):
-        try:
-            return json.loads(raw_args)
-        except json.JSONDecodeError:
-            return {"raw": raw_args}
-    return raw_args if raw_args is not None else {}
-
-
-def _emit_trajectory_trace(
-    *,
-    runtime: RolloutRuntime[Any],
-    trajectory: Mapping[str, Any],
-    model_name: str,
-    base_url: str,
-) -> None:
-    """Record model and tool execution spans reconstructed from the Toolathlon trajectory."""
-    config = trajectory.get("config")
-    system_prompts = config.get("system_prompts") if isinstance(config, Mapping) else None
-    system_prompt = system_prompts.get("agent") if isinstance(system_prompts, Mapping) else None
-
-    messages = trajectory.get("messages")
-    if not isinstance(messages, list):
-        return
-
-    assistant_indices = [
-        idx for idx, item in enumerate(messages) if isinstance(item, Mapping) and item.get("role") == "assistant"
-    ]
-    num_assistant = len(assistant_indices)
-    if num_assistant == 0:
-        return
-
-    agent_cost = trajectory.get("agent_cost") if isinstance(trajectory.get("agent_cost"), Mapping) else {}
-    key_stats = trajectory.get("key_stats") if isinstance(trajectory.get("key_stats"), Mapping) else {}
-    total_in = int(agent_cost.get("total_input_tokens") or key_stats.get("input_tokens") or 0)
-    total_out = int(agent_cost.get("total_output_tokens") or key_stats.get("output_tokens") or 0)
-    raw_cached = agent_cost.get("total_cached_input_tokens")
-    total_cached = int(raw_cached) if isinstance(raw_cached, int) and raw_cached >= 0 else None
-
-    provider = _provider_name(model_name, base_url)
-    context_messages: list[dict[str, Any]] = []
-    if isinstance(system_prompt, str) and system_prompt.strip():
-        context_messages.append({"role": "system", "content": system_prompt})
-
-    tool_calls_by_id: dict[str, tuple[str, Any]] = {}
-    assistant_Ordinal = 0
-
-    for item in messages:
-        if not isinstance(item, Mapping):
-            continue
-        role = item.get("role")
-        if role == "assistant":
-            in_tokens = (total_in // num_assistant) + (1 if assistant_Ordinal < (total_in % num_assistant) else 0)
-            out_tokens = (total_out // num_assistant) + (1 if assistant_Ordinal < (total_out % num_assistant) else 0)
-            cached_tokens = (
-                (total_cached // num_assistant) + (1 if assistant_Ordinal < (total_cached % num_assistant) else 0)
-                if total_cached is not None
-                else None
-            )
-            assistant_Ordinal += 1
-
-            with runtime.trace.model_call(
-                operation="chat.completions",
-                provider=provider,
-                model=model_name,
-                input_messages=list(context_messages),
-            ) as call:
-                call.output(dict(item))
-                call.usage(
-                    input_tokens=in_tokens,
-                    output_tokens=out_tokens,
-                    cached_input_tokens=cached_tokens,
-                )
-
-            raw_tool_calls = item.get("tool_calls")
-            if isinstance(raw_tool_calls, list):
-                for tc in raw_tool_calls:
-                    if not isinstance(tc, Mapping):
-                        continue
-                    call_id = str(tc.get("id") or "")
-                    fn = tc.get("function") if isinstance(tc.get("function"), Mapping) else {}
-                    fn_name = str(fn.get("name") or "tool")
-                    fn_args = _parse_tool_arguments(fn.get("arguments"))
-                    if call_id:
-                        tool_calls_by_id[call_id] = (fn_name, fn_args)
-            context_messages.append(dict(item))
-        elif role == "tool":
-            call_id = str(item.get("tool_call_id") or "")
-            tool_name, tool_args = tool_calls_by_id.get(call_id, ("tool", {}))
-            with runtime.trace.tool_call(
-                tool_name,
-                arguments=tool_args,
-                call_id=call_id or None,
-            ) as tool_op:
-                tool_op.output(item.get("content"))
-            context_messages.append(dict(item))
-        else:
-            context_messages.append(dict(item))
-
-
 async def _communicate(process: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
     """Bound the supervisor and reap its process group even on cancellation."""
     try:
         return await asyncio.wait_for(process.communicate(), timeout=DEFAULT_TIMEOUT_SECONDS + 30)
     finally:
+        alive = False
         try:
             os.killpg(process.pid, signal.SIGTERM)
+            alive = True
         except ProcessLookupError:
             pass
         # Give tools a short opportunity to disconnect, then kill descendants
         # even if the supervisor has already exited or ignores SIGTERM.
         try:
-            await asyncio.sleep(0.2)
+            if alive:
+                await asyncio.sleep(5)
         finally:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
@@ -285,16 +180,21 @@ def _has_model_turn(agent_status: Any, key_stats: Any, trajectory: dict[str, Any
 async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> CaseResult:
     payload = TaskInput.model_validate(case_input)
     task = payload.task
-    cache, _ = prepare_toolathlon()
+    cache, source = prepare_toolathlon()
+    agent_venv = prepare_agent_runtime(cache, source)
     base_url, api_key, model_name, is_gateway = _resolve_model_target(runtime)
 
-    with runtime.trace.stage(
-        "toolathlon.run_task",
-        inputs={"task": task, "model": model_name, "max_steps": DEFAULT_MAX_STEPS},
-    ) as stage:
+    with (
+        NativeTrace(runtime.trace) as telemetry,
+        runtime.trace.stage(
+            "toolathlon.run_task",
+            inputs={"task": task, "model": model_name, "max_steps": DEFAULT_MAX_STEPS},
+        ) as stage,
+    ):
         with tempfile.TemporaryDirectory(prefix=f"beaker-toolathlon-case-{task}-") as temp_dir:
             root = Path(temp_dir)
             output_dir = root / "run"
+            telemetry.status_path = output_dir / "telemetry_status.json"
             request_path = root / "request.json"
             response_path = root / "response.json"
 
@@ -306,6 +206,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
                 "max_steps": DEFAULT_MAX_STEPS,
                 "timeout": DEFAULT_TIMEOUT_SECONDS,
                 "system_prompt": str(Path(__file__).resolve().parents[1] / "prompts/agent_system_prompt.md"),
+                "agent_venv": str(agent_venv),
             }
             custom_params_file = os.environ.get("TOOLATHLON_MODEL_PARAMS_FILE")
             if custom_params_file and not is_gateway and Path(custom_params_file).is_file():
@@ -319,6 +220,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             env = os.environ.copy()
             env["TOOLATHLON_OPENAI_BASE_URL"] = base_url
             env["TOOLATHLON_OPENAI_API_KEY"] = api_key
+            env.update(telemetry.env())
             project_root = Path(__file__).resolve().parents[1]
             src_dir = os.pathsep.join((str(project_root / ".beaker"), str(project_root / "src")))
             existing_pythonpath = env.get("PYTHONPATH", "")
@@ -340,6 +242,8 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
                 stdout_bytes, stderr_bytes = await _communicate(process)
             except TimeoutError as exc:
                 raise RetryableCaseError(f"Toolathlon supervisor timed out for {task!r}") from exc
+            finally:
+                telemetry.read_status()
             if process.returncode != 0 or not response_path.is_file():
                 detail = (stderr_bytes or stdout_bytes).decode("utf-8", errors="replace")[-4000:]
                 raise RetryableCaseError(f"Toolathlon runner subprocess failed (exit {process.returncode}): {detail}")
@@ -348,13 +252,6 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             traj_path = output_dir / "artifacts/traj_log.json"
             trajectory: dict[str, Any] = (
                 json.loads(traj_path.read_text(encoding="utf-8")) if traj_path.is_file() else {}
-            )
-
-            _emit_trajectory_trace(
-                runtime=runtime,
-                trajectory=trajectory,
-                model_name=model_name,
-                base_url=base_url,
             )
 
             status = summary.get("status")
@@ -391,6 +288,8 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             observed_output: dict[str, JsonValue] = {
                 "task": task,
                 "upstream_revision": UPSTREAM_REVISION,
+                "agent_framework": "openai-agents==0.20.0",
+                "trace_source": "native_otlp",
                 "model": model_name,
                 "agent_status": agent_status,
                 "key_stats": key_stats if isinstance(key_stats, Mapping) else {},
