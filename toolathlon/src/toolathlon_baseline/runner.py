@@ -98,9 +98,7 @@ def stage_task(source: Path, cache: Path, output: Path, task: str, system_prompt
             params.setdefault("env", {})["PYTHONPATH"] = str(checkout)
         else:
             executable = (
-                source / "utils/local_servers/excel_runtime/.venv/bin/excel-mcp-server"
-                if name == "excel"
-                else bin_dir / entrypoints[name]
+                source / ".venv-excel/bin/excel-mcp-server" if name == "excel" else bin_dir / entrypoints[name]
             )
             params["command"] = str(executable)
             params["args"] = ["stdio"] if name == "excel" else []

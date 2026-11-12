@@ -1,89 +1,61 @@
-# Native onboarding execution boundary
+# Beaker execution
 
-Beaker may edit `prompts/agent_system_prompt.md` only. Its initial contents are
-the unchanged system prompt shared by the three pinned quickstart tasks.
-Preparation, launch adapters, dependencies, reference files and graders stay
-outside that editable surface. Expanding the surface to tool implementations
-requires a separate, explicit integration change.
+Beaker may edit **`prompts/agent_system_prompt.md` only**. Its seed is the original
+system prompt shared by the three quickstart tasks. Bootstrap, dependency pins,
+tool implementations and graders remain outside that editable surface.
 
-Both onboarding and the standalone CLI execute Toolathlon's original
-`main.py` → `TaskRunner` → `TaskAgent`. Preparation applies the versioned source
-patch `src/toolathlon_baseline/upstream/openai-agents-0.20.patch` once to the
-pinned checkout. The original agent is migrated **in place** to **OpenAI Agents
-0.20.0**; no alternate agent, runtime SDK shim, or second agent environment is
-used. Preparation verifies the exact patch on every native cache reuse.
+Both onboarding and the standalone CLI execute the original
+`main.py → TaskRunner → TaskAgent`, migrated in place to **OpenAI Agents 0.20.0**.
+Preparation applies `src/toolathlon_baseline/upstream/openai-agents-0.20.patch`
+and verifies its Git blob hashes. No alternate agent or SDK compatibility layer
+is used. The default Beaker cache is keyed by the source revision and migration;
+`BEAKER_TOOLATHLON_CACHE` can select an explicitly managed cache.
 
-The patch migrates the original provider, MCP registration and context runner
-where SDK APIs changed. The context runner uses public lifecycle hooks and
-`RunConfig.call_model_input_filter`, preserving upstream's truncation policies,
-turn boundaries, persistent history, context-error reset and remaining-turn
-budget. Local and MCP tools retain their original implementations, argument
-coercion, aliases and output limits. Completion still follows TaskAgent's
-original loop, including its `claim_done` behavior.
+The original provider, MCP registration and context runner are migrated to the
+new APIs. Public lifecycle hooks and `RunConfig.call_model_input_filter` preserve
+Toolathlon's history, turn accounting, truncation, context-error recovery and turn
+budget. Tool aliases, argument coercion, output limits and completion behavior
+remain those of the original agent.
 
-The upgraded upstream `.venv` runs the original agent, Python tools and official
-graders. The unchanged Excel 0.1.4 MCP server alone retains MCP 1.9.0 in its
-own locked server environment (`utils/local_servers/excel_runtime`), because
-its old FastMCP constructor is incompatible with MCP 1.19.0. This environment
-contains no agent SDK or alternate agent. Other externally installed MCP
-servers retain their own environments, as in upstream.
+The upstream `uv.lock` covers two exclusive groups: `agent` (default) runs Agents
+0.20.0, MCP 1.19.0, Pydantic 2.12.3 and `beaker-sdk[openai-agents]==0.6.6`; `excel`
+runs the unchanged Excel 0.1.4 server with MCP 1.9.0 in `.venv-excel`. Its FastMCP
+constructor requires that older MCP. Python stays at 3.12.11. The cookbook parent
+installs only Beaker's `tracing` extra; agent dependencies belong to upstream.
+This is an SDK-migrated baseline, with updated transitive dependencies.
 
-The migrated agent’s upstream `pyproject.toml` and `uv.lock` pin
-Agents 0.20.0, Beaker's native connector (`beaker-sdk[openai-agents]==0.6.6`),
-MCP 1.19.0 and Pydantic 2.12.3. Python remains pinned to 3.12.11. Required
-transitive dependency upgrades are recorded in that lockfile. Benchmark results
-therefore identify an SDK-migrated baseline, rather than the historical 0.0.15
-software environment.
+`toolathlon_entry.py` surrounds upstream `main()` with native trace export.
+`--agent_only` skips inline evaluation so the trusted parent can run the official
+grader after the sandbox exits. Standalone CLI runs keep inline evaluation.
+Task instructions, initial files, tools and evaluator logic stay upstream.
 
-`toolathlon_entry.py` only surrounds the original entrypoint with native trace
-export. The `--agent_only` flag skips inline evaluation for onboarding, where
-the trusted parent performs official scoring after the sandbox exits. Normal
-CLI execution keeps upstream's inline evaluation.
+## Tracing and isolation
 
-The staged task contains instructions, initial files and preprocessing only.
-Scoring runs the official evaluator separately, against trusted reference hashes
-and the complete returned workspace. The task assets, prompts, tool
-implementations and evaluator logic remain upstream.
+The child registers Beaker's native Agents processor before task execution.
+Framework spans record actual model/tool timings, inputs/outputs and per-call
+usage, including reported cached tokens. The default OpenAI exporter is replaced
+by a local, per-case OTLP receiver. The child gets a capture token; only the parent
+holds Beaker run credentials.
 
-## Native traces
+The parent adopts received batches into its capture, preserving timing and child
+hierarchy, adding trusted case/candidate IDs and storing large bodies as artifacts.
+Managed captures use Beaker's OTLP ingestion; local captures archive the same
+format. Traces are not reconstructed from `traj_log.json` or estimated token splits.
+Exporters flush in `finally`, including errors and graceful SIGTERM. Dropped or
+rejected batches and missing flush confirmation mark telemetry incomplete. SIGKILL
+may prevent a final flush; already received spans remain available. MCP spans
+measure calls from the agent; server internals and internal HTTP retries are visible
+only where the framework emits spans.
 
-The agent registers Beaker's OpenAI Agents processor before task execution.
-Model/tool spans are created by the running framework, with actual timestamps,
-per-call usage (including reported cached tokens), and recorded inputs/outputs.
-The default OpenAI trace exporter is replaced; only the local, per-case OTLP
-receiver receives these traces. The agent receives a capture token, not the
-parent's Beaker run credentials.
+Onboarding requires Linux x86_64/aarch64 with **Landlock ABI >= 3**. The policy allows
+system runtimes and dependencies read-only, plus per-case writable directories.
+Staged tasks contain instructions, initial files and preprocessing; local reference
+files and other cases are inaccessible. The unmodified Excel package is copied per
+case because it writes a log beside itself. Network access remains available,
+including public benchmark data. Unsupported isolation fails explicitly.
 
-The parent adopts the OTLP batches into its existing Beaker capture, preserving
-the measured times and child hierarchy, stamping trusted case/candidate IDs and
-moving large bodies into parent-owned artifacts. The managed capture then uses
-Beaker's normal OTLP ingestion route; local captures archive the same format.
-There is no replay of `traj_log.json` and no evenly divided token estimate.
-
-The SDK processors and OpenTelemetry exporter are flushed in `finally`, also
-on agent errors and graceful SIGTERM. Missing exports, dropped/rejected batches
-and missing flush confirmation are reported as incomplete telemetry. A forced
-SIGKILL can still prevent the final flush; already received spans are retained.
-MCP spans describe calls as observed by the agent, not the internals of each
-server. Internal HTTP retries are visible only where the framework emits spans.
-
-The onboarding agent and its MCP children require Linux x86_64 or aarch64 with
-Landlock ABI 3 or newer enabled. The filesystem allowlist permits system runtime
-files and pinned dependencies read-only, plus per-case writable directories.
-It excludes the reference cache and other cases. Policies that would expose
-the cache through an allowed parent directory are rejected. The unmodified
-Excel MCP package is relocated per case because it writes a log next to itself.
-Network access remains available, including access to public benchmark data;
-this boundary protects local references, not against downloading public answers.
-If Landlock is unavailable, execution fails explicitly rather than falling back
-to an agent with unrestricted filesystem access. Verify this requirement on the
-actual hosted worker before launching an optimization.
-
-Workspace transport retains a 4 MiB raw-byte limit to fit the base64 payload in
-Beaker's context envelope. Exceeding that limit is a technical error, never a
-partially transferred workspace scored as a model failure. Symlinks are rejected
-so collection cannot dereference private files outside the agent workspace.
-Missing scoring context is also a technical error. A task that reaches its model
-turn limit is scored as a failure even when upstream leaves its request counter
-at zero. Cancellation and supervisor timeout terminate the whole process group,
-including MCP servers.
+Official scoring uses trusted reference hashes and the complete returned workspace.
+Oversized workspaces fail explicitly instead of dropping files. Failures before a
+model turn are retryable; exhausted turn budgets are scored as failures even if
+upstream leaves its request counter at zero. Cancellation and timeout terminate the
+whole case process group, including MCP servers.

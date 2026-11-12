@@ -27,14 +27,13 @@ def stage_agent(source: Path, cache: Path, output: Path, task: str, system_promp
                 shutil.rmtree(path)
             else:
                 path.unlink()
-    for name in ("toolathlon_native_trace",):
-        shutil.copyfile(Path(__file__).with_name(f"{name}.py"), checkout / f"{name}.py")
+    shutil.copyfile(Path(__file__).with_name("toolathlon_native_trace.py"), checkout / "toolathlon_native_trace.py")
     shutil.copyfile(Path(__file__).with_name("toolathlon_entry.py"), checkout / "agent_main.py")
     if "excel" in json.loads((task_dir / "task_config.json").read_text())["needed_mcp_servers"]:
         # This pinned server hardcodes its log beside site-packages. Relocate
         # its unmodified package so the log is per-case and the shared venv
         # remains read-only for the agent.
-        package = next((source / ".venv/lib").glob("python*/site-packages/excel_mcp"))
+        package = next((source / ".venv-excel/lib").glob("python*/site-packages/excel_mcp"))
         shutil.copytree(package, checkout / "runtime/site-packages/excel_mcp")
     # MCP's stdio client forwards only a small environment allowlist. Supply
     # the per-case locations explicitly for every server and nested command.
@@ -97,7 +96,7 @@ def run_agent(
         read_paths = [Path(p) for p in ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc") if Path(p).exists()]
         read_paths += [
             source / ".venv",
-            source / "utils/local_servers/excel_runtime/.venv",
+            source / ".venv-excel",
             python_prefix,
             cache / "node",
             Path(require_command("node")),

@@ -1,17 +1,19 @@
 diff --git a/configs/mcp_servers/excel.yaml b/configs/mcp_servers/excel.yaml
-index e48e93f146003fe8115a540fb18e7a7065e553a3..cc186cebba1542a0a503edd968c2c346c3e525ef 100644
+index e48e93f146003fe8115a540fb18e7a7065e553a3..613b25c8f47f177dec35193428e8902918fc7a82 100644
 --- a/configs/mcp_servers/excel.yaml
 +++ b/configs/mcp_servers/excel.yaml
-@@ -7,8 +7,12 @@ params:
+@@ -7,8 +7,14 @@ params:
    command: uv
    args:
      - "run"
 +    - "--project"
-+    - "${project_root}/utils/local_servers/excel_runtime"
++    - "${project_root}"
++    - "--only-group"
++    - "excel"
      - "excel-mcp-server"
      - "stdio"
 +  env:
-+    UV_PROJECT_ENVIRONMENT: "${project_root}/utils/local_servers/excel_runtime/.venv"
++    UV_PROJECT_ENVIRONMENT: "${project_root}/.venv-excel"
    cwd: "${agent_workspace}"
  client_session_timeout_seconds: 100
  cache_tools_list: true
@@ -40,18 +42,10 @@ index 3e692dbe3c30ec0f853205c7b809125c280c9ecd..11cb46c876278fd3e095ba4b45d7a62c
      print_color("\n====== Starting Task Evaluation ======", "yellow")
      log_file = task_config.log_file
 diff --git a/pyproject.toml b/pyproject.toml
-index f6a3c992b373cd34b68d7b14fb51dbc3f5095a90..61f68ea5bf44fca2c9081e4da150e6404e9d3aaf 100644
+index f6a3c992b373cd34b68d7b14fb51dbc3f5095a90..8304c8ea7e8b3a5b1f229b50257229450f28b3f3 100644
 --- a/pyproject.toml
 +++ b/pyproject.toml
-@@ -5,6 +5,7 @@ description = "Add your description here"
- readme = "README.md"
- requires-python = "==3.12.11"
- dependencies = [
-+    "beaker-sdk[openai-agents]==0.6.6",
-     "addict==2.4.0",
-     "aiofiles==24.1.0",
-     "aiohappyeyeballs==2.6.1",
-@@ -23,7 +24,7 @@ dependencies = [
+@@ -23,7 +23,7 @@ dependencies = [
      "beautifulsoup4==4.13.4",
      "bibtexparser==1.4.3",
      "canvasapi>=3.3.0",
@@ -60,7 +54,15 @@ index f6a3c992b373cd34b68d7b14fb51dbc3f5095a90..61f68ea5bf44fca2c9081e4da150e640
      "charset-normalizer==3.4.1",
      "cli-mcp-server>=0.2.4",
      "click==8.1.8",
-@@ -60,13 +61,13 @@ dependencies = [
+@@ -34,7 +34,6 @@ dependencies = [
+     "deprecated==1.2.18",
+     "distro==1.9.0",
+     "docutils==0.21.2",
+-    "excel-mcp-server>=0.1.4",
+     "exceptiongroup==1.2.2",
+     "fake-useragent==2.2.0",
+     "faker>=37.4.2",
+@@ -60,13 +59,13 @@ dependencies = [
      "gspread>=6.2.1",
      "h11==0.16.0",
      "httpcore==1.0.9",
@@ -76,27 +78,18 @@ index f6a3c992b373cd34b68d7b14fb51dbc3f5095a90..61f68ea5bf44fca2c9081e4da150e640
      "jsonlines==4.0.0",
      "kiwisolver==1.4.8",
      "kubernetes>=33.1.0",
-@@ -74,7 +75,7 @@ dependencies = [
-     "lxml==5.4.0",
-     "markupsafe==3.0.2",
-     "matplotlib==3.10.3",
--    "mcp>=1.9.0",
-+    "mcp==1.19.0",
-     "mcp-ocr>=0.1.2",
-     "mcp-scholarly==0.1.0",
-     "mcp-server-fetch>=2025.4.7",
-@@ -87,8 +88,8 @@ dependencies = [
+@@ -87,8 +86,8 @@ dependencies = [
      "numpy==2.2.6",
      "office-powerpoint-mcp-server>=1.0.0",
      "office-word-mcp-server>=1.1.5",
 -    "openai==1.76.0",
 -    "openai-agents==0.0.15",
 +    "openai==2.54.0",
-+    "openai-agents==0.20.0",
++    "openpyxl==3.1.5",
      "outcome==1.3.0.post0",
      "packaging==25.0",
      "pandas==2.2.3",
-@@ -101,8 +102,8 @@ dependencies = [
+@@ -101,8 +100,8 @@ dependencies = [
      "propcache==0.3.1",
      "psycopg2-binary==2.9.10",
      "pyarrow==18.0.0",
@@ -107,7 +100,7 @@ index f6a3c992b373cd34b68d7b14fb51dbc3f5095a90..61f68ea5bf44fca2c9081e4da150e640
      "pydantic-settings==2.9.1",
      "pyee==13.0.0",
      "pygments==2.19.1",
-@@ -116,13 +117,13 @@ dependencies = [
+@@ -116,13 +115,13 @@ dependencies = [
      "python-dotenv==1.1.0",
      "python-multipart==0.0.20",
      "pytz==2025.2",
@@ -123,7 +116,7 @@ index f6a3c992b373cd34b68d7b14fb51dbc3f5095a90..61f68ea5bf44fca2c9081e4da150e640
      "setuptools==75.8.0",
      "sgmllib3k==1.0.0",
      "shortuuid>=1.0.13",
-@@ -154,10 +155,10 @@ dependencies = [
+@@ -154,10 +153,10 @@ dependencies = [
      "trio-websocket==0.12.2",
      "types-python-dateutil==2.9.0.20250516",
      "types-requests==2.32.0.20250328",
@@ -137,6 +130,18 @@ index f6a3c992b373cd34b68d7b14fb51dbc3f5095a90..61f68ea5bf44fca2c9081e4da150e640
      "uvicorn==0.34.2",
      "wandb>=0.21.1",
      "wcwidth==0.2.13",
+@@ -176,3 +175,11 @@ dependencies = [
+     "claude-agent-sdk>=0.1.43",
+     "opencode-ai>=0.1.0a36",
+ ]
++
++[dependency-groups]
++agent = ["openai-agents==0.20.0", "beaker-sdk[openai-agents]==0.6.6", "mcp==1.19.0"]
++excel = ["excel-mcp-server==0.1.4", "mcp[cli]==1.9.0"]
++
++[tool.uv]
++default-groups = ["agent"]
++conflicts = [[{group = "agent"}, {group = "excel"}]]
 diff --git a/scripts/run_single_containerized.sh b/scripts/run_single_containerized.sh
 index 53ca57cde4ee4fb389355ceadbf66e166636df27..1aa29c3e84267722a1e92830c8897b01869f4ce2 100755
 --- a/scripts/run_single_containerized.sh
@@ -292,433 +297,6 @@ index 803b759a234e0c703d8e447e3d7e4aeb66ae7540..6d881c9a1f5b06d6735067db09de901b
      setattr(usage, "cached_input_tokens", cached_tokens)
      setattr(usage, "non_cached_input_tokens", non_cached_tokens)
      return usage
-diff --git a/utils/local_servers/excel_runtime/pyproject.toml b/utils/local_servers/excel_runtime/pyproject.toml
-new file mode 100644
-index 0000000000000000000000000000000000000000..e2f66026aaf510139d13279b26097342c83a8bf8
---- /dev/null
-+++ b/utils/local_servers/excel_runtime/pyproject.toml
-@@ -0,0 +1,10 @@
-+[project]
-+name = "toolathlon-excel-server"
-+version = "0.1.0"
-+requires-python = "==3.12.11"
-+dependencies = [
-+    "excel-mcp-server==0.1.4",
-+    "mcp[cli]==1.9.0",
-+    "pydantic==2.11.3",
-+    "openpyxl==3.1.5",
-+]
-diff --git a/utils/local_servers/excel_runtime/uv.lock b/utils/local_servers/excel_runtime/uv.lock
-new file mode 100644
-index 0000000000000000000000000000000000000000..84c8659e55bad5bc326e8aae9dd9d191c4ec71ca
---- /dev/null
-+++ b/utils/local_servers/excel_runtime/uv.lock
-@@ -0,0 +1,405 @@
-+version = 1
-+revision = 3
-+requires-python = "==3.12.11"
-+resolution-markers = [
-+    "platform_machine == 'aarch64' and sys_platform == 'linux'",
-+    "platform_machine != 'aarch64' and sys_platform == 'linux'",
-+    "sys_platform == 'darwin'",
-+    "sys_platform != 'darwin' and sys_platform != 'linux'",
-+]
-+
-+[[package]]
-+name = "annotated-types"
-+version = "0.7.0"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/ee/67/531ea369ba64dcff5ec9c3402f9f51bf748cec26dde048a2f973a4eea7f5/annotated_types-0.7.0.tar.gz", hash = "sha256:aff07c09a53a08bc8cfccb9c85b05f1aa9a2a6f23728d790723543408344ce89", size = 16081, upload-time = "2024-05-20T21:33:25.928Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/78/b6/6307fbef88d9b5ee7421e68d78a9f162e0da4900bc5f5793f6d3d0e34fb8/annotated_types-0.7.0-py3-none-any.whl", hash = "sha256:1f02e8b43a8fbbc3f3e0d4f0f4bfc8131bcb4eebe8849b8e5c773f3a1c582a53", size = 13643, upload-time = "2024-05-20T21:33:24.1Z" },
-+]
-+
-+[[package]]
-+name = "anyio"
-+version = "4.9.0"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "idna" },
-+    { name = "sniffio" },
-+    { name = "typing-extensions" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/95/7d/4c1bd541d4dffa1b52bd83fb8527089e097a106fc90b467a7313b105f840/anyio-4.9.0.tar.gz", hash = "sha256:673c0c244e15788651a4ff38710fea9675823028a6f08a5eda409e0c9840a028", size = 190949, upload-time = "2025-03-17T00:02:54.77Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/a1/ee/48ca1a7c89ffec8b6a0c5d02b89c305671d5ffd8d3c94acf8b8c408575bb/anyio-4.9.0-py3-none-any.whl", hash = "sha256:9f76d541cad6e36af7beb62e978876f3b41e3e04f2c1fbf0884604c0a9c4d93c", size = 100916, upload-time = "2025-03-17T00:02:52.713Z" },
-+]
-+
-+[[package]]
-+name = "certifi"
-+version = "2025.4.26"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/e8/9e/c05b3920a3b7d20d3d3310465f50348e5b3694f4f88c6daf736eef3024c4/certifi-2025.4.26.tar.gz", hash = "sha256:0a816057ea3cdefcef70270d2c515e4506bbc954f417fa5ade2021213bb8f0c6", size = 160705, upload-time = "2025-04-26T02:12:29.51Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/4a/7e/3db2bd1b1f9e95f7cddca6d6e75e2f2bd9f51b1246e546d88addca0106bd/certifi-2025.4.26-py3-none-any.whl", hash = "sha256:30350364dfe371162649852c63336a15c70c6510c2ad5015b21c2345311805f3", size = 159618, upload-time = "2025-04-26T02:12:27.662Z" },
-+]
-+
-+[[package]]
-+name = "click"
-+version = "8.1.8"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "colorama", marker = "sys_platform == 'win32'" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/b9/2e/0090cbf739cee7d23781ad4b89a9894a41538e4fcf4c31dcdd705b78eb8b/click-8.1.8.tar.gz", hash = "sha256:ed53c9d8990d83c2a27deae68e4ee337473f6330c040a31d4225c9574d16096a", size = 226593, upload-time = "2024-12-21T18:38:44.339Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/7e/d4/7ebdbd03970677812aac39c869717059dbb71a4cfc033ca6e5221787892c/click-8.1.8-py3-none-any.whl", hash = "sha256:63c132bbbed01578a06712a2d1f497bb62d9c1c0d329b7903a866228027263b2", size = 98188, upload-time = "2024-12-21T18:38:41.666Z" },
-+]
-+
-+[[package]]
-+name = "colorama"
-+version = "0.4.6"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44", size = 27697, upload-time = "2022-10-25T02:36:22.414Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
-+]
-+
-+[[package]]
-+name = "et-xmlfile"
-+version = "2.0.0"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/d3/38/af70d7ab1ae9d4da450eeec1fa3918940a5fafb9055e934af8d6eb0c2313/et_xmlfile-2.0.0.tar.gz", hash = "sha256:dab3f4764309081ce75662649be815c4c9081e88f0837825f90fd28317d4da54", size = 17234, upload-time = "2024-10-25T17:25:40.039Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl", hash = "sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa", size = 18059, upload-time = "2024-10-25T17:25:39.051Z" },
-+]
-+
-+[[package]]
-+name = "excel-mcp-server"
-+version = "0.1.4"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "mcp", extra = ["cli"] },
-+    { name = "openpyxl" },
-+    { name = "typer" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/e4/da/e16b54c7ff1898f3814d24949037e10d22d9825e8a080f5c910907b4de95/excel_mcp_server-0.1.4.tar.gz", hash = "sha256:8abbc91bcfb0ec32c53cdcc424e4afc80b3574f6ffdc231182766b0b8a57fba7", size = 22037, upload-time = "2025-06-10T18:19:48.38Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/3c/ce/8c604ea8653de138a935bd2ab4dc32bd1cfb643af7f280b9a63eb6c37cb1/excel_mcp_server-0.1.4-py3-none-any.whl", hash = "sha256:68b8ce1b7c2318fb699911488815bb351835c436fcb33fc295fb31f944dc35c4", size = 29428, upload-time = "2025-06-10T18:19:46.881Z" },
-+]
-+
-+[[package]]
-+name = "h11"
-+version = "0.16.0"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/01/ee/02a2c011bdab74c6fb3c75474d40b3052059d95df7e73351460c8588d963/h11-0.16.0.tar.gz", hash = "sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1", size = 101250, upload-time = "2025-04-24T03:35:25.427Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl", hash = "sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86", size = 37515, upload-time = "2025-04-24T03:35:24.344Z" },
-+]
-+
-+[[package]]
-+name = "httpcore"
-+version = "1.0.9"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "certifi" },
-+    { name = "h11" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/06/94/82699a10bca87a5556c9c59b5963f2d039dbd239f25bc2a63907a05a14cb/httpcore-1.0.9.tar.gz", hash = "sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8", size = 85484, upload-time = "2025-04-24T22:06:22.219Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl", hash = "sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55", size = 78784, upload-time = "2025-04-24T22:06:20.566Z" },
-+]
-+
-+[[package]]
-+name = "httpx"
-+version = "0.27.0"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "anyio" },
-+    { name = "certifi" },
-+    { name = "httpcore" },
-+    { name = "idna" },
-+    { name = "sniffio" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/5c/2d/3da5bdf4408b8b2800061c339f240c1802f2e82d55e50bd39c5a881f47f0/httpx-0.27.0.tar.gz", hash = "sha256:a0cb88a46f32dc874e04ee956e4c2764aba2aa228f650b06788ba6bda2962ab5", size = 126413, upload-time = "2024-02-21T13:07:52.434Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/41/7b/ddacf6dcebb42466abd03f368782142baa82e08fc0c1f8eaa05b4bae87d5/httpx-0.27.0-py3-none-any.whl", hash = "sha256:71d5465162c13681bff01ad59b2cc68dd838ea1f10e51574bac27103f00c91a5", size = 75590, upload-time = "2024-02-21T13:07:50.455Z" },
-+]
-+
-+[[package]]
-+name = "httpx-sse"
-+version = "0.4.0"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/4c/60/8f4281fa9bbf3c8034fd54c0e7412e66edbab6bc74c4996bd616f8d0406e/httpx-sse-0.4.0.tar.gz", hash = "sha256:1e81a3a3070ce322add1d3529ed42eb5f70817f45ed6ec915ab753f961139721", size = 12624, upload-time = "2023-12-22T08:01:21.083Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/e1/9b/a181f281f65d776426002f330c31849b86b31fc9d848db62e16f03ff739f/httpx_sse-0.4.0-py3-none-any.whl", hash = "sha256:f329af6eae57eaa2bdfd962b42524764af68075ea87370a2de920af5341e318f", size = 7819, upload-time = "2023-12-22T08:01:19.89Z" },
-+]
-+
-+[[package]]
-+name = "idna"
-+version = "3.10"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/f1/70/7703c29685631f5a7590aa73f1f1d3fa9a380e654b86af429e0934a32f7d/idna-3.10.tar.gz", hash = "sha256:12f65c9b470abda6dc35cf8e63cc574b1c52b11df2c86030af0ac09b01b13ea9", size = 190490, upload-time = "2024-09-15T18:07:39.745Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/76/c6/c88e154df9c4e1a2a66ccf0005a88dfb2650c1dffb6f5ce603dfbd452ce3/idna-3.10-py3-none-any.whl", hash = "sha256:946d195a0d259cbba61165e88e65941f16e9b36ea6ddb97f00452bae8b1287d3", size = 70442, upload-time = "2024-09-15T18:07:37.964Z" },
-+]
-+
-+[[package]]
-+name = "markdown-it-py"
-+version = "3.0.0"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "mdurl" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/38/71/3b932df36c1a044d397a1f92d1cf91ee0a503d91e470cbd670aa66b07ed0/markdown-it-py-3.0.0.tar.gz", hash = "sha256:e3f60a94fa066dc52ec76661e37c851cb232d92f9886b15cb560aaada2df8feb", size = 74596, upload-time = "2023-06-03T06:41:14.443Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/42/d7/1ec15b46af6af88f19b8e5ffea08fa375d433c998b8a7639e76935c14f1f/markdown_it_py-3.0.0-py3-none-any.whl", hash = "sha256:355216845c60bd96232cd8d8c40e8f9765cc86f46880e43a8fd22dc1a1a8cab1", size = 87528, upload-time = "2023-06-03T06:41:11.019Z" },
-+]
-+
-+[[package]]
-+name = "mcp"
-+version = "1.9.0"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "anyio" },
-+    { name = "httpx" },
-+    { name = "httpx-sse" },
-+    { name = "pydantic" },
-+    { name = "pydantic-settings" },
-+    { name = "python-multipart" },
-+    { name = "sse-starlette" },
-+    { name = "starlette" },
-+    { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/bc/8d/0f4468582e9e97b0a24604b585c651dfd2144300ecffd1c06a680f5c8861/mcp-1.9.0.tar.gz", hash = "sha256:905d8d208baf7e3e71d70c82803b89112e321581bcd2530f9de0fe4103d28749", size = 281432, upload-time = "2025-05-15T18:51:06.615Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/a5/d5/22e36c95c83c80eb47c83f231095419cf57cf5cca5416f1c960032074c78/mcp-1.9.0-py3-none-any.whl", hash = "sha256:9dfb89c8c56f742da10a5910a1f64b0d2ac2c3ed2bd572ddb1cfab7f35957178", size = 125082, upload-time = "2025-05-15T18:51:04.916Z" },
-+]
-+
-+[package.optional-dependencies]
-+cli = [
-+    { name = "python-dotenv" },
-+    { name = "typer" },
-+]
-+
-+[[package]]
-+name = "mdurl"
-+version = "0.1.2"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
-+]
-+
-+[[package]]
-+name = "openpyxl"
-+version = "3.1.5"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "et-xmlfile" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/3d/f9/88d94a75de065ea32619465d2f77b29a0469500e99012523b91cc4141cd1/openpyxl-3.1.5.tar.gz", hash = "sha256:cf0e3cf56142039133628b5acffe8ef0c12bc902d2aadd3e0fe5878dc08d1050", size = 186464, upload-time = "2024-06-28T14:03:44.161Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl", hash = "sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2", size = 250910, upload-time = "2024-06-28T14:03:41.161Z" },
-+]
-+
-+[[package]]
-+name = "pydantic"
-+version = "2.11.3"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "annotated-types" },
-+    { name = "pydantic-core" },
-+    { name = "typing-extensions" },
-+    { name = "typing-inspection" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/10/2e/ca897f093ee6c5f3b0bee123ee4465c50e75431c3d5b6a3b44a47134e891/pydantic-2.11.3.tar.gz", hash = "sha256:7471657138c16adad9322fe3070c0116dd6c3ad8d649300e3cbdfe91f4db4ec3", size = 785513, upload-time = "2025-04-08T13:27:06.399Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/b0/1d/407b29780a289868ed696d1616f4aad49d6388e5a77f567dcd2629dcd7b8/pydantic-2.11.3-py3-none-any.whl", hash = "sha256:a082753436a07f9ba1289c6ffa01cd93db3548776088aa917cc43b63f68fa60f", size = 443591, upload-time = "2025-04-08T13:27:03.789Z" },
-+]
-+
-+[[package]]
-+name = "pydantic-core"
-+version = "2.33.1"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "typing-extensions" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/17/19/ed6a078a5287aea7922de6841ef4c06157931622c89c2a47940837b5eecd/pydantic_core-2.33.1.tar.gz", hash = "sha256:bcc9c6fdb0ced789245b02b7d6603e17d1563064ddcfc36f046b61c0c05dd9df", size = 434395, upload-time = "2025-04-02T09:49:41.8Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/c8/ce/3cb22b07c29938f97ff5f5bb27521f95e2ebec399b882392deb68d6c440e/pydantic_core-2.33.1-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:1293d7febb995e9d3ec3ea09caf1a26214eec45b0f29f6074abb004723fc1de8", size = 2026640, upload-time = "2025-04-02T09:47:25.394Z" },
-+    { url = "https://files.pythonhosted.org/packages/19/78/f381d643b12378fee782a72126ec5d793081ef03791c28a0fd542a5bee64/pydantic_core-2.33.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:99b56acd433386c8f20be5c4000786d1e7ca0523c8eefc995d14d79c7a081498", size = 1852649, upload-time = "2025-04-02T09:47:27.417Z" },
-+    { url = "https://files.pythonhosted.org/packages/9d/2b/98a37b80b15aac9eb2c6cfc6dbd35e5058a352891c5cce3a8472d77665a6/pydantic_core-2.33.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:35a5ec3fa8c2fe6c53e1b2ccc2454398f95d5393ab398478f53e1afbbeb4d939", size = 1892472, upload-time = "2025-04-02T09:47:29.006Z" },
-+    { url = "https://files.pythonhosted.org/packages/4e/d4/3c59514e0f55a161004792b9ff3039da52448f43f5834f905abef9db6e4a/pydantic_core-2.33.1-cp312-cp312-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:b172f7b9d2f3abc0efd12e3386f7e48b576ef309544ac3a63e5e9cdd2e24585d", size = 1977509, upload-time = "2025-04-02T09:47:33.464Z" },
-+    { url = "https://files.pythonhosted.org/packages/a9/b6/c2c7946ef70576f79a25db59a576bce088bdc5952d1b93c9789b091df716/pydantic_core-2.33.1-cp312-cp312-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:9097b9f17f91eea659b9ec58148c0747ec354a42f7389b9d50701610d86f812e", size = 2128702, upload-time = "2025-04-02T09:47:34.812Z" },
-+    { url = "https://files.pythonhosted.org/packages/88/fe/65a880f81e3f2a974312b61f82a03d85528f89a010ce21ad92f109d94deb/pydantic_core-2.33.1-cp312-cp312-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:cc77ec5b7e2118b152b0d886c7514a4653bcb58c6b1d760134a9fab915f777b3", size = 2679428, upload-time = "2025-04-02T09:47:37.315Z" },
-+    { url = "https://files.pythonhosted.org/packages/6f/ff/4459e4146afd0462fb483bb98aa2436d69c484737feaceba1341615fb0ac/pydantic_core-2.33.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d5e3d15245b08fa4a84cefc6c9222e6f37c98111c8679fbd94aa145f9a0ae23d", size = 2008753, upload-time = "2025-04-02T09:47:39.013Z" },
-+    { url = "https://files.pythonhosted.org/packages/7c/76/1c42e384e8d78452ededac8b583fe2550c84abfef83a0552e0e7478ccbc3/pydantic_core-2.33.1-cp312-cp312-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:ef99779001d7ac2e2461d8ab55d3373fe7315caefdbecd8ced75304ae5a6fc6b", size = 2114849, upload-time = "2025-04-02T09:47:40.427Z" },
-+    { url = "https://files.pythonhosted.org/packages/00/72/7d0cf05095c15f7ffe0eb78914b166d591c0eed72f294da68378da205101/pydantic_core-2.33.1-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:fc6bf8869e193855e8d91d91f6bf59699a5cdfaa47a404e278e776dd7f168b39", size = 2069541, upload-time = "2025-04-02T09:47:42.01Z" },
-+    { url = "https://files.pythonhosted.org/packages/b3/69/94a514066bb7d8be499aa764926937409d2389c09be0b5107a970286ef81/pydantic_core-2.33.1-cp312-cp312-musllinux_1_1_armv7l.whl", hash = "sha256:b1caa0bc2741b043db7823843e1bde8aaa58a55a58fda06083b0569f8b45693a", size = 2239225, upload-time = "2025-04-02T09:47:43.425Z" },
-+    { url = "https://files.pythonhosted.org/packages/84/b0/e390071eadb44b41f4f54c3cef64d8bf5f9612c92686c9299eaa09e267e2/pydantic_core-2.33.1-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:ec259f62538e8bf364903a7d0d0239447059f9434b284f5536e8402b7dd198db", size = 2248373, upload-time = "2025-04-02T09:47:44.979Z" },
-+    { url = "https://files.pythonhosted.org/packages/d6/b2/288b3579ffc07e92af66e2f1a11be3b056fe1214aab314748461f21a31c3/pydantic_core-2.33.1-cp312-cp312-win32.whl", hash = "sha256:e14f369c98a7c15772b9da98987f58e2b509a93235582838bd0d1d8c08b68fda", size = 1907034, upload-time = "2025-04-02T09:47:46.843Z" },
-+    { url = "https://files.pythonhosted.org/packages/02/28/58442ad1c22b5b6742b992ba9518420235adced665513868f99a1c2638a5/pydantic_core-2.33.1-cp312-cp312-win_amd64.whl", hash = "sha256:1c607801d85e2e123357b3893f82c97a42856192997b95b4d8325deb1cd0c5f4", size = 1956848, upload-time = "2025-04-02T09:47:48.404Z" },
-+    { url = "https://files.pythonhosted.org/packages/a1/eb/f54809b51c7e2a1d9f439f158b8dd94359321abcc98767e16fc48ae5a77e/pydantic_core-2.33.1-cp312-cp312-win_arm64.whl", hash = "sha256:8d13f0276806ee722e70a1c93da19748594f19ac4299c7e41237fc791d1861ea", size = 1903986, upload-time = "2025-04-02T09:47:49.839Z" },
-+]
-+
-+[[package]]
-+name = "pydantic-settings"
-+version = "2.9.1"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "pydantic" },
-+    { name = "python-dotenv" },
-+    { name = "typing-inspection" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/67/1d/42628a2c33e93f8e9acbde0d5d735fa0850f3e6a2f8cb1eb6c40b9a732ac/pydantic_settings-2.9.1.tar.gz", hash = "sha256:c509bf79d27563add44e8446233359004ed85066cd096d8b510f715e6ef5d268", size = 163234, upload-time = "2025-04-18T16:44:48.265Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/b6/5f/d6d641b490fd3ec2c4c13b4244d68deea3a1b970a97be64f34fb5504ff72/pydantic_settings-2.9.1-py3-none-any.whl", hash = "sha256:59b4f431b1defb26fe620c71a7d3968a710d719f5f4cdbbdb7926edeb770f6ef", size = 44356, upload-time = "2025-04-18T16:44:46.617Z" },
-+]
-+
-+[[package]]
-+name = "pygments"
-+version = "2.19.1"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/7c/2d/c3338d48ea6cc0feb8446d8e6937e1408088a72a39937982cc6111d17f84/pygments-2.19.1.tar.gz", hash = "sha256:61c16d2a8576dc0649d9f39e089b5f02bcd27fba10d8fb4dcc28173f7a45151f", size = 4968581, upload-time = "2025-01-06T17:26:30.443Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/8a/0b/9fcc47d19c48b59121088dd6da2488a49d5f72dacf8262e2790a1d2c7d15/pygments-2.19.1-py3-none-any.whl", hash = "sha256:9ea1544ad55cecf4b8242fab6dd35a93bbce657034b0611ee383099054ab6d8c", size = 1225293, upload-time = "2025-01-06T17:26:25.553Z" },
-+]
-+
-+[[package]]
-+name = "python-dotenv"
-+version = "1.1.0"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/88/2c/7bb1416c5620485aa793f2de31d3df393d3686aa8a8506d11e10e13c5baf/python_dotenv-1.1.0.tar.gz", hash = "sha256:41f90bc6f5f177fb41f53e87666db362025010eb28f60a01c9143bfa33a2b2d5", size = 39920, upload-time = "2025-03-25T10:14:56.835Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/1e/18/98a99ad95133c6a6e2005fe89faedf294a748bd5dc803008059409ac9b1e/python_dotenv-1.1.0-py3-none-any.whl", hash = "sha256:d7c01d9e2293916c18baf562d95698754b0dbbb5e74d457c45d4f6561fb9d55d", size = 20256, upload-time = "2025-03-25T10:14:55.034Z" },
-+]
-+
-+[[package]]
-+name = "python-multipart"
-+version = "0.0.20"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/f3/87/f44d7c9f274c7ee665a29b885ec97089ec5dc034c7f3fafa03da9e39a09e/python_multipart-0.0.20.tar.gz", hash = "sha256:8dd0cab45b8e23064ae09147625994d090fa46f5b0d1e13af944c331a7fa9d13", size = 37158, upload-time = "2024-12-16T19:45:46.972Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/45/58/38b5afbc1a800eeea951b9285d3912613f2603bdf897a4ab0f4bd7f405fc/python_multipart-0.0.20-py3-none-any.whl", hash = "sha256:8a62d3a8335e06589fe01f2a3e178cdcc632f3fbe0d492ad9ee0ec35aab1f104", size = 24546, upload-time = "2024-12-16T19:45:44.423Z" },
-+]
-+
-+[[package]]
-+name = "rich"
-+version = "14.0.0"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "markdown-it-py" },
-+    { name = "pygments" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/a1/53/830aa4c3066a8ab0ae9a9955976fb770fe9c6102117c8ec4ab3ea62d89e8/rich-14.0.0.tar.gz", hash = "sha256:82f1bc23a6a21ebca4ae0c45af9bdbc492ed20231dcb63f297d6d1021a9d5725", size = 224078, upload-time = "2025-03-30T14:15:14.23Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/0d/9b/63f4c7ebc259242c89b3acafdb37b41d1185c07ff0011164674e9076b491/rich-14.0.0-py3-none-any.whl", hash = "sha256:1c9491e1951aac09caffd42f448ee3d04e58923ffe14993f6e83068dc395d7e0", size = 243229, upload-time = "2025-03-30T14:15:12.283Z" },
-+]
-+
-+[[package]]
-+name = "shellingham"
-+version = "1.5.4"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/58/15/8b3609fd3830ef7b27b655beb4b4e9c62313a4e8da8c676e142cc210d58e/shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de", size = 10310, upload-time = "2023-10-24T04:13:40.426Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686", size = 9755, upload-time = "2023-10-24T04:13:38.866Z" },
-+]
-+
-+[[package]]
-+name = "sniffio"
-+version = "1.3.1"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
-+]
-+
-+[[package]]
-+name = "sse-starlette"
-+version = "2.3.4"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "anyio" },
-+    { name = "starlette" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/43/be/7e776a29b5f712b5bd13c571256a2470fcf345c562c7b2359f2ee15d9355/sse_starlette-2.3.4.tar.gz", hash = "sha256:0ffd6bed217cdbb74a84816437c609278003998b4991cd2e6872d0b35130e4d5", size = 17522, upload-time = "2025-05-04T19:28:51.44Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/43/a4/ee4a20f0b5ff34c391f3685eff7cdba1178a487766e31b04efb51bbddd87/sse_starlette-2.3.4-py3-none-any.whl", hash = "sha256:b8100694f3f892b133d0f7483acb7aacfcf6ed60f863b31947664b6dc74e529f", size = 10232, upload-time = "2025-05-04T19:28:50.199Z" },
-+]
-+
-+[[package]]
-+name = "starlette"
-+version = "0.46.2"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "anyio" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/ce/20/08dfcd9c983f6a6f4a1000d934b9e6d626cff8d2eeb77a89a68eef20a2b7/starlette-0.46.2.tar.gz", hash = "sha256:7f7361f34eed179294600af672f565727419830b54b7b084efe44bb82d2fccd5", size = 2580846, upload-time = "2025-04-13T13:56:17.942Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/8b/0c/9d30a4ebeb6db2b25a841afbb80f6ef9a854fc3b41be131d249a977b4959/starlette-0.46.2-py3-none-any.whl", hash = "sha256:595633ce89f8ffa71a015caed34a5b2dc1c0cdb3f0f1fbd1e69339cf2abeec35", size = 72037, upload-time = "2025-04-13T13:56:16.21Z" },
-+]
-+
-+[[package]]
-+name = "toolathlon-excel-server"
-+version = "0.1.0"
-+source = { virtual = "." }
-+dependencies = [
-+    { name = "excel-mcp-server" },
-+    { name = "mcp", extra = ["cli"] },
-+    { name = "openpyxl" },
-+    { name = "pydantic" },
-+]
-+
-+[package.metadata]
-+requires-dist = [
-+    { name = "excel-mcp-server", specifier = "==0.1.4" },
-+    { name = "mcp", extras = ["cli"], specifier = "==1.9.0" },
-+    { name = "openpyxl", specifier = "==3.1.5" },
-+    { name = "pydantic", specifier = "==2.11.3" },
-+]
-+
-+[[package]]
-+name = "typer"
-+version = "0.16.0"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "click" },
-+    { name = "rich" },
-+    { name = "shellingham" },
-+    { name = "typing-extensions" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/c5/8c/7d682431efca5fd290017663ea4588bf6f2c6aad085c7f108c5dbc316e70/typer-0.16.0.tar.gz", hash = "sha256:af377ffaee1dbe37ae9440cb4e8f11686ea5ce4e9bae01b84ae7c63b87f1dd3b", size = 102625, upload-time = "2025-05-26T14:30:31.824Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/76/42/3efaf858001d2c2913de7f354563e3a3a2f0decae3efe98427125a8f441e/typer-0.16.0-py3-none-any.whl", hash = "sha256:1f79bed11d4d02d4310e3c1b7ba594183bcedb0ac73b27a9e5f28f6fb5b98855", size = 46317, upload-time = "2025-05-26T14:30:30.523Z" },
-+]
-+
-+[[package]]
-+name = "typing-extensions"
-+version = "4.13.2"
-+source = { registry = "https://pypi.org/simple" }
-+sdist = { url = "https://files.pythonhosted.org/packages/f6/37/23083fcd6e35492953e8d2aaaa68b860eb422b34627b13f2ce3eb6106061/typing_extensions-4.13.2.tar.gz", hash = "sha256:e6c81219bd689f51865d9e372991c540bda33a0379d5573cddb9a3a23f7caaef", size = 106967, upload-time = "2025-04-10T14:19:05.416Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/8b/54/b1ae86c0973cc6f0210b53d508ca3641fb6d0c56823f288d108bc7ab3cc8/typing_extensions-4.13.2-py3-none-any.whl", hash = "sha256:a439e7c04b49fec3e5d3e2beaa21755cadbbdc391694e28ccdd36ca4a1408f8c", size = 45806, upload-time = "2025-04-10T14:19:03.967Z" },
-+]
-+
-+[[package]]
-+name = "typing-inspection"
-+version = "0.4.0"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "typing-extensions" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/82/5c/e6082df02e215b846b4b8c0b887a64d7d08ffaba30605502639d44c06b82/typing_inspection-0.4.0.tar.gz", hash = "sha256:9765c87de36671694a67904bf2c96e395be9c6439bb6c87b5142569dcdd65122", size = 76222, upload-time = "2025-02-25T17:27:59.638Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/31/08/aa4fdfb71f7de5176385bd9e90852eaf6b5d622735020ad600f2bab54385/typing_inspection-0.4.0-py3-none-any.whl", hash = "sha256:50e72559fcd2a6367a19f7a7e610e6afcb9fac940c650290eed893d61386832f", size = 14125, upload-time = "2025-02-25T17:27:57.754Z" },
-+]
-+
-+[[package]]
-+name = "uvicorn"
-+version = "0.34.2"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
-+    { name = "click" },
-+    { name = "h11" },
-+]
-+sdist = { url = "https://files.pythonhosted.org/packages/a6/ae/9bbb19b9e1c450cf9ecaef06463e40234d98d95bf572fab11b4f19ae5ded/uvicorn-0.34.2.tar.gz", hash = "sha256:0e929828f6186353a80b58ea719861d2629d766293b6d19baf086ba31d4f3328", size = 76815, upload-time = "2025-04-19T06:02:50.101Z" }
-+wheels = [
-+    { url = "https://files.pythonhosted.org/packages/b1/4b/4cef6ce21a2aaca9d852a6e84ef4f135d99fcd74fa75105e2fc0c8308acd/uvicorn-0.34.2-py3-none-any.whl", hash = "sha256:deb49af569084536d269fe0a6d67e3754f104cf03aba7c11c40f01aadf33c403", size = 62483, upload-time = "2025-04-19T06:02:48.42Z" },
-+]
 diff --git a/utils/mcp/tool_servers.py b/utils/mcp/tool_servers.py
 index adbd2219d3c3a8aa02290f63c9a589f3ae7e15fb..9ff847cc458281bdaccb5ab03bfeaa42a5c46bc7 100644
 --- a/utils/mcp/tool_servers.py
@@ -1441,10 +1019,40 @@ index d69f92203b776bb16965afc5ce0094879c8298dc..06dc9d7131496a8bb8c451a9c257d780
                              max_turns=remaining_steps,
                              history_dir=self.history_dir,
 diff --git a/uv.lock b/uv.lock
-index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de8f64308e 100644
+index 7fa3877c66074fdf9be5120a9431f580d5edc716..4e83736288eb91a1b481021147655408d47a1719 100644
 --- a/uv.lock
 +++ b/uv.lock
-@@ -236,6 +236,30 @@ wheels = [
+@@ -7,6 +7,10 @@ resolution-markers = [
+     "sys_platform == 'darwin'",
+     "sys_platform != 'darwin' and sys_platform != 'linux'",
+ ]
++conflicts = [[
++    { package = "mcpbench-dev", group = "agent" },
++    { package = "mcpbench-dev", group = "excel" },
++]]
+ 
+ [[package]]
+ name = "addict"
+@@ -139,7 +143,7 @@ name = "appscript"
+ version = "1.3.0"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "lxml", marker = "sys_platform == 'darwin'" },
++    { name = "lxml", marker = "sys_platform == 'darwin' or (extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel')" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/a3/84/5c0aec149c6a002d46af17e3d2c5efbe5e8258ef7574cfc17cd1b26c726e/appscript-1.3.0.tar.gz", hash = "sha256:80943118bc97f9f78a8aa55f85565752ed4d82c7893427d7d9ebfdf401c12b2c", size = 295205, upload-time = "2024-10-13T12:34:00.57Z" }
+ wheels = [
+@@ -183,7 +187,8 @@ dependencies = [
+     { name = "anyio" },
+     { name = "arxiv" },
+     { name = "httpx" },
+-    { name = "mcp" },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+     { name = "pydantic" },
+     { name = "pydantic-settings" },
+     { name = "pymupdf4llm" },
+@@ -236,6 +241,30 @@ wheels = [
      { url = "https://files.pythonhosted.org/packages/b7/b8/3fe70c75fe32afc4bb507f75563d39bc5642255d1d94f1f23604725780bf/babel-2.17.0-py3-none-any.whl", hash = "sha256:4d0b53093fdfb4b21c92b5213dba5a1b23885afa8383709427046b21c366e5f2", size = 10182537, upload-time = "2025-02-01T15:17:37.39Z" },
  ]
  
@@ -1475,7 +1083,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  [[package]]
  name = "beautifulsoup4"
  version = "4.13.4"
-@@ -311,11 +335,11 @@ wheels = [
+@@ -311,11 +340,11 @@ wheels = [
  
  [[package]]
  name = "certifi"
@@ -1490,7 +1098,65 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  ]
  
  [[package]]
-@@ -785,6 +809,17 @@ wheels = [
+@@ -368,7 +397,8 @@ version = "0.1.43"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "anyio" },
+-    { name = "mcp" },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/a2/02/129412a3751f6719799d484f6029794d497bc2c22ca8998c7a2f2a47cc0e/claude_agent_sdk-0.1.43.tar.gz", hash = "sha256:611bbb8bf923455bba5e8bd1cc00f3ea382b6673fa62e73f88bdb7ef0def9222", size = 62440, upload-time = "2026-02-25T06:48:52.981Z" }
+ wheels = [
+@@ -383,7 +413,8 @@ name = "cli-mcp-server"
+ version = "0.2.4"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "mcp" },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/d0/a0/779c58396af0e7863b781a98dd9cec91aebc1d13691a18021812414600d6/cli_mcp_server-0.2.4.tar.gz", hash = "sha256:928d46985b74a9c5f3745378cabe88f0642e7eeadccdea87a4949e05f25c47fc", size = 23742, upload-time = "2025-04-21T21:28:11.75Z" }
+ wheels = [
+@@ -395,7 +426,7 @@ name = "click"
+ version = "8.1.8"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "colorama", marker = "sys_platform == 'win32'" },
++    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel')" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/b9/2e/0090cbf739cee7d23781ad4b89a9894a41538e4fcf4c31dcdd705b78eb8b/click-8.1.8.tar.gz", hash = "sha256:ed53c9d8990d83c2a27deae68e4ee337473f6330c040a31d4225c9574d16096a", size = 226593, upload-time = "2024-12-21T18:38:44.339Z" }
+ wheels = [
+@@ -446,7 +477,7 @@ name = "cryptography"
+ version = "45.0.4"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "cffi", marker = "platform_python_implementation != 'PyPy'" },
++    { name = "cffi", marker = "platform_python_implementation != 'PyPy' or (extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel')" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/fe/c8/a2a376a8711c1e11708b9c9972e0c3223f5fc682552c82d8db844393d6ce/cryptography-45.0.4.tar.gz", hash = "sha256:7405ade85c83c37682c8fe65554759800a4a8c54b2d96e0f8ad114d31b808d57", size = 744890, upload-time = "2025-06-10T00:03:51.297Z" }
+ wheels = [
+@@ -573,8 +604,8 @@ name = "docx2pdf"
+ version = "0.1.8"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "appscript", marker = "sys_platform == 'darwin'" },
+-    { name = "pywin32", marker = "sys_platform == 'win32'" },
++    { name = "appscript", marker = "sys_platform == 'darwin' or (extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel')" },
++    { name = "pywin32", marker = "sys_platform == 'win32' or (extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel')" },
+     { name = "tqdm" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/ab/5d/112531fff53cf60513e14fa1707755c874d47880ec4de7b2235302ad19a0/docx2pdf-0.1.8.tar.gz", hash = "sha256:6d2c20f9ad36eec75f4da017dc7a97622946954a6124ca0b11772875fa86fbed", size = 6483, upload-time = "2021-12-11T16:56:36.75Z" }
+@@ -605,7 +636,7 @@ name = "excel-mcp-server"
+ version = "0.1.4"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "mcp", extra = ["cli"] },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, extra = ["cli"], marker = "extra == 'group-12-mcpbench-dev-excel'" },
+     { name = "openpyxl" },
+     { name = "typer" },
+ ]
+@@ -785,6 +816,17 @@ wheels = [
      { url = "https://files.pythonhosted.org/packages/54/70/e07c381e6488a77094f04c85c9caf1c8008cdc30778f7019bc52e5285ef0/gdown-5.2.0-py3-none-any.whl", hash = "sha256:33083832d82b1101bdd0e9df3edd0fbc0e1c5f14c9d8c38d2a35bf1683b526d6", size = 18235, upload-time = "2024-05-12T06:45:10.017Z" },
  ]
  
@@ -1508,7 +1174,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  [[package]]
  name = "gitdb"
  version = "4.0.12"
-@@ -1072,6 +1107,15 @@ wheels = [
+@@ -1072,6 +1114,15 @@ wheels = [
      { url = "https://files.pythonhosted.org/packages/58/c6/5c20af38c2a57c15d87f7f38bee77d63c1d2a3689f74fefaf35915dd12b2/griffe-1.7.3-py3-none-any.whl", hash = "sha256:c6b3ee30c2f0f17f30bcdef5068d6ab7a2a4f1b8bf1a3e74b56fffd21e1c5f75", size = 129303, upload-time = "2025-04-23T11:29:07.145Z" },
  ]
  
@@ -1524,7 +1190,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  [[package]]
  name = "grpc-google-iam-v1"
  version = "0.14.2"
-@@ -1195,7 +1239,7 @@ wheels = [
+@@ -1195,7 +1246,7 @@ wheels = [
  
  [[package]]
  name = "httpx"
@@ -1533,7 +1199,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  source = { registry = "https://pypi.org/simple" }
  dependencies = [
      { name = "anyio" },
-@@ -1204,9 +1248,9 @@ dependencies = [
+@@ -1204,9 +1255,9 @@ dependencies = [
      { name = "idna" },
      { name = "sniffio" },
  ]
@@ -1545,7 +1211,16 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  ]
  
  [[package]]
-@@ -1264,18 +1308,6 @@ wheels = [
+@@ -1225,7 +1276,7 @@ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "filelock" },
+     { name = "fsspec" },
+-    { name = "hf-xet", marker = "platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'" },
++    { name = "hf-xet", marker = "platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64' or (extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel')" },
+     { name = "packaging" },
+     { name = "pyyaml" },
+     { name = "requests" },
+@@ -1264,18 +1315,6 @@ wheels = [
      { url = "https://files.pythonhosted.org/packages/de/8a/d1364c1c6d8f53ea390e8f1c6da220a4f9ee478ac8a473ae0669a2fb6f51/IMAPClient-3.0.1-py2.py3-none-any.whl", hash = "sha256:d77d77caa4123e0233b5cf2b9c54a078522e63270b88d3f48653a28637fd8828", size = 182490, upload-time = "2023-12-02T08:24:11.854Z" },
  ]
  
@@ -1564,7 +1239,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  [[package]]
  name = "jinja2"
  version = "3.1.6"
-@@ -1290,22 +1322,28 @@ wheels = [
+@@ -1290,22 +1329,28 @@ wheels = [
  
  [[package]]
  name = "jiter"
@@ -1609,7 +1284,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  ]
  
  [[package]]
-@@ -1329,6 +1367,33 @@ wheels = [
+@@ -1329,6 +1374,33 @@ wheels = [
      { url = "https://files.pythonhosted.org/packages/f8/62/d9ba6323b9202dd2fe166beab8a86d29465c41a0288cbe229fac60c1ab8d/jsonlines-4.0.0-py3-none-any.whl", hash = "sha256:185b334ff2ca5a91362993f42e83588a360cf95ce4b71a73548502bda52a7c55", size = 8701, upload-time = "2023-09-01T12:34:42.563Z" },
  ]
  
@@ -1618,10 +1293,10 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
 +version = "4.26.0"
 +source = { registry = "https://pypi.org/simple" }
 +dependencies = [
-+    { name = "attrs" },
-+    { name = "jsonschema-specifications" },
-+    { name = "referencing" },
-+    { name = "rpds-py" },
++    { name = "attrs", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "jsonschema-specifications", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "referencing", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "rpds-py", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
 +]
 +sdist = { url = "https://files.pythonhosted.org/packages/b3/fc/e067678238fa451312d4c62bf6e6cf5ec56375422aee02f9cb5f909b3047/jsonschema-4.26.0.tar.gz", hash = "sha256:0c26707e2efad8aa1bfc5b7ce170f3fccc2e4918ff85989ba9ffa9facb2be326", size = 366583, upload-time = "2026-01-07T13:41:07.246Z" }
 +wheels = [
@@ -1633,7 +1308,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
 +version = "2025.9.1"
 +source = { registry = "https://pypi.org/simple" }
 +dependencies = [
-+    { name = "referencing" },
++    { name = "referencing", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
 +]
 +sdist = { url = "https://files.pythonhosted.org/packages/19/74/a633ee74eb36c44aa6d1095e7cc5569bebf04342ee146178e2d36600708b/jsonschema_specifications-2025.9.1.tar.gz", hash = "sha256:b540987f239e745613c7a9176f3edb72b832a4ac465cf02712288397832b5e8d", size = 32855, upload-time = "2025-09-08T01:34:59.186Z" }
 +wheels = [
@@ -1643,47 +1318,190 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  [[package]]
  name = "kiwisolver"
  version = "1.4.8"
-@@ -1495,22 +1560,24 @@ wheels = [
- 
- [[package]]
+@@ -1497,16 +1569,22 @@ wheels = [
  name = "mcp"
--version = "1.9.0"
-+version = "1.19.0"
+ version = "1.9.0"
  source = { registry = "https://pypi.org/simple" }
++resolution-markers = [
++    "platform_machine == 'aarch64' and sys_platform == 'linux'",
++    "platform_machine != 'aarch64' and sys_platform == 'linux'",
++    "sys_platform == 'darwin'",
++    "sys_platform != 'darwin' and sys_platform != 'linux'",
++]
  dependencies = [
-     { name = "anyio" },
-     { name = "httpx" },
-     { name = "httpx-sse" },
-+    { name = "jsonschema" },
-     { name = "pydantic" },
-     { name = "pydantic-settings" },
-     { name = "python-multipart" },
-+    { name = "pywin32", marker = "sys_platform == 'win32'" },
-     { name = "sse-starlette" },
-     { name = "starlette" },
-     { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
+-    { name = "anyio" },
+-    { name = "httpx" },
+-    { name = "httpx-sse" },
+-    { name = "pydantic" },
+-    { name = "pydantic-settings" },
+-    { name = "python-multipart" },
+-    { name = "sse-starlette" },
+-    { name = "starlette" },
+-    { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
++    { name = "anyio", marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "httpx", marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "httpx-sse", marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "pydantic", marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "pydantic-settings", marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "python-multipart", marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "sse-starlette", marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "starlette", marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "uvicorn", marker = "(sys_platform != 'emscripten' and extra == 'group-12-mcpbench-dev-excel') or (extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel')" },
  ]
--sdist = { url = "https://files.pythonhosted.org/packages/bc/8d/0f4468582e9e97b0a24604b585c651dfd2144300ecffd1c06a680f5c8861/mcp-1.9.0.tar.gz", hash = "sha256:905d8d208baf7e3e71d70c82803b89112e321581bcd2530f9de0fe4103d28749", size = 281432, upload-time = "2025-05-15T18:51:06.615Z" }
-+sdist = { url = "https://files.pythonhosted.org/packages/69/2b/916852a5668f45d8787378461eaa1244876d77575ffef024483c94c0649c/mcp-1.19.0.tar.gz", hash = "sha256:213de0d3cd63f71bc08ffe9cc8d4409cc87acffd383f6195d2ce0457c021b5c1", size = 444163, upload-time = "2025-10-24T01:11:15.839Z" }
+ sdist = { url = "https://files.pythonhosted.org/packages/bc/8d/0f4468582e9e97b0a24604b585c651dfd2144300ecffd1c06a680f5c8861/mcp-1.9.0.tar.gz", hash = "sha256:905d8d208baf7e3e71d70c82803b89112e321581bcd2530f9de0fe4103d28749", size = 281432, upload-time = "2025-05-15T18:51:06.615Z" }
  wheels = [
--    { url = "https://files.pythonhosted.org/packages/a5/d5/22e36c95c83c80eb47c83f231095419cf57cf5cca5416f1c960032074c78/mcp-1.9.0-py3-none-any.whl", hash = "sha256:9dfb89c8c56f742da10a5910a1f64b0d2ac2c3ed2bd572ddb1cfab7f35957178", size = 125082, upload-time = "2025-05-15T18:51:04.916Z" },
-+    { url = "https://files.pythonhosted.org/packages/ce/a3/3e71a875a08b6a830b88c40bc413bff01f1650f1efe8a054b5e90a9d4f56/mcp-1.19.0-py3-none-any.whl", hash = "sha256:f5907fe1c0167255f916718f376d05f09a830a215327a3ccdd5ec8a519f2e572", size = 170105, upload-time = "2025-10-24T01:11:14.151Z" },
- ]
+@@ -1515,8 +1593,42 @@ wheels = [
  
  [package.optional-dependencies]
-@@ -1631,6 +1698,7 @@ dependencies = [
-     { name = "attrdict" },
-     { name = "attrs" },
-     { name = "babel" },
-+    { name = "beaker-sdk", extra = ["openai-agents"] },
-     { name = "beautifulsoup4" },
-     { name = "bibtexparser" },
-     { name = "canvasapi" },
-@@ -1805,10 +1873,11 @@ requires-dist = [
-     { name = "attrdict", specifier = "==2.0.1" },
-     { name = "attrs", specifier = "==25.3.0" },
-     { name = "babel", specifier = "==2.17.0" },
-+    { name = "beaker-sdk", extras = ["openai-agents"], specifier = "==0.6.6" },
+ cli = [
+-    { name = "python-dotenv" },
+-    { name = "typer" },
++    { name = "python-dotenv", marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "typer", marker = "extra == 'group-12-mcpbench-dev-excel'" },
++]
++
++[[package]]
++name = "mcp"
++version = "1.19.0"
++source = { registry = "https://pypi.org/simple" }
++resolution-markers = [
++    "platform_machine == 'aarch64' and sys_platform == 'linux'",
++    "platform_machine != 'aarch64' and sys_platform == 'linux'",
++    "sys_platform == 'darwin'",
++    "sys_platform != 'darwin' and sys_platform != 'linux'",
++]
++dependencies = [
++    { name = "anyio", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "httpx", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "httpx-sse", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "jsonschema", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "pydantic", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "pydantic-settings", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "python-multipart", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "pywin32", marker = "(sys_platform == 'win32' and extra == 'group-12-mcpbench-dev-agent') or (sys_platform == 'win32' and extra != 'group-12-mcpbench-dev-excel') or (extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel')" },
++    { name = "sse-starlette", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "starlette", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "uvicorn", marker = "(sys_platform != 'emscripten' and extra == 'group-12-mcpbench-dev-agent') or (sys_platform != 'emscripten' and extra != 'group-12-mcpbench-dev-excel') or (extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel')" },
++]
++sdist = { url = "https://files.pythonhosted.org/packages/69/2b/916852a5668f45d8787378461eaa1244876d77575ffef024483c94c0649c/mcp-1.19.0.tar.gz", hash = "sha256:213de0d3cd63f71bc08ffe9cc8d4409cc87acffd383f6195d2ce0457c021b5c1", size = 444163, upload-time = "2025-10-24T01:11:15.839Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/ce/a3/3e71a875a08b6a830b88c40bc413bff01f1650f1efe8a054b5e90a9d4f56/mcp-1.19.0-py3-none-any.whl", hash = "sha256:f5907fe1c0167255f916718f376d05f09a830a215327a3ccdd5ec8a519f2e572", size = 170105, upload-time = "2025-10-24T01:11:14.151Z" },
++]
++
++[package.optional-dependencies]
++cli = [
++    { name = "python-dotenv", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "typer", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+ ]
+ 
+ [[package]]
+@@ -1525,7 +1637,8 @@ version = "0.1.2"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "httpx" },
+-    { name = "mcp", extra = ["cli"] },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, extra = ["cli"], marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, extra = ["cli"], marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+     { name = "numpy" },
+     { name = "opencv-python" },
+     { name = "pillow" },
+@@ -1543,7 +1656,8 @@ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "arxiv" },
+     { name = "free-proxy" },
+-    { name = "mcp" },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+     { name = "scholarly" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/b9/f4/42122d0a6872007b4e3a0391af6f32aa3c299bdaaa57c7dcf8c3addb8438/mcp_scholarly-0.1.0.tar.gz", hash = "sha256:cf7a65988e5a8d9386c4ae589fc684b83cda86d0f8ee7ca991a6ba7039299424", size = 20069204, upload-time = "2025-01-11T03:26:26.064Z" }
+@@ -1558,7 +1672,8 @@ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "httpx" },
+     { name = "markdownify" },
+-    { name = "mcp" },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+     { name = "protego" },
+     { name = "pydantic" },
+     { name = "readabilipy" },
+@@ -1576,7 +1691,8 @@ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "click" },
+     { name = "gitpython" },
+-    { name = "mcp" },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+     { name = "pydantic" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/5a/43/a148baa2b1e8599eda07c4b40aa95ff357afc62515388e365e8f12e55ffa/mcp_server_git-2025.1.14.tar.gz", hash = "sha256:34469d85b78370f4f167b7285da175ba735c7fccebfbf27569d9eed97bc467c2", size = 24735, upload-time = "2025-01-14T01:46:41.55Z" }
+@@ -1589,7 +1705,8 @@ name = "mcp-server-time"
+ version = "0.6.2"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "mcp" },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+     { name = "pydantic" },
+     { name = "tzdata" },
+ ]
+@@ -1603,7 +1720,8 @@ name = "mcp-yahoo-finance"
+ version = "0.1.3"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "mcp" },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+     { name = "yfinance" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/07/dd/bf98cd94b79880d4cc71d35d1d09f440e0e4bcb974e480df68732407a176/mcp_yahoo_finance-0.1.3.tar.gz", hash = "sha256:5a435b07f6763f00e263244b3fbe0f4d99f24046dfe3f8c37c8d07c3dd9cabfd", size = 51358, upload-time = "2025-05-16T12:55:01.501Z" }
+@@ -1646,7 +1764,6 @@ dependencies = [
+     { name = "deprecated" },
+     { name = "distro" },
+     { name = "docutils" },
+-    { name = "excel-mcp-server" },
+     { name = "exceptiongroup" },
+     { name = "fake-useragent" },
+     { name = "faker" },
+@@ -1688,7 +1805,8 @@ dependencies = [
+     { name = "lxml" },
+     { name = "markupsafe" },
+     { name = "matplotlib" },
+-    { name = "mcp" },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+     { name = "mcp-ocr" },
+     { name = "mcp-scholarly" },
+     { name = "mcp-server-fetch" },
+@@ -1702,8 +1820,8 @@ dependencies = [
+     { name = "office-powerpoint-mcp-server" },
+     { name = "office-word-mcp-server" },
+     { name = "openai" },
+-    { name = "openai-agents" },
+     { name = "opencode-ai" },
++    { name = "openpyxl" },
+     { name = "outcome" },
+     { name = "packaging" },
+     { name = "pandas" },
+@@ -1788,6 +1906,17 @@ dependencies = [
+     { name = "yfinance" },
+ ]
+ 
++[package.dev-dependencies]
++agent = [
++    { name = "beaker-sdk", extra = ["openai-agents"], marker = "extra == 'group-12-mcpbench-dev-agent'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" } },
++    { name = "openai-agents" },
++]
++excel = [
++    { name = "excel-mcp-server" },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, extra = ["cli"], marker = "extra == 'group-12-mcpbench-dev-excel'" },
++]
++
+ [package.metadata]
+ requires-dist = [
+     { name = "addict", specifier = "==2.4.0" },
+@@ -1808,7 +1937,7 @@ requires-dist = [
      { name = "beautifulsoup4", specifier = "==4.13.4" },
      { name = "bibtexparser", specifier = "==1.4.3" },
      { name = "canvasapi", specifier = ">=3.3.0" },
@@ -1692,7 +1510,15 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
      { name = "charset-normalizer", specifier = "==3.4.1" },
      { name = "claude-agent-sdk", specifier = ">=0.1.43" },
      { name = "cli-mcp-server", specifier = ">=0.2.4" },
-@@ -1848,13 +1917,13 @@ requires-dist = [
+@@ -1820,7 +1949,6 @@ requires-dist = [
+     { name = "deprecated", specifier = "==1.2.18" },
+     { name = "distro", specifier = "==1.9.0" },
+     { name = "docutils", specifier = "==0.21.2" },
+-    { name = "excel-mcp-server", specifier = ">=0.1.4" },
+     { name = "exceptiongroup", specifier = "==1.2.2" },
+     { name = "fake-useragent", specifier = "==2.2.0" },
+     { name = "faker", specifier = ">=37.4.2" },
+@@ -1848,13 +1976,13 @@ requires-dist = [
      { name = "gspread", specifier = ">=6.2.1" },
      { name = "h11", specifier = "==0.16.0" },
      { name = "httpcore", specifier = "==1.0.9" },
@@ -1708,27 +1534,19 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
      { name = "jsonlines", specifier = "==4.0.0" },
      { name = "kiwisolver", specifier = "==1.4.8" },
      { name = "kubernetes", specifier = ">=33.1.0" },
-@@ -1862,7 +1931,7 @@ requires-dist = [
-     { name = "lxml", specifier = "==5.4.0" },
-     { name = "markupsafe", specifier = "==3.0.2" },
-     { name = "matplotlib", specifier = "==3.10.3" },
--    { name = "mcp", specifier = ">=1.9.0" },
-+    { name = "mcp", specifier = "==1.19.0" },
-     { name = "mcp-ocr", specifier = ">=0.1.2" },
-     { name = "mcp-scholarly", specifier = "==0.1.0" },
-     { name = "mcp-server-fetch", specifier = ">=2025.4.7" },
-@@ -1875,8 +1944,8 @@ requires-dist = [
+@@ -1875,9 +2003,9 @@ requires-dist = [
      { name = "numpy", specifier = "==2.2.6" },
      { name = "office-powerpoint-mcp-server", specifier = ">=1.0.0" },
      { name = "office-word-mcp-server", specifier = ">=1.1.5" },
 -    { name = "openai", specifier = "==1.76.0" },
 -    { name = "openai-agents", specifier = "==0.0.15" },
 +    { name = "openai", specifier = "==2.54.0" },
-+    { name = "openai-agents", specifier = "==0.20.0" },
      { name = "opencode-ai", specifier = ">=0.1.0a36" },
++    { name = "openpyxl", specifier = "==3.1.5" },
      { name = "outcome", specifier = "==1.3.0.post0" },
      { name = "packaging", specifier = "==25.0" },
-@@ -1890,8 +1959,8 @@ requires-dist = [
+     { name = "pandas", specifier = "==2.2.3" },
+@@ -1890,8 +2018,8 @@ requires-dist = [
      { name = "psutil", specifier = ">=6.1.0" },
      { name = "psycopg2-binary", specifier = "==2.9.10" },
      { name = "pyarrow", specifier = "==18.0.0" },
@@ -1739,7 +1557,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
      { name = "pydantic-settings", specifier = "==2.9.1" },
      { name = "pyee", specifier = "==13.0.0" },
      { name = "pygments", specifier = "==2.19.1" },
-@@ -1905,7 +1974,7 @@ requires-dist = [
+@@ -1905,7 +2033,7 @@ requires-dist = [
      { name = "python-dotenv", specifier = "==1.1.0" },
      { name = "python-multipart", specifier = "==0.0.20" },
      { name = "pytz", specifier = "==2025.2" },
@@ -1748,7 +1566,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
      { name = "rapidfuzz", specifier = "==3.13.0" },
      { name = "reportlab", specifier = ">=4.4.3" },
      { name = "requests", specifier = "==2.32.3" },
-@@ -1913,7 +1982,7 @@ requires-dist = [
+@@ -1913,7 +2041,7 @@ requires-dist = [
      { name = "scholarly", specifier = "==1.7.11" },
      { name = "scipy", specifier = ">=1.16.2" },
      { name = "seaborn", specifier = ">=0.13.2" },
@@ -1757,7 +1575,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
      { name = "setuptools", specifier = "==75.8.0" },
      { name = "sgmllib3k", specifier = "==1.0.0" },
      { name = "shortuuid", specifier = ">=1.0.13" },
-@@ -1946,10 +2015,10 @@ requires-dist = [
+@@ -1946,10 +2074,10 @@ requires-dist = [
      { name = "typer", specifier = ">=0.16.0" },
      { name = "types-python-dateutil", specifier = "==2.9.0.20250516" },
      { name = "types-requests", specifier = "==2.32.0.20250328" },
@@ -1771,7 +1589,45 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
      { name = "uvicorn", specifier = "==0.34.2" },
      { name = "wandb", specifier = ">=0.21.1" },
      { name = "wcwidth", specifier = "==0.2.13" },
-@@ -2138,7 +2207,7 @@ wheels = [
+@@ -1962,6 +2090,17 @@ requires-dist = [
+     { name = "yfinance", specifier = ">=0.2.62" },
+ ]
+ 
++[package.metadata.requires-dev]
++agent = [
++    { name = "beaker-sdk", extras = ["openai-agents"], specifier = "==0.6.6" },
++    { name = "mcp", specifier = "==1.19.0" },
++    { name = "openai-agents", specifier = "==0.20.0" },
++]
++excel = [
++    { name = "excel-mcp-server", specifier = "==0.1.4" },
++    { name = "mcp", extras = ["cli"], specifier = "==1.9.0" },
++]
++
+ [[package]]
+ name = "mdurl"
+ version = "0.1.2"
+@@ -2104,7 +2243,8 @@ name = "office-powerpoint-mcp-server"
+ version = "1.0.0"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "mcp", extra = ["cli"] },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, extra = ["cli"], marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, extra = ["cli"], marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+     { name = "python-pptx" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/77/41/ff7ff6ca2cc68a1d93e107a251abb5411ace196b7cff169ffd12e8a3c522/office_powerpoint_mcp_server-1.0.0.tar.gz", hash = "sha256:e76ae9002e7aa6cd72d7dcf6b75c3e56b3cb6a8f9e5a74d8d4eea0c6351a194a", size = 18884, upload-time = "2025-03-25T12:36:29.414Z" }
+@@ -2118,7 +2258,8 @@ version = "1.1.5"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "docx2pdf" },
+-    { name = "mcp", extra = ["cli"] },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, extra = ["cli"], marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, extra = ["cli"], marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+     { name = "msoffcrypto-tool" },
+     { name = "python-docx" },
+ ]
+@@ -2138,7 +2279,7 @@ wheels = [
  
  [[package]]
  name = "openai"
@@ -1780,7 +1636,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  source = { registry = "https://pypi.org/simple" }
  dependencies = [
      { name = "anyio" },
-@@ -2150,27 +2219,27 @@ dependencies = [
+@@ -2150,27 +2291,27 @@ dependencies = [
      { name = "tqdm" },
      { name = "typing-extensions" },
  ]
@@ -1798,8 +1654,9 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  source = { registry = "https://pypi.org/simple" }
  dependencies = [
 -    { name = "griffe" },
+-    { name = "mcp" },
 +    { name = "griffelib" },
-     { name = "mcp" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" } },
      { name = "openai" },
      { name = "pydantic" },
      { name = "requests" },
@@ -1815,7 +1672,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  ]
  
  [[package]]
-@@ -2221,15 +2290,114 @@ wheels = [
+@@ -2221,15 +2362,114 @@ wheels = [
  
  [[package]]
  name = "opentelemetry-api"
@@ -1878,7 +1735,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
 +dependencies = [
 +    { name = "googleapis-common-protos" },
 +    { name = "opentelemetry-api" },
-+    { name = "opentelemetry-exporter-http-transport", extra = ["requests"] },
++    { name = "opentelemetry-exporter-http-transport", extra = ["requests"], marker = "extra == 'group-12-mcpbench-dev-agent'" },
 +    { name = "opentelemetry-exporter-otlp-common" },
 +    { name = "opentelemetry-exporter-otlp-proto-common" },
 +    { name = "opentelemetry-proto" },
@@ -1894,8 +1751,9 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
 +[[package]]
 +name = "opentelemetry-proto"
 +version = "1.45.2"
-+source = { registry = "https://pypi.org/simple" }
-+dependencies = [
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "importlib-metadata" },
 +    { name = "protobuf" },
 +]
 +sdist = { url = "https://files.pythonhosted.org/packages/24/9c/1aa4ce60e9bc72af20dc49c92cc0566825092d92b3d6a277439fb5fb7c01/opentelemetry_proto-1.45.2.tar.gz", hash = "sha256:bd8d23cf770605b0af9b7be2071d26a464fea289d35429abfd2a66226114ad64", size = 46486, upload-time = "2026-10-29T17:29:53.007Z" }
@@ -1910,31 +1768,30 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
 +dependencies = [
 +    { name = "opentelemetry-api" },
 +    { name = "opentelemetry-semantic-conventions" },
-+    { name = "typing-extensions" },
-+]
+     { name = "typing-extensions" },
+ ]
+-sdist = { url = "https://files.pythonhosted.org/packages/63/04/05040d7ce33a907a2a02257e601992f0cdf11c73b33f13c4492bf6c3d6d5/opentelemetry_api-1.37.0.tar.gz", hash = "sha256:540735b120355bd5112738ea53621f8d5edb35ebcd6fe21ada3ab1c61d1cd9a7", size = 64923, upload-time = "2025-09-11T10:29:01.662Z" }
 +sdist = { url = "https://files.pythonhosted.org/packages/7b/1a/74a21d4d6969fb8b432ac397e66112a8167a6deb267ea4559dbaf2fe91ef/opentelemetry_sdk-1.45.2.tar.gz", hash = "sha256:7eec4de13dd21ff3a1670dcb0e02079e692736f94d733dfdce5af461d884248d", size = 221705, upload-time = "2026-10-29T17:29:54.685Z" }
-+wheels = [
+ wheels = [
+-    { url = "https://files.pythonhosted.org/packages/91/48/28ed9e55dcf2f453128df738210a980e09f4e468a456fa3c763dbc8be70a/opentelemetry_api-1.37.0-py3-none-any.whl", hash = "sha256:accf2024d3e89faec14302213bc39550ec0f4095d1cf5ca688e1bfb1c8612f47", size = 65732, upload-time = "2025-09-11T10:28:41.826Z" },
 +    { url = "https://files.pythonhosted.org/packages/9f/a5/9a3b793ef48245f2336a16beb2324c2397dbb3f987cd68942f77cca06156/opentelemetry_sdk-1.45.2-py3-none-any.whl", hash = "sha256:ff974ea70ee4f1d51e2ec152db37c2b626c7bf82bb3f7d86114fd8704e7199c6", size = 141756, upload-time = "2026-10-29T17:29:33.722Z" },
 +]
 +
 +[[package]]
 +name = "opentelemetry-semantic-conventions"
 +version = "0.66b2"
- source = { registry = "https://pypi.org/simple" }
- dependencies = [
--    { name = "importlib-metadata" },
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
 +    { name = "opentelemetry-api" },
-     { name = "typing-extensions" },
- ]
--sdist = { url = "https://files.pythonhosted.org/packages/63/04/05040d7ce33a907a2a02257e601992f0cdf11c73b33f13c4492bf6c3d6d5/opentelemetry_api-1.37.0.tar.gz", hash = "sha256:540735b120355bd5112738ea53621f8d5edb35ebcd6fe21ada3ab1c61d1cd9a7", size = 64923, upload-time = "2025-09-11T10:29:01.662Z" }
++    { name = "typing-extensions" },
++]
 +sdist = { url = "https://files.pythonhosted.org/packages/37/3f/50f95972b50e8e353f5b9342034c9cd17730f1956f009ce6a3fbbd89f9ce/opentelemetry_semantic_conventions-0.66b2.tar.gz", hash = "sha256:7da5f1a5dc4383eb66711d4d3d3e71824d9403ac1559fea021cc103c1a4c4976", size = 150246, upload-time = "2026-10-29T17:29:55.682Z" }
- wheels = [
--    { url = "https://files.pythonhosted.org/packages/91/48/28ed9e55dcf2f453128df738210a980e09f4e468a456fa3c763dbc8be70a/opentelemetry_api-1.37.0-py3-none-any.whl", hash = "sha256:accf2024d3e89faec14302213bc39550ec0f4095d1cf5ca688e1bfb1c8612f47", size = 65732, upload-time = "2025-09-11T10:28:41.826Z" },
++wheels = [
 +    { url = "https://files.pythonhosted.org/packages/67/bd/6bf33ed31521c565931c037e9e81bac47c1acb000e850c6e24220e2a0c00/opentelemetry_semantic_conventions-0.66b2-py3-none-any.whl", hash = "sha256:4cbe61e5f9275d57ab31708446e7938ef4291ebbe6a7fca6f7a629c5acae87d8", size = 206280, upload-time = "2026-10-29T17:29:35.062Z" },
  ]
  
  [[package]]
-@@ -2518,7 +2686,7 @@ wheels = [
+@@ -2518,7 +2758,7 @@ wheels = [
  
  [[package]]
  name = "pydantic"
@@ -1943,7 +1800,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  source = { registry = "https://pypi.org/simple" }
  dependencies = [
      { name = "annotated-types" },
-@@ -2526,34 +2694,38 @@ dependencies = [
+@@ -2526,34 +2766,38 @@ dependencies = [
      { name = "typing-extensions" },
      { name = "typing-inspection" },
  ]
@@ -2001,7 +1858,17 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  ]
  
  [[package]]
-@@ -2783,19 +2955,20 @@ wheels = [
+@@ -2632,7 +2876,8 @@ name = "pymupdf4llm-mcp"
+ version = "0.0.4"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "mcp", extra = ["cli"] },
++    { name = "mcp", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, extra = ["cli"], marker = "extra == 'group-12-mcpbench-dev-excel'" },
++    { name = "mcp", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, extra = ["cli"], marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
+     { name = "pydantic" },
+     { name = "pymupdf4llm" },
+     { name = "typer" },
+@@ -2783,19 +3028,20 @@ wheels = [
  
  [[package]]
  name = "pyyaml"
@@ -2033,7 +1900,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  ]
  
  [[package]]
-@@ -2836,6 +3009,20 @@ wheels = [
+@@ -2836,6 +3082,20 @@ wheels = [
      { url = "https://files.pythonhosted.org/packages/dd/46/8a640c6de1a6c6af971f858b2fb178ca5e1db91f223d8ba5f40efe1491e5/readabilipy-0.3.0-py3-none-any.whl", hash = "sha256:d106da0fad11d5fdfcde21f5c5385556bfa8ff0258483037d39ea6b1d6db3943", size = 22158, upload-time = "2024-12-02T23:03:00.438Z" },
  ]
  
@@ -2042,9 +1909,9 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
 +version = "0.37.0"
 +source = { registry = "https://pypi.org/simple" }
 +dependencies = [
-+    { name = "attrs" },
-+    { name = "rpds-py" },
-+    { name = "typing-extensions" },
++    { name = "attrs", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "rpds-py", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
++    { name = "typing-extensions", marker = "extra == 'group-12-mcpbench-dev-agent' or extra != 'group-12-mcpbench-dev-excel'" },
 +]
 +sdist = { url = "https://files.pythonhosted.org/packages/22/f5/df4e9027acead3ecc63e50fe1e36aca1523e1719559c499951bb4b53188f/referencing-0.37.0.tar.gz", hash = "sha256:44aefc3142c5b842538163acb373e24cce6632bd54bdb01b21ad5863489f50d8", size = 78036, upload-time = "2025-10-13T15:30:48.871Z" }
 +wheels = [
@@ -2054,7 +1921,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  [[package]]
  name = "regex"
  version = "2024.11.6"
-@@ -2927,6 +3114,41 @@ wheels = [
+@@ -2927,6 +3187,41 @@ wheels = [
      { url = "https://files.pythonhosted.org/packages/53/97/d2cbbaa10c9b826af0e10fdf836e1bf344d9f0abb873ebc34d1f49642d3f/roman_numerals_py-3.1.0-py3-none-any.whl", hash = "sha256:9da2ad2fb670bcf24e81070ceb3be72f6c11c440d73bd579fbeca1e9f330954c", size = 7742, upload-time = "2025-02-22T07:34:52.422Z" },
  ]
  
@@ -2096,7 +1963,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  [[package]]
  name = "rsa"
  version = "4.9.1"
-@@ -3011,7 +3233,7 @@ wheels = [
+@@ -3011,7 +3306,7 @@ wheels = [
  
  [[package]]
  name = "selenium"
@@ -2105,7 +1972,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  source = { registry = "https://pypi.org/simple" }
  dependencies = [
      { name = "certifi" },
-@@ -3021,9 +3243,9 @@ dependencies = [
+@@ -3021,9 +3316,9 @@ dependencies = [
      { name = "urllib3", extra = ["socks"] },
      { name = "websocket-client" },
  ]
@@ -2117,7 +1984,34 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  ]
  
  [[package]]
-@@ -3471,23 +3693,23 @@ wheels = [
+@@ -3225,7 +3520,7 @@ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "alabaster" },
+     { name = "babel" },
+-    { name = "colorama", marker = "sys_platform == 'win32'" },
++    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel')" },
+     { name = "docutils" },
+     { name = "imagesize" },
+     { name = "jinja2" },
+@@ -3395,7 +3690,7 @@ name = "tqdm"
+ version = "4.67.1"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "colorama", marker = "sys_platform == 'win32'" },
++    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel')" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/a8/4b/29b4ef32e036bb34e4ab51796dd745cdba7ed47ad142a9f4a1eb8e0c744d/tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2", size = 169737, upload-time = "2024-11-24T20:12:22.481Z" }
+ wheels = [
+@@ -3408,7 +3703,7 @@ version = "0.30.0"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+     { name = "attrs" },
+-    { name = "cffi", marker = "implementation_name != 'pypy' and os_name == 'nt' and sys_platform != 'darwin' and sys_platform != 'linux'" },
++    { name = "cffi", marker = "(implementation_name != 'pypy' and os_name == 'nt' and sys_platform != 'darwin' and sys_platform != 'linux') or (implementation_name == 'pypy' and sys_platform != 'darwin' and sys_platform != 'linux' and extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel') or (os_name != 'nt' and extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel') or (sys_platform == 'darwin' and extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel') or (sys_platform == 'linux' and extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel')" },
+     { name = "idna" },
+     { name = "outcome" },
+     { name = "sniffio" },
+@@ -3471,23 +3766,23 @@ wheels = [
  
  [[package]]
  name = "typing-extensions"
@@ -2147,7 +2041,16 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  ]
  
  [[package]]
-@@ -3522,11 +3744,11 @@ wheels = [
+@@ -3504,7 +3799,7 @@ name = "tzlocal"
+ version = "5.3.1"
+ source = { registry = "https://pypi.org/simple" }
+ dependencies = [
+-    { name = "tzdata", marker = "sys_platform == 'win32'" },
++    { name = "tzdata", marker = "sys_platform == 'win32' or (extra == 'group-12-mcpbench-dev-agent' and extra == 'group-12-mcpbench-dev-excel')" },
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/8b/2e/c14812d3d4d9cd1773c6be938f89e5735a1f11a9f184ac3639b93cef35d5/tzlocal-5.3.1.tar.gz", hash = "sha256:cceffc7edecefea1f595541dbd6e990cb1ea3d19bf01b2809f362a03dd7921fd", size = 30761, upload-time = "2025-03-05T21:17:41.549Z" }
+ wheels = [
+@@ -3522,11 +3817,11 @@ wheels = [
  
  [[package]]
  name = "urllib3"
@@ -2162,7 +2065,7 @@ index 7fa3877c66074fdf9be5120a9431f580d5edc716..eae928c4a859555163bcbf5038e193de
  ]
  
  [package.optional-dependencies]
-@@ -3749,12 +3971,3 @@ sdist = { url = "https://files.pythonhosted.org/packages/4f/e8/6459e3d4351b07bd7
+@@ -3749,12 +4044,3 @@ sdist = { url = "https://files.pythonhosted.org/packages/4f/e8/6459e3d4351b07bd7
  wheels = [
      { url = "https://files.pythonhosted.org/packages/d5/2a/63be4c36ca88e222ce34c010819e4c455f16d7775c4d5df4e958f8312170/yfinance-0.2.62-py2.py3-none-any.whl", hash = "sha256:4edd81f6f9b20eb83532e7c4e01e3822ede7a282098b5341263b6b84e8cdc4cf", size = 118372, upload-time = "2025-06-08T15:11:43.546Z" },
  ]

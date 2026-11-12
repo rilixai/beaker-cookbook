@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from toolathlon_baseline import QUICKSTART_TASKS, UPSTREAM_REVISION
-from toolathlon_baseline.prepare import prepare, prepared_source, runtime_env
+from toolathlon_baseline.prepare import MIGRATION_PATCH, prepare, prepared_source, runtime_env
 
 
 def _ensure_bin_on_path() -> None:
@@ -32,10 +32,13 @@ def _cache_dir() -> Path:
         return Path(configured)
     # Candidate rollouts override TMPDIR per attempt; keep the prepared upstream
     # checkout in shared /tmp so prepare_run, run_case, and score_case reuse it.
+    cache_name = (
+        f"beaker-toolathlon-{UPSTREAM_REVISION}-{hashlib.sha256(MIGRATION_PATCH.read_bytes()).hexdigest()[:12]}"
+    )
     shared_tmp = Path("/tmp")
     if shared_tmp.is_dir() and os.access(shared_tmp, os.W_OK | os.X_OK):
-        return shared_tmp / f"beaker-toolathlon-{UPSTREAM_REVISION}"
-    return Path(tempfile.gettempdir()) / f"beaker-toolathlon-{UPSTREAM_REVISION}"
+        return shared_tmp / cache_name
+    return Path(tempfile.gettempdir()) / cache_name
 
 
 def prepare_toolathlon() -> tuple[Path, Path]:
