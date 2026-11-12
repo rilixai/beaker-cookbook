@@ -68,20 +68,3 @@ Missing scoring context is also a technical error. A task that reaches its model
 turn limit is scored as a failure even when upstream leaves its request counter
 at zero. Cancellation and supervisor timeout terminate the whole process group,
 including MCP servers.
-
-## Verification without paid model calls
-
-Run `uv run pytest -q` from the recipe directory for standalone runner regression
-checks. The real framework, MCP and OTLP checks below are opt-in.
-
-For the real Toolathlon loop and MCP checks, prepare a cache once, then run:
-
-```bash
-uv run toolathlon-baseline prepare --cache /tmp/toolathlon-native-check
-TOOLATHLON_TEST_CACHE=/tmp/toolathlon-native-check uv run pytest tests/test_native_toolathlon.py -q
-```
-
-These opt-in checks use a local deterministic model endpoint, exercise the three
-quickstart tasks, actual MCP writes, context truncation and the turn limit, and
-verify that tools still cannot read local references. They do not measure model
-quality or establish parity with the full 108-task containerized benchmark.

@@ -267,10 +267,5 @@ uv sync --group dev --locked
 uv run ruff check
 uv run ruff format --check
 uv run python -m mypy
-uv run pytest -q
 uv build --no-sources
 ```
-
-Tests exercise the recipe's process lifecycle, run isolation, and failure
-reporting without downloading Toolathlon or calling an LLM. They are not
-benchmark results.
