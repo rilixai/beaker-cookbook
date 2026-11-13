@@ -1,0 +1,39 @@
+[project]
+name = "clinc150-router"
+version = "0.1.0"
+description = "Chat-model intent routing with out-of-scope detection on the frozen CLINC150 benchmark."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["openai>=2,<3", "pydantic>=2.11,<3"]
+
+[project.scripts]
+clinc150-router = "clinc150_router.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/clinc150_router"]
+
+[dependency-groups]
+dev = ["beaker-sdk>=0.6.5,<0.7", "ruff", "mypy", "pytest", "pytest-asyncio"]
+
+[tool.ruff]
+line-length = 119
+extend-include = [".beaker/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/clinc150_router", ".beaker/beaker_integration.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
