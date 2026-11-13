@@ -1,0 +1,50 @@
+--- a/scripts/run_single_containerized.sh
++++ b/scripts/run_single_containerized.sh
+@@ -212,6 +212,8 @@
+     "local_binary/github-mcp-server"
+     "utils"
+     "main.py"
++    "toolathlon_container_agent.py"
++    "toolathlon_native_trace.py"
+     "pyproject.toml"
+     "uv.lock"
+ )
+@@ -257,6 +259,28 @@
+ for envarg in "${EXTRA_ENV_ARGS[@]}"; do
+     START_CONTAINER_ARGS+=("$envarg")
+ done
++
++# Beaker's public CA files and case-scoped OTLP token cross only into this task.
++for env_name in SSL_CERT_FILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE NODE_EXTRA_CA_CERTS SSL_CERT_DIR TOOLATHLON_OTLP_ENDPOINT TOOLATHLON_OTLP_TOKEN TOOLATHLON_TELEMETRY_STATUS; do
++    if [ -n "${!env_name:-}" ]; then
++        START_CONTAINER_ARGS+=("-e" "$env_name")
++    fi
++done
++while IFS= read -r route; do
++    START_CONTAINER_ARGS+=("--add-host" "$route")
++done < <(uv run python -c 'import json, os; print("\n".join(json.loads(os.environ["TOOLATHLON_DOCKER_HOSTS"])))')
++declare -A beaker_mounted=()
++for env_name in SSL_CERT_FILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE NODE_EXTRA_CA_CERTS SSL_CERT_DIR; do
++    if [ -n "${!env_name:-}" ] && [ -e "${!env_name}" ]; then
++        if [ -z "${beaker_mounted[${!env_name}]:-}" ]; then
++            START_CONTAINER_ARGS+=("-v" "${!env_name}:${!env_name}:ro")
++            beaker_mounted[${!env_name}]=1
++        fi
++    fi
++done
++if [ -n "${TOOLATHLON_TELEMETRY_STATUS:-}" ]; then
++    START_CONTAINER_ARGS+=("-v" "$TOOLATHLON_TELEMETRY_STATUS:$TOOLATHLON_TELEMETRY_STATUS")
++fi
+-
++
+ # Add socket mount based on container runtime
+ if [ "$CONTAINER_RUNTIME" = "podman" ]; then
+@@ -660,7 +684,7 @@
+     stage_trusted_bundle
+     set +e
+     run_container_phase \
+-        uv run python -m scripts.containerized.container_agent \
++        uv run python toolathlon_container_agent.py \
+         --bundle_file "$CURRENT_CONTAINER_BUNDLE" \
+         --debug
+     AGENT_EXIT_CODE=$?

@@ -59,3 +59,40 @@ Oversized workspaces fail explicitly instead of dropping files. Failures before 
 model turn are retryable; exhausted turn budgets are scored as failures even if
 upstream leaves its request counter at zero. Cancellation and timeout terminate the
 whole case process group, including MCP servers.
+
+## Tasks outside quickstart
+
+The three quickstart tasks keep their native path. Every other official task
+uses `toolathlon_docker.py`, selected from its canonical task ID. Dataset metadata
+alone cannot enable execution. Docker availability and the task image are checked
+during case loading, before baseline model calls.
+
+The Beaker image installs Docker and socat and needs a VM sandbox. Each case gets
+a private Docker-in-Docker host with its own network, image-store volume and
+application state. Only its required Canvas, email, WooCommerce or Kubernetes
+services are started, using the upstream setup scripts. The shared VM caches the
+public task image; private daemons load it without repeated registry downloads.
+Case cancellation removes the host and its anonymous image-store volume.
+
+The original `scripts/run_single_containerized.sh` keeps its phased workflow:
+preprocess, hide reference/evaluator files, run the original agent, restore trusted
+artifacts, and run the official grader while the same applications remain alive.
+A small reviewed shell patch forwards provider host mappings, public CA files and
+the case's OTLP token. The tracing entrypoint wraps the original prepared-agent
+phase only. No private proxy key or local `.env` is mounted into the Docker host.
+
+Full task scoring returns the official verdict and bounded diagnostic text instead
+of transferring large workspaces through the native 4 MiB context limit. Missing
+results, failed bootstrap and evaluator infrastructure errors do not become
+measured zero scores. Output records the runner and resolved task-image ID.
+
+The 38-task no-external-account subset still requires local application setup.
+The remaining tasks require dedicated third-party accounts. For these, configure
+`TOOLATHLON_CONFIG_JSON` in the agent environment as a JSON object mapping paths
+relative to upstream `configs/` to their text contents; alternatively a managed
+runtime can mount an existing `TOOLATHLON_CONFIG_DIR`. Keep credentials out of Git.
+`TOOLATHLON_DOCKER_IMAGE` can select a compatible pinned task-image digest.
+
+Containerized execution retains upstream's privileged Docker/socket requirements;
+it does not provide the native Landlock boundary. Use dedicated benchmark accounts
+and VM resources. Real Docker execution must be validated before a broad baseline.

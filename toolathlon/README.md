@@ -3,8 +3,9 @@
 Run [Toolathlon](https://github.com/hkust-nlp/Toolathlon)'s **original agent**, migrated
 in place to **OpenAI Agents 0.20.0**. The standalone CLI supports all 108 official
 tasks through the upstream container runner. Three tasks also run natively without
-Docker or application accounts. [Beaker onboarding](.beaker/README.md) uses those
-three tasks and exports native OTLP traces.
+Docker or application accounts. [Beaker onboarding](.beaker/README.md) uses the native
+path for those three tasks and isolated Docker environments for the others, with
+native OTLP tracing. The Docker path still needs an end-to-end VM validation.
 
 ## Native quickstart
 
@@ -113,7 +114,7 @@ into containers, where upstream `uv run` installs the selected dependencies.
 Defaults are one worker and a 5,400-second per-task timeout. `--workers`, `--timeout`
 and `--max-steps` override them. `--runner containerized` selects this path explicitly;
 `auto` selects it for an environment, multiple tasks or `--all`. Native mode accepts
-one quickstart task at a time. The full Docker/services path still needs validation
+one task at a time. The Docker/services path still needs validation
 on a configured benchmark host.
 
 Full-run artifacts are under `artifacts/finalpool/<task>/`; `result.json` records

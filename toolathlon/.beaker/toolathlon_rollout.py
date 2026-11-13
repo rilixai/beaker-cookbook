@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from toolathlon_baseline import UPSTREAM_REVISION
+from toolathlon_baseline import QUICKSTART_TASKS, UPSTREAM_REVISION
 from toolathlon_baseline.prepare import native_path, prepared_source, require_command, runtime_env
 from toolathlon_baseline.runner import stage_task
 
@@ -68,6 +68,20 @@ def run_agent(
         raise ValueError("Set TOOLATHLON_OPENAI_BASE_URL first")
     cache, output = native_path(cache), native_path(output)
     source = prepared_source(cache)
+    if task not in QUICKSTART_TASKS:
+        from toolathlon_docker import run_containerized_agent
+
+        return run_containerized_agent(
+            cache=cache,
+            source=source,
+            output=output,
+            task=task,
+            model=model,
+            max_steps=max_steps,
+            timeout=timeout,
+            system_prompt=system_prompt,
+            model_params=model_params,
+        )
     output.mkdir(parents=True, exist_ok=False)
     checkout = stage_agent(source, cache, output, task, system_prompt)
     config = json.loads((source / "scripts/formal_run_v0.json").read_text())
