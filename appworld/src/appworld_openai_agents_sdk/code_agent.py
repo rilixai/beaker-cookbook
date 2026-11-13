@@ -14,6 +14,7 @@ code (checked after every execution) or exhausts its step budget.
 from __future__ import annotations
 
 import json
+from functools import wraps
 from typing import Any, cast
 
 from agents import (
@@ -43,6 +44,85 @@ from appworld_openai_agents_sdk.vendored.common.logger import Logger
 
 
 set_tracing_disabled(True)
+
+
+# Scoped to one task-runner invocation; values are snapshots of successful
+# documentation responses, never credentials, account records or REPL state.
+DocumentationCache = dict[tuple[str, bool, str, str], str]
+
+
+def reuse_api_documentation(world: AppWorld, cache: DocumentationCache) -> str:
+    """Supply previously discovered interfaces and observe fresh doc requests.
+
+    AppWorld's API interfaces are fixed within this process. Restrict reuse to
+    the current data version, schema setting and available apps. Explicit API
+    calls still execute normally, including errors; this only observes them.
+    """
+    if world.remote_environment_url:
+        return ""  # The remote interpreter owns a separate API collection.
+    version = world.task.db_version
+    schemas = world.show_api_response_schemas
+    allowed_apps = set(world.apis.keys())
+    available: dict[str, dict[str, Any]] = {}
+    for (doc_version, doc_schemas, app, name), value in cache.items():
+        if (doc_version, doc_schemas) == (version, schemas) and app in allowed_apps:
+            app_docs = available.setdefault(app, {"specifications": {}})
+            if name:
+                app_docs["specifications"][name] = json.loads(value)
+            else:
+                app_docs["api_descriptions"] = json.loads(value)
+
+    def observe(api_name: str) -> None:
+        original = world.apis.api_docs[api_name]
+
+        @wraps(original)
+        def observed(*args: Any, **kwargs: Any) -> Any:
+            result = original(*args, **kwargs)
+            app = kwargs.get("app_name")
+            name = kwargs.get("api_name", "") if api_name == "show_api_doc" else ""
+            is_list = (
+                api_name == "show_api_descriptions"
+                and isinstance(result, list)
+                and bool(result)
+                and all(isinstance(item, dict) and {"name", "description"} <= item.keys() for item in result)
+            )
+            is_spec = (
+                api_name == "show_api_doc"
+                and isinstance(result, dict)
+                and {"app_name", "api_name", "path", "method", "description", "parameters"} <= result.keys()
+                and (not schemas or "response_schemas" in result)
+                and result["app_name"] == app
+                and result["api_name"] == name
+            )
+            if isinstance(app, str) and app in allowed_apps and isinstance(name, str) and (is_list or is_spec):
+                try:
+                    snapshot = json.dumps(result, separators=(",", ":"))
+                except (TypeError, ValueError):
+                    pass  # Recording must not change the API's return behavior.
+                else:
+                    key = (version, schemas, app, name)
+                    cache.pop(key, None)
+                    cache[key] = snapshot
+                    # Bound accumulated context for long, heterogeneous runs.
+                    # Evicted documentation remains discoverable normally.
+                    while sum(map(len, cache.values())) > 64_000:
+                        cache.pop(next(iter(cache)))
+            return result
+
+        world.apis.api_docs[api_name] = observed
+
+    observe("show_api_descriptions")
+    observe("show_api_doc")
+    if not available:
+        return ""
+    return (
+        "\n\nPreviously retrieved API documentation for the available apps follows. "
+        "Read these complete interfaces instead of requesting the same documentation again; "
+        "discover any missing APIs or specifications normally. Only documentation is reused. "
+        "Retrieve this task's credentials and account data afresh; no Python variables, "
+        "tokens, people, IDs or task results carry over.\n"
+        + json.dumps(available, separators=(",", ":"))
+    )
 
 
 def render_instructions(prompt_file_path: str, world: AppWorld) -> str:
@@ -113,10 +193,13 @@ async def run_code_agent_on_task(
     *,
     run_config: RunConfig | None = None,
     raise_provider_errors: bool = False,
+    documentation_cache: DocumentationCache | None = None,
 ) -> None:
     with AppWorld(task_id=task_id) as world:
         logger.start_task(world)
         instructions = render_instructions(prompt_file_path, world)
+        if documentation_cache is not None:
+            instructions += reuse_api_documentation(world, documentation_cache)
         agent, step_counter = build_agent(world, profile, instructions, logger)
         run_config = run_config or RunConfig(tracing_disabled=True)
         input_: Any = "Begin. Submit your first code step with the execute_python tool."
@@ -183,6 +266,7 @@ async def run_code_agent_on_tasks(
         process_index=0,
     )
     with AppWorld.initializer(update_defaults=True, experiment_name=experiment_name, **appworld_config):
+        documentation_cache: DocumentationCache = {}
         for task_id in task_ids:
             # Upstream reseeds per task (Agent.initialize); mirror it.
             set_random_seed(appworld_config.get("random_seed"))
@@ -194,4 +278,5 @@ async def run_code_agent_on_tasks(
                 max_steps=max_steps,
                 run_config=run_config,
                 raise_provider_errors=raise_provider_errors,
+                documentation_cache=documentation_cache,
             )
