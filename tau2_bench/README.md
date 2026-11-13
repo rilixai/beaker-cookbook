@@ -41,6 +41,11 @@ divided 75/25 into train and validation by a hash with seed `tau2-bench-v1`. Upl
 only `optimization/`, and keep `heldout/` for the final evaluation of a frozen candidate.
 Rows hold only `{domain, task_id}`. Expected outcomes stay inside upstream.
 
+The recipe includes the τ²-bench v2.0.0 Python package in `vendor/tau2` with a
+LiteLLM pin that matches the Beaker worker. Both `uv sync` and the Beaker image
+build install that copy. For a plain pip install, pass both local projects from
+this directory with `python -m pip install . ./vendor/tau2`.
+
 ## Models
 
 - **Agent:** without a model choice, `gpt-5.6-luna` at reasoning `medium`, through

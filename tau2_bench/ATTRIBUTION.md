@@ -9,8 +9,9 @@ This recipe builds on **τ²-bench** by Sierra Research.
 
 ## What is used vs. copied
 
-- The benchmark code (domains, tools, user simulator, orchestrator, evaluator) is
-  **used as an unmodified dependency**, installed from the pinned Git commit.
+- The benchmark package source from the pinned commit is copied into
+  `vendor/tau2`. Its Python source is unchanged. Its package metadata pins
+  LiteLLM to `1.104.0` so Beaker can install it alongside its runtime.
 - Upstream data files (airline and retail databases, policies, tasks, splits, and the
   English language pack) are **downloaded at run time** from the same commit and
   checked against SHA-256 digests. They are not stored in this repository.

@@ -6,8 +6,8 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
   # The benchmark itself (domains, user simulator, orchestrator, evaluator).
-  # Unmodified; pinned to release v2.0.0. Not vendored.
-  "tau2 @ git+https://github.com/sierra-research/tau2-bench.git@989d3285ae669e49503324bdb9981bf14fccedeb",
+  # Beaker installs the vendored package alongside this recipe via pip_install_from.
+  "tau2==2.0.0",
   "pydantic>=2.11,<3",
   "openai>=1.99,<3",
   # Traces the agent's and simulator's model calls on every run.
@@ -24,8 +24,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/tau2_bench"]
 
-[tool.hatch.metadata]
-allow-direct-references = true
+[tool.uv.sources]
+tau2 = { path = "vendor/tau2" }
 
 [dependency-groups]
 dev = ["ruff", "mypy", "pytest", "pytest-asyncio"]
@@ -33,6 +33,7 @@ dev = ["ruff", "mypy", "pytest", "pytest-asyncio"]
 [tool.ruff]
 line-length = 119
 extend-include = [".beaker/*.py"]
+extend-exclude = ["vendor/tau2"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
