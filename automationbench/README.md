@@ -1,221 +1,296 @@
-# AutomationBench with skills
+# AutomationBench + filesystem skills
 
-Test and improve an AI agent on business tasks in simulated apps such as Gmail,
-Google Sheets, Slack, and Salesforce. A task might ask the agent to update a
-customer record, check invoices, or send a follow-up email. The benchmark checks
-what the agent changed to decide whether it completed the task.
+[AutomationBench](https://github.com/zapier/AutomationBench) ([paper](https://arxiv.org/abs/2604.18934)) is Zapier's benchmark for business automation agents: 600 public tasks in six domains (sales, marketing, operations, support, finance, hr). The agent works in a simulated workspace of SaaS tools (Gmail, Sheets, Slack, CRMs, ...) and is scored by deterministic assertions on the final state of that workspace.
 
-This recipe uses [AutomationBench-PI](https://github.com/xeophon/AutomationBench-PI),
-a version of Zapier's AutomationBench. It includes an agent, starter skills,
-training and test tasks, and a ready-to-use Beaker integration. The apps and their
-data are simulated; you do not need accounts for them. Model requests use your
-provider account and incur its usual charges.
+This recipe uses [AutomationBench-PI](https://github.com/xeophon/AutomationBench-PI/tree/858718b19e5d66c74451432783d34ee64a550a15) for tools, world models and deterministic grading. The agent uses a system prompt in `prompts/`, and a `skills/` folder it reads through with two tools, `list_skills` and `read_skill`. Both are read from disk on every call, so Beaker can improve the agent by editing those files between rollouts. The optimizer itself is not part of this recipe. The apps are simulated; only model calls require provider access and incur charges.
 
-Start with one local task below, or follow [Use Beaker](#use-beaker) to optimize
-the agent in Beaker.
+> **The Beaker integration is already present in this recipe.** `.beaker/` holds a
+> working `beaker.yaml` and `beaker_integration.py`; there is nothing to write
+> before pointing Beaker at it.
 
-## Run your first task
+### Frozen cases and the shared PI API interface
 
-You need a checkout of this repository, `uv`, and an API key for your chosen
-model. The project requires Python 3.13 or later. The default model is
-`gpt-5.6-luna` with medium reasoning effort; see [Choose a model](#choose-a-model)
-for other providers.
+Hosted evaluation always uses PI's `api_search`, `api_fetch` and `base64_encode`,
+plus the skill tools. Search returns descriptions and JSON schemas for path,
+query and body fields. The same PI catalog and rendering apply to every case;
+the endpoints available for execution depend on the case's connected services.
+The hosted default matches `main`: **GPT-5.6 Luna** with **medium reasoning effort**.
 
-From the repository root:
+Each row must include `runtime_fixture: {task, scenario}`. The task contains
+`example_id`, `prompt`, `answer`, and `info` with `task_name`, `initial_state`,
+`assertions`, and `zapier_tools`. The scenario records source provenance,
+fallback time, an optional controlled tool fault, and trace capture policy.
+`metadata.benchmark_commit` identifies the task's source, while execution and
+scoring always use the pinned PI revision above. This intentionally re-evaluates
+original-source fixtures under PI; it does not reproduce their original runtime.
+
+Rows must carry matching task/scenario SHA-256 hashes, and `expected.assertions`
+must equal the frozen task's assertions. Missing fixtures and inconsistent rows
+fail validation. Task names are never used to replace the supplied fixture.
+The scorer reads initial state from the trusted case and end state from the
+rollout. Gold faulty/valid labels remain outside model inputs.
+
+The controlled empty-email-lookup fault suppresses a successful Gmail list result;
+the opportunity fault drops the forwarded amount. Neither edits task data.
+Incomplete trace capture omits alternating tool spans while preserving all tool
+execution, model messages, state and grading. Missing spans are an observability
+control, not a data defect.
+
+Existing name-only datasets must be regenerated. Use `.beaker/upload_splits.py`
+for the PI quickstart splits; retain the original task contents when rebuilding
+original-source rows.
+The mixed 11/11 dataset contains the required frozen fixtures. Train and test
+may contain identical tasks, but each row must have a unique ID across both
+splits (for example, `train:case-123` and `test:case-123`). Store the shared local
+label key as `metadata.reference_id` so predictions can be joined to reference
+labels without treating the two copies as independent examples. Its label
+audit must use this PI API execution condition, not the earlier native Zapier
+condition. Local smoke validation does not execute a model rollout.
+
+Beaker displays assertion conditions as **Checks**, without Expected/Predicted
+value pairs. Check names include the assertion type and complete parameter values,
+resolving record IDs to readable labels when available. Descriptions include the
+handler's first docstring line and the full condition parameters with original IDs;
+scoring metadata (`scored`, `excluded`) is omitted from both names and descriptions.
+Failed Checks show a readable summary of required conditions, recorded value
+comparisons, and the latest evaluator observations captured during scoring.
+Messages omit Python code and function traces, and explicitly note that the
+diagnostic is partial; it does not infer a cause from the last comparisons alone.
+**OUTPUT** shows app changes once per sample with size limits and omission markers.
+Display output is reduced or omitted when the combined result approaches Beaker's
+transport limit, preserving the complete scoring state before display details.
+The full final state remains in `context.end_state` for native scoring.
+Spreadsheet write history travels separately in `context.grading_state` because
+PI's `_updated_row_keys` is omitted by world serialization. The scorer restores
+it before grading, including writes later reverted to their initial values.
+Older saved results lack this history; rerun affected cases with the rebuilt
+integration. Rescoring the old final state cannot recover it.
+
+## Implementation and maintenance
+
+| Owner | Responsibility |
+| --- | --- |
+| Pinned PI dependency | Tasks, API catalog, MCP tools, simulated services, world models, and scalar grading. |
+| Recipe `src/` | In-process model/tool loop, skills, tracing, and provider-message conversion. Beaker can edit this code. |
+| `src/automationbench_skills/vendored/` | Original AutomationBench provider clients and routing. Source revisions are recorded in [ATTRIBUTION.md](ATTRIBUTION.md). |
+| Trusted `.beaker/` | Fixture validation, dataset export, and scoring from the supplied assertions and returned world. |
+
+The local runtime preserves the recipe's `run_one` interface and provider clients
+while using PI's MCP toolset. Adopting PI's native Verifiers V1 runtime would be a
+separate migration. The adapter currently accesses PI's private `_world` and `_api`
+attributes; review these calls when updating the dependency pin.
+
+Keep fixture serialization and hashes in `CaseFixture`; the exporter uses that
+same contract (`model_dump(mode="json")` and `hashes()`). Runtime errors stay as
+exception objects until the integration classifies them and serializes the result. Provider failures request retries;
+context overflow and task deadlines preserve earned credit.
+
+PI exposes a scalar score. The CLI and hosted scorer separately reconstruct
+assertion details for display. Keep both aligned with PI's exclusion rules.
+Do not load candidate code into the scoring process to remove this duplication.
+Use the trusted case's assertions and initial state, not candidate-provided scores
+or assertions. A shared upstream outcome API would be the preferred solution.
+
+After dependency or provider changes, run the commands in
+`.github/workflows/checks.yml` from this recipe directory, including
+`BEAKER_AGENT_KEY= uv run python -m pytest -q`. The tests cover frozen fixtures,
+all 54 quickstart rows, and error handling after a successful tool write. Keep
+vendored changes narrow so they remain comparable with the recorded upstream source.
+
+## Quick start
+
+Requires `uv`, Python 3.13 or later, and a model API key. The CLI loads `.env` automatically.
 
 ```bash
 cd automationbench
-uv sync --locked
-cp .env.example .env
-```
+uv sync --group dev --locked
+export OPENAI_API_KEY=sk-...   # or copy .env.example to .env
 
-Open `.env` and set `OPENAI_API_KEY` to your key. The CLI loads this file
-automatically. Then run one training task with the starter skills:
-
-```bash
-uv run automationbench-skills run \
-  --split train --limit 1 \
+# Run one training task with the same API tool interface as hosted Beaker
+uv run automationbench-skills run --split train --limit 1 \
   --skills-dir skills --prompts-dir prompts --toolset api \
-  --max-concurrent 1 --task-timeout 300 \
-  --output-dir runs/first-run
-```
+  --max-concurrent 1 --task-timeout 300 --output-dir runs/first-run
 
-The agent reads the task, calls tools in the simulated apps, and receives a score.
-Each task starts with its own app data. This command allows up to five minutes for
-the task's model and tool loop; setup and scoring can take additional time.
-
-These examples select `--toolset api`, the same tool interface used by hosted
-Beaker runs. It lets the agent discover endpoints with `api_search` and call them
-with `api_fetch`. The CLI also offers `--toolset zapier`, its default, which uses
-tool search and execution. Keep the toolset fixed when comparing runs.
-
-## Understand the results
-
-The command prints a summary and saves these files in the output directory:
-
-| File | Contents |
-| --- | --- |
-| `<task-name>.json` | Scores, model messages, tool calls, app state, and any error for one task. |
-| `config.json` | The selected tasks and run settings. |
-| `summary.json` | Average scores per domain and for the full run. |
-
-Use a new output directory for each experiment. To summarize saved results again:
-
-```bash
+# Aggregate a finished (or partial) run directory
 uv run automationbench-skills evaluate --output-dir runs/first-run
 ```
 
-`evaluate` reads the saved scores. It does not call a model or run the tasks again.
-For an unfinished run, it summarizes only the task files already written.
+`run` writes one JSON per task (scores, trajectory, final world state) plus
+`config.json` and `summary.json` to `--output-dir` (default
+`runs/<split>-<timestamp>`). `evaluate` prints the pass rate (mean
+`task_completed_correctly`) and mean `partial_credit`, per domain and overall.
+`--task-timeout <seconds>` caps each rollout; a task that runs out of time is
+still scored on the world it has changed so far. Setup and scoring can take
+additional time. `evaluate` reads saved scores; it does not rerun tasks.
+Use a new output directory for each experiment. A missing provider cost is not zero cost.
 
-| Metric | Meaning |
-| --- | --- |
-| `partial_credit` | Fraction of scored requirements met, from 0 to 1. Useful for tracking progress on tasks with several steps. |
-| `task_completed_correctly` | 1 when the task receives full credit; otherwise 0. |
-| `pass_rate` | Average of `task_completed_correctly` across the completed tasks. |
+The CLI defaults to `--toolset zapier`; use `--toolset api` to match hosted runs.
+Keep the model, tasks, toolset and limits fixed when comparing configurations.
+Use train for development and reserve test for the final, frozen configuration.
 
-A requirement is a check on the simulated apps, such as whether an email was sent
-to the right person. A correct final chat message alone does not complete the task.
-Some checks are excluded from the score, such as conditions already satisfied at
-the start. Breaking a protected condition can count as a failure. Inspect each
-task's `assertion_results` and `error` when investigating a low score.
+### Use Beaker
 
-A task that reaches its time limit keeps credit for work completed so far. Check
-errors before comparing scores: a provider failure is different from an agent
-choosing the wrong action. Cost is shown only when the provider reports it;
-a missing cost is not zero cost.
-
-## Improve the agent
-
-The agent reads instructions from `prompts/system.md` and can read skill files
-from `skills/`. A skill is a folder containing a `SKILL.md`. Its YAML frontmatter
-sets the `name` and `description`; the Markdown body contains the instructions:
-
-```text
-skills/
-  apps/gmail/SKILL.md
-  apps/google_sheets/SKILL.md
-  domains/sales/SKILL.md
-```
-
-The included skills are short starting points. Add procedures that help the agent
-use an app or complete a type of task. The agent uses `list_skills` to see available
-skills and `read_skill` to read one. Skills and prompts are read for each task, so
-your edits take effect on the next run.
-
-Compare the agent with and without skills on the same training tasks:
-
-```bash
-uv run automationbench-skills run \
-  --split train --limit 3 --no-skills --prompts-dir prompts \
-  --toolset api --max-concurrent 1 --task-timeout 300 \
-  --output-dir runs/baseline
-
-uv run automationbench-skills run \
-  --split train --limit 3 --skills-dir skills --prompts-dir prompts \
-  --toolset api --max-concurrent 1 --task-timeout 300 \
-  --output-dir runs/with-skills
-```
-
-The baseline uses `prompts/system_no_skills.md` and has no skill tools. The skills
-run uses `prompts/system.md` and enables the skill tools. Keep the model, tasks,
-toolset, and limits the same when comparing these configurations.
-
-Use training tasks to develop the agent. Once you finish editing and selecting a
-configuration, run it with `--split test` for a held-out evaluation. Remove
-`--limit` to run the whole split.
-
-## Choose a model
-
-Use `--model` to select a model your provider account can access. Set the matching
-key in `.env`:
-
-| Model selection | Key | API selected automatically |
-| --- | --- | --- |
-| Direct OpenAI model | `OPENAI_API_KEY` | Responses |
-| `claude-*` | `ANTHROPIC_API_KEY` | Anthropic Messages |
-| `gemini-*` | `GEMINI_API_KEY` | Gemini interactions |
-| OpenRouter `vendor/model` name | `OPENROUTER_API_KEY` | OpenRouter Chat Completions |
-
-The table applies when no gateway URL or API override is set. Use
-`--reasoning-effort` for the model's supported reasoning level; `default` omits
-that setting. `--reasoning-enabled` enables reasoning for OpenRouter models that
-use an on/off setting.
-
-For an OpenAI-compatible gateway, set its key in `.env` and pass its URL, model
-name, and key variable explicitly. Replace the example values:
-
-```bash
-uv run automationbench-skills run \
-  --split train --limit 1 --skills-dir skills --prompts-dir prompts \
-  --toolset api --task-timeout 300 \
-  --model YOUR_MODEL --base-url https://YOUR_GATEWAY/v1 \
-  --api chat_completions --api-key-var GATEWAY_API_KEY
-```
-
-Chat Completions requests have a default output cap of 32,768 tokens and up to
-three attempts per model turn. Each attempt has a 300-second timeout; the whole
-turn, including retries, has a 600-second limit. `--task-timeout` can stop a task
-earlier. Native provider APIs have different request limits.
-
-For all command options, run `uv run automationbench-skills run --help`.
-
-## Use Beaker
-
-Beaker can run experiments that edit the skills, prompts, and agent code to
-improve task scores. This recipe already includes the integration in `.beaker/`.
-You do not need to write an integration.
-
-Fork this repository, connect your fork to Beaker, and follow the
-[Beaker getting-started tutorial](https://www.withbeaker.ai/docs/getting-started/getting-started)
-for account and repository setup. Select the `automationbench-skills` integration.
-
-From the `automationbench` directory in your fork, run `uv sync --locked` if you
-have not installed the project yet. Then sign in and configure your agent.
-Replace `YOUR_GITHUB_NAME` with the owner of your fork:
+Fork this repository and connect it using the
+[getting-started tutorial](https://www.withbeaker.ai/docs/getting-started/getting-started).
+From `automationbench`, replace `YOUR_GITHUB_NAME` with your fork owner:
 
 ```bash
 uv run beaker login
 uv run beaker agent setup my-automationbench-agent \
   --integration-id automationbench-skills --repo YOUR_GITHUB_NAME/beaker-cookbook
 uv run python .beaker/upload_splits.py
+# Replace REVISION with the revision returned by the upload
+uv run beaker run smoke --dataset automationbench-skills-quickstart@REVISION --strict
 ```
 
-The uploader creates the `automationbench-skills-quickstart` dataset with
-**36 training tasks and 18 test tasks**, spread across all six domains. It includes
-the task data and grading requirements automatically. Use the dataset revision
-returned by the upload when selecting a dataset for a run.
+Smoke checks setup and dataset loading without running a model. Start an
+optimization run in Beaker with this integration and the uploaded dataset revision.
 
-To check the integration and dataset before launching, replace `REVISION` below:
+## Baseline vs. skills
+
+- **Vanilla**: `--no-skills` (or no `--skills-dir`). No skill tools; the
+  system prompt is `prompts/system_no_skills.md`, which ships as the benchmark's
+  own prompt.
+- **Skills**: `--skills-dir skills`. The system prompt is `prompts/system.md`
+  (the benchmark's prompt plus a paragraph on using the skills) and the agent
+  has `list_skills()` / `read_skill(skill_id)` over the skills directory. An
+  empty skills directory is fine.
+
+A skill is a folder with a `SKILL.md` (YAML frontmatter `name`/`description`,
+markdown body). Its ID is its path under `skills/`:
+
+```text
+skills/
+  domains/{sales,marketing,operations,support,finance,hr}/SKILL.md
+  apps/{gmail,google_sheets,google_drive,slack,salesforce,intercom,jira}/SKILL.md
+```
+
+The shipped skills are seeds (frontmatter plus a one-line stub); filling, adding,
+splitting and merging them is the optimizer's job. `list_skills` returns every ID
+with its description, no filtering. The seed apps are the most frequent ones in
+the tasks' `zapier_tools`.
+
+## Splits
+
+We reviewed AutomationBench's task instructions, metadata, and grader code and
+identified **122 original-source cases with data-integrity defects**. These historical
+exclusions are retained for ordinary CLI splits; they are not claims about PI's repairs.
+The split loader excludes these
+cases before use, yielding **374 train and 104 test cases**, with case order and
+split membership preserved. Exclusions address defective tasks or grading, not
+case difficulty or agent performance.
+
+See [exclusion reasons and source links](src/automationbench_skills/splits/EXCLUSIONS.md)
+for the evidence and [split documentation](src/automationbench_skills/splits/README.md)
+for counts, generation, and held-out evaluation.
+
+`uv run python .beaker/upload_splits.py` uses the first six train and three test
+cases per domain from the filtered splits: **54 cases (36 train / 18 test)**.
+Hosted datasets change only when uploaded.
+
+## Models
+
+`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort medium`. Routing
+follows the benchmark (`vendored/model_setup.py`): `claude-*` goes to
+Anthropic, `gemini-*` to the Gemini interactions API. Other names served
+directly by OpenAI (no `--base-url` or `OPENAI_BASE_URL`) go to the Responses
+API, because OpenAI rejects function tools on chat completions for gpt-5.4+
+models unless `reasoning_effort` is `"none"`; a gateway stays on chat completions. `--api` overrides the choice.
+`--reasoning-effort` maps to each API's reasoning setting. For a gateway:
 
 ```bash
-uv run beaker run smoke \
-  --dataset automationbench-skills-quickstart@REVISION --strict
+uv run automationbench-skills run --split test --limit 3 \
+  --model YOUR_MODEL --base-url https://YOUR_GATEWAY/v1 \
+  --api chat_completions --api-key-var GATEWAY_API_KEY
 ```
 
-This checks setup and dataset loading. It does not run the agent or test model
-quality. Start an optimization run in Beaker using the connected recipe and that
-dataset revision. The hosted model defaults to GPT-5.6 Luna with medium reasoning.
+For a plain OpenAI-compatible gateway, pass `--api chat_completions` explicitly.
+Without a gateway or API override, Claude uses `ANTHROPIC_API_KEY` and Gemini
+uses `GEMINI_API_KEY`.
 
-In Beaker, **Checks** show which task requirements passed or failed. Failed checks
-include available observations from grading to help explain the result.
-**OUTPUT** summarizes changes to the simulated apps. Large outputs may be
-shortened; scoring still uses the full returned app state and write history.
-The optimization score combines 80% partial credit and 20% full-task completion.
+A `vendor/model` name (e.g. `z-ai/glm-5.3-flash`) routes to OpenRouter using
+`OPENROUTER_API_KEY`; `--reasoning-enabled` toggles reasoning for models that
+only expose an on/off switch.
 
-## Dataset and evaluation scope
+## Chat Completions limits
 
-The recipe covers sales, marketing, operations, support, finance, and HR. Its
-standard splits load **374 training tasks and 104 test tasks** from 600 public
-tasks. The quickstart dataset is a smaller selection from these splits.
+OpenAI-compatible Chat Completions calls use **32,768 output tokens** (a 24,576-token
+reasoning allowance plus 8,192 for the answer), at most **three attempts per model
+turn**, a **300-second timeout per attempt**, and a **600-second deadline** for the
+whole turn, covering every attempt and the backoff between them. SDK retries are
+disabled. These limits apply to the hosted Beaker gateway and local runs using
+`--api chat_completions`. Direct OpenAI CLI
+runs select native Responses by default. Responses retries empty output up to
+three attempts, then raises a model error; valid refusal and reasoning output
+is preserved. Anthropic context overflow preserves earned credit. Other native
+provider retry behavior follows the copied upstream clients.
 
-The selection excludes 122 task names based on an audit of the original benchmark.
-That audit does not establish which issues remain in PI. See the
-[dataset guide](src/automationbench_skills/splits/README.md) for selection details
-and evaluation guidance. Compare runs on the same tasks, benchmark revision,
-model, toolset, and limits.
+The defaults are named constants in `src/automationbench_skills/clients.py`.
+Reasoning counts toward the completion cap on most providers, so a reasoning
+budget in `ModelSpec.extra_body` (OpenRouter's `{"reasoning": {"max_tokens": N}}`)
+sets the cap to that budget plus the answer allowance; where the provider honors
+the budget, a call stops reasoning and still answers. The CLI does not expose
+`extra_body`, and a budget applies only to runs that call OpenRouter directly:
+hosted runs send none, and the Beaker gateway accepts `reasoning.effort`,
+`enabled`, and `exclude` but rejects a token budget. A lower output cap in
+`extra_body` is honored; a higher one cannot exceed the cap above. A call whose
+reasoning uses the whole cap without answering fails with a model error rather
+than ending the rollout as if the agent had finished. The client does not retry
+that call, since the same request would stop in the same place, but a hosted run
+re-runs the whole case after any model error, up to the run's case retry limit; a
+local run scores the world as the agent left it. The cap can still truncate a
+legitimate response, so compare task accuracy and truncation when changing it.
+Hosted model requests retain per-attempt traces, and returned responses retain
+usage/cost accounting.
+Tool arguments pass unchanged to the existing environment parser; this client
+adds no batch validation or format-recovery instructions. Rebuild the Integration
+image from the updated cookbook commit before starting hosted evaluations.
 
-## Further reading
+## Reference numbers
 
-- [Maintainer guide](MAINTAINING.md): integration internals, custom dataset format, and development checks.
-- [Attribution and licenses](ATTRIBUTION.md): benchmark sources and copied provider code.
+Upstream reports strict pass rates (`task_completed_correctly`) of roughly
+40–60% for frontier models on the public set. That is not the AutomationBench-AA
+number, which adds guardrail and hidden-task components and uses a different
+harness.
+
+Historical result on the original, unfiltered 150-task test split (`--max-concurrent 16`, one seed;
+skills arm uses `--skills-dir skills`, the seed skills):
+
+| model | arm | pass_rate | partial_credit |
+|---|---|---|---|
+| `gpt-6-astra` (`--reasoning-effort max`) | no skills | 0.510 | 0.829 |
+| `gpt-6-astra` (`--reasoning-effort max`) | skills | 0.507 | 0.837 |
+| `z-ai/glm-5.3-flash` via OpenRouter (`--reasoning-effort max`) | no skills | 0.333 | 0.701 |
+| `z-ai/glm-5.3-flash` via OpenRouter (`--reasoning-effort max`) | skills | 0.313 | 0.713 |
+| `qwen/qwen3.8-flash` via OpenRouter (`--reasoning-effort default --reasoning-enabled`) | no skills | 0.413 | 0.795 |
+| `qwen/qwen3.8-flash` via OpenRouter (`--reasoning-effort default --reasoning-enabled`) | skills | 0.447 | 0.802 |
+
+### How a case is scored
+
+There is no expected answer. Each task is a prompt against a simulated world
+(Salesforce, Gmail, Sheets, ... as JSON records). After the agent acts, a list
+of assertions is checked against that world
+(`salesforce_campaign_member_exists`, `gmail_message_sent_to`, ...); each holds
+or does not. Some checks are excluded, including conditions already satisfied at the start.
+Breaking a protected condition can still count as a failure. Inspect
+`assertion_results` and `error` alongside the score.
+
+`partial_credit` is the share of scored requirements met (0–1), providing a
+denser signal than `task_completed_correctly` (full credit or not).
+The hosted objective in `.beaker/beaker_integration.py` combines **80% partial
+credit and 20% full-task completion**. `pass_rate` is the mean full-task score.
+
+## Development
+
+```bash
+uv sync --group dev --locked
+uv run ruff check && uv run ruff format --check
+uv run python -m mypy
+uv build --no-sources
+BEAKER_AGENT_KEY= uv run python -m pytest -q  # scripted or mocked clients
+```
+
+## Attribution
+
+AutomationBench is MIT-licensed by Zapier, Inc. See [ATTRIBUTION.md](ATTRIBUTION.md)
+and [LICENSE](LICENSE).
