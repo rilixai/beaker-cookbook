@@ -1,33 +1,15 @@
-"""Beaker repository Integration for AutomationBench skills.
+"""Beaker integration for AutomationBench skills.
 
-The candidate is the live ``skills/`` tree and the agent's system prompt,
-``prompts/system.md``. Evaluation policy stays here: load the frozen task from
-each dataset row, run the harness ``run_one`` path, and score the benchmark's
-deterministic assertion metrics.
+Load each dataset row's frozen task, run the candidate, and score with PI's
+assertions from ``expected``. Evaluation policy stays in this integration.
 
-Contract: the dataset row's ``expected`` holds the task's assertion list
-(``{"assertions": [...]}``), ``run_case`` exposes bounded app changes as the
-observed output and reports the final world state separately in
-``CaseResult.context["end_state"]``. Transient update history travels separately
-in ``context["grading_state"]`` and is restored before ``score_case``
-runs the benchmark's own ``partial_credit`` rubric against that state,
-emitting one ``Check`` per assertion so the optimizer sees which requirements
-failed.
+``run_case`` returns bounded app changes for display and the full world in
+``CaseResult.context["end_state"]``. Spreadsheet write history travels in
+``context["grading_state"]`` and is restored before ``score_case`` applies PI's
+``partial_credit`` rubric. Final cell values alone cannot recover write history.
 
-Assertions reference simulated records by opaque id (``"contact_id":
-"003xx000004MNO1"``); the scorer resolves those against the initial and end
-world state so each check reads as ``salesforce_campaign_member_exists ·
-contact_id=David Park · campaign_id=Q1 Product Launch Webinar`` rather than a
-dict of ids. These Checks verify conditions, rather than compare field values:
-their complete parameters are preserved in ``description``, with no
-``expected``/``predicted`` pair. Failed conditions carry bounded readable summaries
-of comparisons and evaluator observations in ``message``, captured during trusted scoring.
-The app diff is shown once, never repeated on individual Checks.
-
-Model calls are traced by subclassing the recipe client (see
-``_TracedChatCompletionsClient`` and ``_TracedAnthropicClient``); the recipe
-rollout is what talks to the model, so there is no framework integration to
-enable here.
+Each assertion produces a Check with its parameters and available grading
+observations. The app diff is displayed once per case.
 """
 
 from __future__ import annotations
