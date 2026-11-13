@@ -18,6 +18,7 @@ from anthropic import AsyncAnthropic
 from anthropic import BadRequestError as AnthropicBadRequestError
 from anthropic.types import Message as AnthropicMessage
 from automationbench.domains import get_combined_dataset
+from automationbench.schema.world import WorldState
 from beaker import CaseResult, RetryableCaseError
 from beaker.tracing import current_trace, local_capture
 from fake_client import ScriptedClient
@@ -155,6 +156,71 @@ async def test_source_provenance_does_not_change_api_interface(row, source, tmp_
     )
     assert score.field_scores["partial_credit"] == 1
     assert case.metadata["runtime_benchmark_commit"] == PI_COMMIT
+
+
+@pytest.mark.parametrize("writes", ["changed", "unchanged", "reverted", "none", "protected"])
+async def test_sheet_update_history_survives_hosted_scoring(row, tmp_path, monkeypatch, writes):
+    import beaker_integration as integration
+
+    for task in get_combined_dataset(["finance"]):
+        info = json.loads(task["info"]) if isinstance(task["info"], str) else task["info"]
+        if info["task_name"] == "finance.duplicate_payment_detection":
+            task["info"] = info
+            break
+    row["runtime_fixture"]["task"] = task
+    row["input"]["task_name"] = info["task_name"]
+    row["expected"]["assertions"] = info["assertions"]
+    row["metadata"].update(hashes(row["runtime_fixture"]))
+    parsed = TaskRow.model_validate(row)
+    case = await anext(TaskSetup().load_cases(parsed, runtime=SimpleNamespace()))
+    sheets = WorldState(**parsed.runtime_fixture.initial_state()).google_sheets
+    worksheet = next(ws for ws in sheets.worksheets if ws.id == "ws_jan_pmts")
+    initial_rows = {r.row_id: r.cells for r in sheets.rows if r.worksheet_id == worksheet.id}
+    headers = worksheet.headers or list(initial_rows[2])
+    column = chr(ord("A") + headers.index("Flag"))
+    calls = []
+    row_ids = [] if writes == "none" else [3] if writes == "protected" else [2, 4, 5, 7]
+    for row_id in row_ids:
+        original = initial_rows[row_id]["Flag"]
+        values = [original] if writes == "unchanged" else ["Potential duplicate"]
+        if writes == "reverted":
+            values.append(original)
+        for value in values:
+            calls.append(
+                {
+                    "name": "api_fetch",
+                    "arguments": {
+                        "endpoint": "sheets.spreadsheets.values.update",
+                        "path": {"spreadsheetId": "ss_vendor_pmts", "range": f"'{worksheet.title}'!{column}{row_id}"},
+                        "params": {"valueInputOption": "RAW"},
+                        "body": {"values": [[value]]},
+                    },
+                }
+            )
+    client = ScriptedClient([{"tool_calls": calls}])
+    monkeypatch.setattr(integration, "_client_for", lambda _: (client, integration.default_model_spec()))
+    monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
+    live = {}
+    run_rollout = integration.run_rollout_raw
+
+    async def capture_rollout(*args, **kwargs):
+        output = await run_rollout(*args, **kwargs)
+        live.update(output)
+        return output
+
+    monkeypatch.setattr(integration, "run_rollout_raw", capture_rollout)
+    with local_capture(tmp_path, case_id=case.id, candidate_id="test", strict_evidence=False):
+        result = await integration.run_case(case_input=case.input, runtime=SimpleNamespace(trace=current_trace()))
+    # Exercise the hosted JSON boundary, not just in-process object passing.
+    transported = CaseResult(output=result.output, context=json.loads(json.dumps(result.context)))
+    score = await score_case(case=case, result=transported, case_files_dir=tmp_path)
+    assert not live.get("error")
+    expected = [True] * 6 if writes in {"changed", "reverted"} else [False, False, True, True, False, False]
+    if writes == "protected":
+        expected[2] = False
+    assert [a["passed"] for a in live["_assertion_results"][:6]] == expected
+    assert [c.verdict == "pass" for c in score.checks[:6]] == expected
+    assert score.field_scores == live["metrics"]
 
 
 async def test_lookup_fault_preserves_emails_and_trace_gap_preserves_execution(row, tmp_path):

@@ -23,6 +23,7 @@ from beaker.tracing import current_trace
 from mcp import Client as MCPClient
 from mcp.server.mcpserver import MCPServer
 
+from automationbench_skills.grading_state import capture_grading_state
 from automationbench_skills.model_protocol import (
     AssistantMessage,
     Client,
@@ -189,6 +190,7 @@ class AutomationBenchEnv:
             for a, passed in zip(assertions, final_results, strict=True)
         ]
         state["_end_state"] = toolset._world.model_dump(mode="json")
+        state["_grading_state"] = capture_grading_state(toolset._world)
         state.setdefault("_perf", {})
         state.pop("world")
         return state

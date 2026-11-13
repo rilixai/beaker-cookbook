@@ -8,7 +8,8 @@ deterministic assertion metrics.
 Contract: the dataset row's ``expected`` holds the task's assertion list
 (``{"assertions": [...]}``), ``run_case`` exposes bounded app changes as the
 observed output and reports the final world state separately in
-``CaseResult.context["end_state"]``. ``score_case``
+``CaseResult.context["end_state"]``. Transient update history travels separately
+in ``context["grading_state"]`` and is restored before ``score_case``
 runs the benchmark's own ``partial_credit`` rubric against that state,
 emitting one ``Check`` per assertion so the optimizer sees which requirements
 failed.
@@ -66,6 +67,7 @@ from pydantic import BaseModel, Field, model_validator
 from world_diff import ServiceDiffs, service_for
 
 from automationbench_skills.clients import DEFAULT_MODEL_REQUEST_TIMEOUT, CostTrackingChatCompletionsClient
+from automationbench_skills.grading_state import restore_grading_state
 from automationbench_skills.model_protocol import (
     Client,
     ClientConfig,
@@ -311,6 +313,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             "trace_capture": fixture.scenario.trace_capture,
             "error": error,
             "end_state": to_json_safe(end_state),
+            "grading_state": to_json_safe(output.get("_grading_state")),
         }
         display = _budget_output(to_json_safe(observed), context)
         return CaseResult(output=display, output_kind="record" if display is not None else "none", context=context)
@@ -464,6 +467,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
     diagnostics: Mapping[int, Any] = {}
     if isinstance(end_state, Mapping):
         world = WorldState(**end_state)
+        restore_grading_state(world, context.get("grading_state"))
         state: dict[str, Any] = {
             "info": {"assertions": assertions},
             "world": world,

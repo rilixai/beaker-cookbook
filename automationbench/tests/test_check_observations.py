@@ -183,6 +183,7 @@ async def test_large_scoring_state_takes_priority_over_display_output(
         "runtime_benchmark_commit": integration.PI_COMMIT,
         "tool_interface": "pi_api",
         "trace_capture": "complete",
+        "grading_state": {"google_sheets_updated_row_keys": ["ss:ws:2"]},
     }
     envelope = {"context": context, "output": None, "output_kind": "record"}
     padding_bytes = (
@@ -204,7 +205,11 @@ async def test_large_scoring_state_takes_priority_over_display_output(
     monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
     monkeypatch.setattr(integration, "_client_for", lambda _: (SimpleNamespace(close=AsyncMock()), None))
     monkeypatch.setattr(
-        integration, "run_rollout_raw", AsyncMock(return_value={"completion": ["done"], "_end_state": end})
+        integration,
+        "run_rollout_raw",
+        AsyncMock(
+            return_value={"completion": ["done"], "_end_state": end, "_grading_state": context["grading_state"]}
+        ),
     )
     monkeypatch.setattr(ServiceDiffs, "to_output", lambda _: observed)
 
