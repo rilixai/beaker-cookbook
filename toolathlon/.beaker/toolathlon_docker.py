@@ -41,6 +41,11 @@ def docker(*args: str, timeout: int = 900) -> str:
 
 def prepare_docker(cache: Path) -> str:
     """Prepare immutable tools once per VM; never share live service state."""
+    # Beaker gives evaluator children a minimal PATH without sbin. Debian's
+    # docker.io installs dockerd/docker-proxy there; dockerd also needs iptables.
+    os.environ["PATH"] = os.pathsep.join(
+        dict.fromkeys((*os.environ.get("PATH", os.defpath).split(os.pathsep), "/usr/local/sbin", "/usr/sbin", "/sbin"))
+    )
     cache.mkdir(parents=True, exist_ok=True)
     with (cache / "docker-setup.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -52,7 +57,9 @@ def prepare_docker(cache: Path) -> str:
                     "Docker is unavailable. Start Docker or use a Beaker VM sandbox with dockerd."
                 ) from None
             with (cache / "dockerd.log").open("a") as log:
-                process = subprocess.Popen(["dockerd"], stdout=log, stderr=log, start_new_session=True)
+                process = subprocess.Popen(
+                    [require_command("dockerd")], stdout=log, stderr=log, start_new_session=True
+                )
             for _ in range(90):
                 try:
                     docker("info", timeout=5)

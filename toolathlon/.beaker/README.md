@@ -64,7 +64,9 @@ Case metadata is normalized to `runner: containerized`, including existing datas
 rows labeled `native`. Execution does not depend on that old label, so an existing
 quickstart dataset does not need to be uploaded again.
 
-The Beaker image installs Docker and socat and needs a VM sandbox. Each case gets
+The Beaker image installs Docker and socat and needs a VM sandbox. Bootstrap adds
+the system `sbin` directories to Beaker’s minimal evaluator `PATH` so `dockerd`,
+`docker-proxy` and `iptables` can be found. Each case gets
 a private Docker-in-Docker host with its own network, image-store volume and
 application state. Only its required Canvas, email, WooCommerce or Kubernetes
 services are started, using the upstream setup scripts. The shared VM caches the
