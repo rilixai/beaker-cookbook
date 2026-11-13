@@ -4,5 +4,6 @@ Setup, datasets, and objectives are in the [main README](../README.md#beaker-int
 
 - **Smoke:** strict smoke checks structure and labeled data only; it does not run the agent.
 - **Isolation:** each case runs in a fresh subprocess (`appworld_subprocess.py`, `appworld_case_worker.py`) because AppWorld mutates process-global state. Variants in a scenario run sequentially; cases run in parallel. Cancellation kills the worker process group; failures keep a traceback artifact.
-- **Setup:** `appworld_setup.py` reuses local data or downloads the pinned assets, verifying checksums.
+- **Setup:** `appworld_setup.py` reuses local data or downloads the pinned assets, verifying checksums. It also checks `APPWORLD_MODEL`, the agent's `configs/model.toml` block for runs without an optimization model, and the key that block needs.
+- **Models:** the worker calls an optimization model through `beaker.inference_target`; otherwise it uses the `APPWORLD_MODEL` block, calling its `base_url` endpoint directly when it has one. Its event loop keeps real time, because AppWorld freezes Python's clocks and the client's timeouts and retry backoff would never end.
 - **Tracing:** Beaker traces candidate execution, not scoring, and provider errors surface in evaluation runs. Worker traces are imported through the Beaker SDK's capture-adoption interfaces, so after an SDK upgrade recheck trace import as well as results.
