@@ -12,6 +12,7 @@ from collections import Counter
 from collections.abc import Callable
 from contextvars import ContextVar
 from functools import cache
+from threading import Lock
 from typing import Any
 
 from loguru import logger
@@ -46,6 +47,7 @@ COMMUNICATE_SCORING = CommunicateScoring(scorer=CommunicateScorer.SUBSTRING)
 
 AgentBuilder = Callable[[list[Tool], str], HalfDuplexAgent[Any]]
 _agent_builder: ContextVar[AgentBuilder] = ContextVar("tau2_bench_agent_builder")
+_setup_lock = Lock()
 
 
 def _agent_factory(*, tools: list[Tool], domain_policy: str, **_: Any) -> HalfDuplexAgent[Any]:
@@ -66,7 +68,9 @@ def _setup() -> None:
 
 
 def run_config(domain: Domain, agent_model: str = DEFAULT_AGENT_MODEL) -> TextRunConfig:
-    _setup()
+    # Lock the cache lookup as well as initialization so concurrent misses cannot register twice.
+    with _setup_lock:
+        _setup()
     return TextRunConfig(
         domain=domain,
         agent=AGENT_NAME,
@@ -124,7 +128,7 @@ def evaluate(simulation: SimulationRun, domain: Domain, task_id: str) -> RewardI
     """tau2's reward: the product of the task's ``reward_basis`` components.
 
     Airline is DB x COMMUNICATE (substring match). Retail is DB x NL_ASSERTION,
-    judged by upstream's pinned NL-assertion model.
+    judged by GPT-6 Luna.
     """
     config = run_config(domain)
     selected = task(domain, task_id)

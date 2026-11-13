@@ -57,8 +57,9 @@ this directory with `python -m pip install . ./vendor/tau2`.
 - **User simulator (fixed):** `openai/gpt-5.5` at reasoning `low`, upstream's 2.0
   benchmark default. It never follows the run's model choice, so a comparison changes
   the agent, not the test. Its calls are traced in `tau2.user_sim` stages.
-- **Retail NL-assertion judge (fixed):** upstream's `gpt-5.4-mini-2026-03-17` at
-  reasoning `low`. It runs in `score_case` with `OPENAI_API_KEY`.
+- **Retail NL-assertion judge (fixed across candidates):** GPT-6 Luna
+  (`gpt-6-luna`) at reasoning `low`. It runs in `score_case` through the
+  Responses API.
 
 Simulator and judge calls count toward a run's spend, along with the agent's calls.
 Traces separate agent cost from simulator cost.
@@ -70,7 +71,7 @@ The objective is τ²-bench's reward, 0 or 1: the product of the task's `reward_
 | Domain | Reward | Deterministic? |
 |---|---|---|
 | airline | `DB` × `COMMUNICATE` | Yes. Communicate checks use the **substring** scorer (`--communicate-scorer substring`), not the default LLM judge. |
-| retail | `DB` × `NL_ASSERTION` (2 tasks: `DB` only) | No. NL assertions are judged by upstream's pinned LLM judge. |
+| retail | `DB` × `NL_ASSERTION` (2 tasks: `DB` only) | No. GPT-6 Luna grades the NL assertions. |
 
 `field_scores` hold `reward`, `db`, plus `communicate` (airline) or `nl_assertion`
 (retail). `checks` show how the conversation ended, the DB match, and one row per

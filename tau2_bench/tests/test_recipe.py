@@ -282,7 +282,13 @@ async def test_retail_requires_one_verdict_per_assertion(
         "complete": [matching],
     }[verdicts]
     reply = AssistantMessage(role="assistant", content=json.dumps({"results": judge_results}))
-    monkeypatch.setattr(upstream_judge, "generate", lambda **_: reply)
+
+    def judge(*, model: str, reasoning_effort: str, **_: Any) -> AssistantMessage:
+        assert model == "openai/responses/gpt-6-luna"
+        assert reasoning_effort == "low"
+        return reply
+
+    monkeypatch.setattr(upstream_judge, "generate", judge)
     case = Case(id=f"retail-{task_id}", input={"domain": "retail", "task_id": task_id}, expected={})
     recorded = scoring.to_context(simulation(TerminationReason.USER_STOP, task_id))
     result = CaseResult(output=None, output_kind="none", context={"simulation": recorded})

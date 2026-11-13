@@ -7,6 +7,7 @@ import json
 import math
 import os
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Literal
 from urllib.request import urlopen
 
@@ -57,9 +58,14 @@ def ensure_data() -> Path:
         if hashlib.sha256(content).hexdigest() != digest:
             raise ValueError(f"Checksum mismatch for {name}; no data was written.")
         path.parent.mkdir(parents=True, exist_ok=True)
-        partial = path.with_name(f"{path.name}.{os.getpid()}.partial")
-        partial.write_bytes(content)
-        partial.replace(path)
+        temporary = NamedTemporaryFile(dir=path.parent, prefix=f"{path.name}.", suffix=".partial", delete=False)
+        partial = Path(temporary.name)
+        try:
+            with temporary:
+                temporary.write(content)
+            partial.replace(path)
+        finally:
+            partial.unlink(missing_ok=True)
     return root
 
 
