@@ -7,11 +7,15 @@ import copy
 import hashlib
 import json
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from anthropic import AsyncAnthropic
+from anthropic.types import Message as AnthropicMessage
 from automationbench.domains import get_combined_dataset
 from beaker import CaseResult, RetryableCaseError
 from beaker.tracing import current_trace, local_capture
@@ -288,3 +292,39 @@ async def test_hosted_failure_after_a_successful_write(row, tmp_path, monkeypatc
     assert client.client.is_closed()
     if failure in {"provider_timeout", "task_deadline"}:
         assert cancelled.is_set()
+
+
+async def test_empty_anthropic_response_retries_the_case(row, tmp_path, monkeypatch):
+    import beaker_integration as integration
+
+    parsed = TaskRow.model_validate(row)
+    case = await anext(TaskSetup().load_cases(parsed, runtime=SimpleNamespace()))
+    reply = AnthropicMessage.model_validate(
+        {
+            "id": "empty",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-haiku-5-5",
+            "content": [],
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 10, "output_tokens": 0},
+        }
+    )
+    final_message = AsyncMock(return_value=reply)
+
+    @asynccontextmanager
+    async def stream(**kwargs):
+        yield SimpleNamespace(get_final_message=final_message)
+
+    client = integration._TracedAnthropicClient(AsyncAnthropic(api_key="test"))
+    monkeypatch.setattr(client.client.messages, "stream", stream)
+    monkeypatch.setattr(
+        integration, "_client_for", lambda _: (client, integration.ModelSpec(name=reply.model, api="anthropic"))
+    )
+    monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
+    with local_capture(tmp_path, case_id=case.id, candidate_id="test", strict_evidence=False):
+        with pytest.raises(RetryableCaseError, match="no content"):
+            await integration.run_case(case_input=case.input, runtime=SimpleNamespace(trace=current_trace()))
+    final_message.assert_awaited_once()
+    assert client.client.is_closed()

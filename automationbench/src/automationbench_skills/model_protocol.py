@@ -260,6 +260,19 @@ class OpenAIChatCompletionsClient(Client):
 
 
 class AnthropicMessagesClient(Client):
+    async def raise_from_native_response(self, response: Any) -> None:
+        if response is None:
+            raise ModelError("Model returned no response")
+        for block in response.content or []:
+            if (
+                block.type == "tool_use"
+                or (block.type == "text" and block.text)
+                or (block.type == "thinking" and block.thinking)
+                or (block.type == "redacted_thinking" and block.data)
+            ):
+                return
+        raise ModelError("Model returned no content and did not call any tools")
+
     def setup_client(self, config: ClientConfig) -> AsyncAnthropic:
         return AsyncAnthropic(
             api_key=os.environ[config.api_key_var], max_retries=config.max_retries, timeout=config.timeout

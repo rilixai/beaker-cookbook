@@ -10,12 +10,13 @@ from typing import Any
 
 import httpx
 import pytest
+from anthropic.types import Message as AnthropicMessage
 from beaker.tracing import local_capture
 from openai import APIStatusError, AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
 from automationbench_skills.clients import CostTrackingChatCompletionsClient
-from automationbench_skills.model_protocol import ModelError, OpenAIChatCompletionsClient
+from automationbench_skills.model_protocol import AnthropicMessagesClient, ModelError, OpenAIChatCompletionsClient
 from automationbench_skills.runner import ModelSpec
 
 
@@ -147,6 +148,47 @@ async def test_valid_nonempty_provider_signals_are_not_rejected(signal: str) -> 
         assert response.message.content == "Provider response"
     elif signal == "reasoning_content":
         assert response.message.reasoning_content == "Provider response"
+
+
+@pytest.mark.parametrize(
+    ("content", "valid"),
+    [
+        (None, False),
+        ([], False),
+        ([{"type": "text", "text": ""}], False),
+        ([{"type": "thinking", "thinking": "", "signature": "test"}], False),
+        ([{"type": "redacted_thinking", "data": ""}], False),
+        ([{"type": "text", "text": "Done"}], True),
+        ([{"type": "tool_use", "id": "call", "name": "api_search", "input": {}}], True),
+        ([{"type": "thinking", "thinking": "Plan", "signature": "test"}], True),
+        ([{"type": "redacted_thinking", "data": "opaque"}], True),
+    ],
+)
+async def test_anthropic_response_validation(content: Any, valid: bool) -> None:
+    native = (
+        AnthropicMessage.model_validate(
+            {
+                "id": "reply",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-haiku-5-5",
+                "content": content,
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 10, "output_tokens": 1},
+            }
+        )
+        if content is not None
+        else None
+    )
+    client = AnthropicMessagesClient(object())
+    if valid:
+        await client.raise_from_native_response(native)
+        response = await client.from_native_response(native)
+        assert response.message.anthropic_content == [block.model_dump(mode="json") for block in native.content]
+    else:
+        with pytest.raises(ModelError, match="Model returned no"):
+            await client.raise_from_native_response(native)
 
 
 async def test_safety_rejection_is_not_retried_and_remains_visible() -> None:
