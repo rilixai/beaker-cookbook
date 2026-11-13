@@ -30,6 +30,7 @@ from beaker import (
 )
 from pydantic import BaseModel, Field
 from toolathlon_docker import prepare_docker
+from toolathlon_harness import patch_paths
 from toolathlon_native_trace import NativeTrace
 from toolathlon_setup import build_task_row, prepare_toolathlon
 from upload_dataset import EXTERNAL_ACCOUNT_LOCAL_TOOLS, EXTERNAL_ACCOUNT_SERVERS
@@ -94,6 +95,7 @@ class Setup(RunSetup[Row]):
     async def prepare_run(self, *, runtime: SetupRuntime):
         del runtime
         self.cache, self.source = prepare_toolathlon()
+        patch_paths(Path(__file__).resolve().parents[1] / "harness/agent.patch.md")
         yield {"repository": RepositoryRunSetupResult()}
 
     async def load_cases(self, row: Row, *, runtime: SetupRuntime) -> AsyncIterator[Case]:
@@ -358,7 +360,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
 
 
 integration = Integration(
-    targets=repository(("prompts/agent_system_prompt.md",)),
+    targets=repository(("prompts/agent_system_prompt.md", "harness/agent.patch.md")),
     run_setup=Setup,
     run_case=run_case,
     score_case=score_case,

@@ -1,8 +1,13 @@
 # Beaker execution
 
-Beaker may edit **`prompts/agent_system_prompt.md` only**. Its seed is the original
-system prompt shared by the three quickstart tasks. Bootstrap, dependency pins,
-tool implementations and graders remain outside that editable surface.
+Beaker may edit `prompts/agent_system_prompt.md` and `harness/agent.patch.md`.
+The prompt seed is the original system prompt shared by the three quickstart
+tasks. The harness patch seed is empty: it preserves the original agent migrated
+in place to OpenAI Agents 0.20.0.
+
+The full editable harness surface, source references and patch-generation workflow
+are documented in [harness/README.md](../harness/README.md). The candidate patch is
+applied only during the agent phase; original code is restored before grading.
 
 Onboarding uses the original prepared-agent phase
 `container_agent.run_agent_phase → TaskRunner → TaskAgent`, migrated in place to
@@ -12,11 +17,11 @@ and verifies its Git blob hashes. No alternate agent or SDK compatibility layer
 is used. The default Beaker cache is keyed by the source revision and migration;
 `BEAKER_TOOLATHLON_CACHE` can select an explicitly managed cache.
 
-The original provider, MCP registration and context runner are migrated to the
+The baseline provider, MCP registration and context runner are migrated to the
 new APIs. Public lifecycle hooks and `RunConfig.call_model_input_filter` preserve
 Toolathlon's history, turn accounting, truncation, context-error recovery and turn
 budget. Tool aliases, argument coercion, output limits and completion behavior
-remain those of the original agent.
+remain those of the original agent until a candidate changes them.
 
 The upstream `uv.lock` covers two exclusive groups: `agent` (default) runs Agents
 0.20.0, MCP 1.19.0, Pydantic 2.12.3 and `beaker-sdk[openai-agents]==0.6.6`; `excel`

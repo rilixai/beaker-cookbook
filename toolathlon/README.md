@@ -138,7 +138,10 @@ uses upstream's `TOOLATHLON_MODEL_PARAMS_FILE` mechanism. `--system-prompt FILE`
 native-only override for `docs/agent_system_prompt.md`; its upstream workspace
 placeholder `!!<<<<||||workspace_dir||||>>>>!!` remains supported. Full runs use
 prompts in the configured environment. Beaker applies its editable system prompt
-inside every task container. Evaluators and references stay unchanged.
+inside every task container. Beaker can also change the complete agent harness
+through [harness/agent.patch.md](harness/agent.patch.md), applied only during the
+agent phase. [Harness instructions](harness/README.md) describe the editable source.
+Evaluators and references stay unchanged.
 Keep OAuth state and run artifacts private; upstream logs can contain task config.
 
 Source and task data are pinned to

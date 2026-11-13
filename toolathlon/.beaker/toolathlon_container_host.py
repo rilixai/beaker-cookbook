@@ -108,6 +108,7 @@ def main() -> None:
     os.environ["PYTHONUNBUFFERED"] = "1"
     os.environ["TOOLATHLON_CONTAINERIZED_MODE"] = "phased"
     os.environ["TOOLATHLON_PARENT_CAPTURES_RUN_LOG"] = "1"
+    os.environ["TOOLATHLON_AGENT_PATCH"] = "/case/agent_harness.patch"
     run("uv", "sync", "--locked", timeout=600)
     # The original native Excel server alone needs its older MCP version.
     subprocess.run(

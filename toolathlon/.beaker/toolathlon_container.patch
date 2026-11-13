@@ -39,7 +39,17 @@
 +
  # Add socket mount based on container runtime
  if [ "$CONTAINER_RUNTIME" = "podman" ]; then
-@@ -660,7 +684,7 @@
+@@ -656,16 +680,24 @@
+         exit 1
+     fi
+-
++
++    # Candidate code is installed only after trusted preparation and stashing.
++    uv run python /beaker/toolathlon_harness.py stage \
++        "$CONTAINER_RUNTIME" "$CONTAINER_NAME" "$TRUSTED_STASH_DIR/harness" \
++        --patch "$TOOLATHLON_AGENT_PATCH"
++
+     echo "Step 3.3: Running prepared agent..."
      stage_trusted_bundle
      set +e
      run_container_phase \
@@ -48,3 +58,11 @@
          --bundle_file "$CURRENT_CONTAINER_BUNDLE" \
          --debug
      AGENT_EXIT_CODE=$?
+     set -e
+     discard_container_bundle
++    # Restore original code/config and remove added modules before grading.
++    uv run python /beaker/toolathlon_harness.py restore \
++        "$CONTAINER_RUNTIME" "$CONTAINER_NAME" "$TRUSTED_STASH_DIR/harness"
+     if [ "$AGENT_EXIT_CODE" -eq 0 ]; then
+         echo "✓ Agent completed successfully"
+     else

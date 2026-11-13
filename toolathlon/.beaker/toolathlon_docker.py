@@ -193,6 +193,7 @@ def run_containerized_agent(
         raise ValueError(f"Unknown Toolathlon task: {task}")
     image = prepare_docker(cache)
     output.mkdir(parents=True, exist_ok=False)
+    shutil.copyfile(HERE.parent / "harness/agent.patch.md", output / "agent_harness.patch")
     with network(output) as (hosts, ports):
         base = os.environ.get("TOOLATHLON_DOCKER_IMAGE", DEFAULT_IMAGE)
         image_id = docker("image", "inspect", "--format", "{{.Id}}", base)
@@ -231,6 +232,7 @@ def run_containerized_agent(
             "toolathlon_container_agent.py",
             "toolathlon_native_trace.py",
             "toolathlon_container.patch",
+            "toolathlon_harness.py",
         ):
             shutil.copyfile(HERE / filename, bootstrap / filename)
         args = [
