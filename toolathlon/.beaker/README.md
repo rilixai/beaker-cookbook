@@ -5,6 +5,12 @@ The prompt seed is the original system prompt shared by the three quickstart
 tasks. The harness patch seed is empty: it preserves the original agent migrated
 in place to OpenAI Agents 0.20.0.
 
+To launch from the Beaker platform, select the existing `toolathlon` agent, the
+GitHub branch containing this integration, and an existing Toolathlon dataset
+revision. Beaker supplies that dataset's rows to this integration. The recipe
+validates them against the pinned task definitions; it neither creates splits
+nor uploads or selects a dataset. Existing dataset schemas remain unchanged.
+
 The full editable harness surface, source references and patch-generation workflow
 are documented in [harness/README.md](../harness/README.md). The candidate patch is
 applied only during the agent phase; original code is restored before grading.

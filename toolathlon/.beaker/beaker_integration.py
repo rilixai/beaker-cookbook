@@ -32,8 +32,13 @@ from pydantic import BaseModel, Field
 from toolathlon_docker import prepare_docker
 from toolathlon_harness import patch_paths
 from toolathlon_native_trace import NativeTrace
-from toolathlon_setup import build_task_row, prepare_toolathlon
-from upload_dataset import EXTERNAL_ACCOUNT_LOCAL_TOOLS, EXTERNAL_ACCOUNT_SERVERS
+from toolathlon_setup import (
+    EXTERNAL_ACCOUNT_LOCAL_TOOLS,
+    EXTERNAL_ACCOUNT_SERVERS,
+    groundtruth_hashes,
+    load_task_reference,
+    prepare_toolathlon,
+)
 
 from toolathlon_baseline import UPSTREAM_REVISION
 
@@ -102,7 +107,7 @@ class Setup(RunSetup[Row]):
         del runtime
         if row.input.task != row.id or row.expected.task != row.id:
             raise ValueError(f"Mismatched Toolathlon task id: {row.id!r}")
-        canonical = build_task_row(self.source, row.id)
+        canonical = load_task_reference(self.source, row.id)
         if row.input.instruction != canonical["input"]["instruction"]:
             raise ValueError(f"Instruction mismatch for task {row.id!r}")
         if row.expected.model_dump() != canonical["expected"]:
@@ -321,7 +326,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
                 "agent_status": agent_status,
                 "runner": "containerized",
                 "official_evaluation": evaluation,
-                "groundtruth_hashes": build_task_row(source, task)["expected"]["groundtruth_hashes"],
+                "groundtruth_hashes": groundtruth_hashes(source, task),
             }
             return CaseResult(output=observed_output, output_kind="record", context=context)
 

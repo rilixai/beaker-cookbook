@@ -16,6 +16,28 @@ from toolathlon_baseline import UPSTREAM_REVISION
 from toolathlon_baseline.prepare import MIGRATION_PATCH, prepare, prepared_source
 
 
+# MCP servers and local tools backed by third-party accounts (tokens in upstream
+# configs/token_key_session.py). Canvas, emails, WooCommerce and k8s are local containers.
+EXTERNAL_ACCOUNT_SERVERS = frozenset(
+    {
+        "github",
+        "google-cloud",
+        "google_calendar",
+        "google_forms",
+        "google_map",
+        "google_sheet",
+        "huggingface",
+        "notion",
+        "snowflake",
+        "wandb",
+        "yahoo-finance",
+        "youtube",
+        "youtube-transcript",
+    }
+)
+EXTERNAL_ACCOUNT_LOCAL_TOOLS = frozenset({"web_search"})
+
+
 def _ensure_bin_on_path() -> None:
     bin_dir = str(Path(sys.executable).resolve().parent)
     current_path = os.environ.get("PATH", "")
@@ -90,8 +112,8 @@ def groundtruth_hashes(source: Path, task: str) -> dict[str, str]:
     return hashes
 
 
-def build_task_row(source: Path, task: str) -> dict[str, Any]:
-    """Build a canonical dataset row from the pinned upstream Toolathlon checkout."""
+def load_task_reference(source: Path, task: str) -> dict[str, Any]:
+    """Read the official task inputs and scoring references for a platform dataset row."""
     if not re.fullmatch(r"[A-Za-z0-9_-]+", task):
         raise ValueError(f"Unsupported Toolathlon task: {task}")
     task_dir = source / "tasks/finalpool" / task
@@ -103,12 +125,6 @@ def build_task_row(source: Path, task: str) -> dict[str, Any]:
     config = json.loads(config_path.read_text(encoding="utf-8"))
     instruction = instruction_path.read_text(encoding="utf-8").strip()
     gt_hashes = groundtruth_hashes(source, task)
-    initial_dir = task_dir / "initial_workspace"
-    initial_files = (
-        sorted(path.relative_to(initial_dir).as_posix() for path in initial_dir.rglob("*") if path.is_file())
-        if initial_dir.is_dir()
-        else []
-    )
     return {
         "id": task,
         "input": {
@@ -116,16 +132,11 @@ def build_task_row(source: Path, task: str) -> dict[str, Any]:
             "instruction": instruction,
             "mcp_servers": list(config.get("needed_mcp_servers", [])),
             "local_tools": list(config.get("needed_local_tools", [])),
-            "initial_workspace_files": initial_files,
         },
         "expected": {
             "task": task,
             "upstream_revision": UPSTREAM_REVISION,
             "evaluation_module": f"tasks.finalpool.{task}.evaluation.main",
             "groundtruth_hashes": gt_hashes,
-        },
-        "metadata": {
-            "runner": "containerized",
-            "upstream_revision": UPSTREAM_REVISION,
         },
     }
