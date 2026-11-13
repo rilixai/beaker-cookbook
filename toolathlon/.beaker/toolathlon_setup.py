@@ -1,22 +1,19 @@
-"""Prepare and evaluate the pinned Toolathlon benchmark in local and hosted runs."""
+"""Prepare the pinned Toolathlon benchmark in local and hosted runs."""
 
 from __future__ import annotations
 
-import base64
 import fcntl
 import hashlib
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from toolathlon_baseline import QUICKSTART_TASKS, UPSTREAM_REVISION
-from toolathlon_baseline.prepare import MIGRATION_PATCH, prepare, prepared_source, runtime_env
+from toolathlon_baseline import UPSTREAM_REVISION
+from toolathlon_baseline.prepare import MIGRATION_PATCH, prepare, prepared_source
 
 
 def _ensure_bin_on_path() -> None:
@@ -59,22 +56,6 @@ def prepare_toolathlon() -> tuple[Path, Path]:
             if not target.exists() and example.is_file():
                 target.write_bytes(example.read_bytes())
         return cache, source
-
-
-def verify_sandbox_support() -> None:
-    """Check actual enforcement in a disposable process before expensive setup."""
-    probe = subprocess.run(
-        [sys.executable, str(Path(__file__).with_name("toolathlon_sandbox.py")), "--check"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
-    if probe.returncode:
-        raise RuntimeError(
-            "Toolathlon onboarding requires Linux with Landlock ABI >= 3 enabled. "
-            f"Refusing unrestricted execution: {probe.stderr[-2000:]}"
-        )
 
 
 def _sha256(path: Path) -> str:
@@ -144,109 +125,7 @@ def build_task_row(source: Path, task: str) -> dict[str, Any]:
             "groundtruth_hashes": gt_hashes,
         },
         "metadata": {
-            "runner": "native" if task in QUICKSTART_TASKS else "containerized",
+            "runner": "containerized",
             "upstream_revision": UPSTREAM_REVISION,
         },
     }
-
-
-build_quickstart_row = build_task_row
-
-
-def collect_workspace_files(workspace: Path, *, max_total_bytes: int = 4 * 1024 * 1024) -> dict[str, str]:
-    """Transfer the complete workspace, or fail explicitly without a quality score.
-
-    The raw-byte cap leaves room for base64 and JSON within Beaker's context
-    wire limit. Never silently drop a file to fit it.
-    """
-    if workspace.is_symlink():
-        raise ValueError("Workspace must not be a symlink")
-    if not workspace.is_dir():
-        return {}
-    encoded: dict[str, str] = {}
-    total_bytes = 0
-    for path in sorted(workspace.rglob("*")):
-        if path.is_symlink():
-            raise ValueError(f"Workspace symlinks cannot be transferred: {path.relative_to(workspace)}")
-        if not path.is_file():
-            continue
-        rel = path.relative_to(workspace).as_posix()
-        remaining = max_total_bytes - total_bytes
-        if path.stat().st_size > remaining:
-            raise ValueError(f"Workspace exceeds the {max_total_bytes}-byte transfer limit at {rel!r}")
-        with path.open("rb") as stream:
-            data = stream.read(remaining + 1)
-        total_bytes += len(data)
-        if total_bytes > max_total_bytes:
-            raise ValueError(f"Workspace exceeds the {max_total_bytes}-byte transfer limit at {rel!r}")
-        encoded[rel] = base64.b64encode(data).decode("ascii")
-    return encoded
-
-
-def evaluate_workspace(
-    *,
-    source: Path,
-    task: str,
-    expected_hashes: dict[str, str],
-    workspace_files: dict[str, str],
-    agent_status: str | None,
-    timeout: int = 300,
-) -> tuple[bool, str]:
-    """Run the official Toolathlon task evaluator in the trusted upstream environment."""
-    if (
-        not re.fullmatch(r"[A-Za-z0-9_-]+", task)
-        or not (source / "tasks/finalpool" / task / "task_config.json").is_file()
-    ):
-        raise ValueError(f"Unsupported Toolathlon task: {task}")
-    actual_hashes = groundtruth_hashes(source, task)
-    if actual_hashes != expected_hashes:
-        raise ValueError(f"Groundtruth hash mismatch for {task}")
-    if agent_status != "success":
-        return False, f"Agent status was {agent_status!r} (only 'success' is eligible to pass)."
-
-    gt_dir = source / "tasks/finalpool" / task / "groundtruth_workspace"
-    with tempfile.TemporaryDirectory(prefix=f"toolathlon-eval-{task}-") as temp_dir:
-        root = Path(temp_dir)
-        staged_gt_dir = root / "groundtruth_workspace"
-        if gt_dir.is_dir():
-            shutil.copytree(gt_dir, staged_gt_dir)
-        else:
-            staged_gt_dir.mkdir(parents=True, exist_ok=True)
-        workspace = root / "workspace"
-        workspace.mkdir(parents=True, exist_ok=True)
-        (workspace / "arxiv_local_storage").mkdir(parents=True, exist_ok=True)
-        for rel_path, b64_data in workspace_files.items():
-            safe_rel = Path(rel_path)
-            if safe_rel.is_absolute() or ".." in safe_rel.parts:
-                raise ValueError(f"Invalid workspace path: {rel_path!r}")
-            target = workspace / safe_rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(base64.b64decode(b64_data, validate=True))
-
-        res_log_file = root / "traj_log.json"
-        res_log_file.write_text(json.dumps({"status": agent_status}), encoding="utf-8")
-
-        command = [
-            str(source / ".venv/bin/python"),
-            "-m",
-            f"tasks.finalpool.{task}.evaluation.main",
-            "--agent_workspace",
-            str(workspace),
-            "--groundtruth_workspace",
-            str(staged_gt_dir),
-            "--res_log_file",
-            str(res_log_file),
-        ]
-        proc = subprocess.run(
-            command,
-            cwd=source,
-            env=runtime_env(source),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-        details = "\n".join(part.strip() for part in (proc.stdout, proc.stderr) if part and part.strip()).strip()
-        if proc.returncode == 0:
-            return True, details or "All evaluation checks passed."
-        return False, details or f"Evaluation script exited with code {proc.returncode}."

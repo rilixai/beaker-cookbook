@@ -4,8 +4,9 @@ Beaker may edit **`prompts/agent_system_prompt.md` only**. Its seed is the origi
 system prompt shared by the three quickstart tasks. Bootstrap, dependency pins,
 tool implementations and graders remain outside that editable surface.
 
-Both onboarding and the standalone CLI execute the original
-`main.py → TaskRunner → TaskAgent`, migrated in place to **OpenAI Agents 0.20.0**.
+Onboarding uses the original prepared-agent phase
+`container_agent.run_agent_phase → TaskRunner → TaskAgent`, migrated in place to
+**OpenAI Agents 0.20.0**. The standalone CLI uses the same original agent lifecycle.
 Preparation applies `src/toolathlon_baseline/upstream/openai-agents-0.20.patch`
 and verifies its Git blob hashes. No alternate agent or SDK compatibility layer
 is used. The default Beaker cache is keyed by the source revision and migration;
@@ -24,10 +25,10 @@ constructor requires that older MCP. Python stays at 3.12.11. The cookbook paren
 installs only Beaker's `tracing` extra; agent dependencies belong to upstream.
 This is an SDK-migrated baseline, with updated transitive dependencies.
 
-`toolathlon_entry.py` surrounds upstream `main()` with native trace export.
-`--agent_only` skips inline evaluation so the trusted parent can run the official
-grader after the sandbox exits. Standalone CLI runs keep inline evaluation.
-Task instructions, initial files, tools and evaluator logic stay upstream.
+`toolathlon_container_agent.py` surrounds the original prepared-agent phase with
+native trace export. The official phased container runner invokes preparation and
+evaluation separately, keeping grader calls outside the agent trace. Task
+instructions, initial files, tools and evaluator logic stay upstream.
 
 ## Tracing and isolation
 
@@ -47,25 +48,21 @@ may prevent a final flush; already received spans remain available. MCP spans
 measure calls from the agent; server internals and internal HTTP retries are visible
 only where the framework emits spans.
 
-Onboarding requires Linux x86_64/aarch64 with **Landlock ABI >= 3**. The policy allows
-system runtimes and dependencies read-only, plus per-case writable directories.
-Staged tasks contain instructions, initial files and preprocessing; local reference
-files and other cases are inaccessible. The unmodified Excel package is copied per
-case because it writes a log beside itself. Network access remains available,
-including public benchmark data. Unsupported isolation fails explicitly.
+Failures before a model turn are retryable; exhausted turn budgets are scored as
+failures even if upstream leaves its request counter at zero. Cancellation and
+timeout stop the private benchmark host and its task containers.
 
-Official scoring uses trusted reference hashes and the complete returned workspace.
-Oversized workspaces fail explicitly instead of dropping files. Failures before a
-model turn are retryable; exhausted turn budgets are scored as failures even if
-upstream leaves its request counter at zero. Cancellation and timeout terminate the
-whole case process group, including MCP servers.
+## Docker execution for every task
 
-## Tasks outside quickstart
+Every Beaker task uses `toolathlon_docker.py`, including `find-alita-paper`,
+`excel-market-research` and `interview-report`. There is no native execution or
+scoring fallback. Docker availability and the task image are checked during case
+loading, before baseline model calls. The standalone CLI's native quickstart
+remains available separately.
 
-The three quickstart tasks keep their native path. Every other official task
-uses `toolathlon_docker.py`, selected from its canonical task ID. Dataset metadata
-alone cannot enable execution. Docker availability and the task image are checked
-during case loading, before baseline model calls.
+Case metadata is normalized to `runner: containerized`, including existing dataset
+rows labeled `native`. Execution does not depend on that old label, so an existing
+quickstart dataset does not need to be uploaded again.
 
 The Beaker image installs Docker and socat and needs a VM sandbox. Each case gets
 a private Docker-in-Docker host with its own network, image-store volume and
@@ -81,8 +78,8 @@ A small reviewed shell patch forwards provider host mappings, public CA files an
 the case's OTLP token. The tracing entrypoint wraps the original prepared-agent
 phase only. No private proxy key or local `.env` is mounted into the Docker host.
 
-Full task scoring returns the official verdict and bounded diagnostic text instead
-of transferring large workspaces through the native 4 MiB context limit. Missing
+Scoring returns the official verdict and bounded diagnostic text without
+transferring the complete workspace through the case context. Missing
 results, failed bootstrap and evaluator infrastructure errors do not become
 measured zero scores. Output records the runner and resolved task-image ID.
 
@@ -93,6 +90,6 @@ relative to upstream `configs/` to their text contents; alternatively a managed
 runtime can mount an existing `TOOLATHLON_CONFIG_DIR`. Keep credentials out of Git.
 `TOOLATHLON_DOCKER_IMAGE` can select a compatible pinned task-image digest.
 
-Containerized execution retains upstream's privileged Docker/socket requirements;
-it does not provide the native Landlock boundary. Use dedicated benchmark accounts
-and VM resources. Real Docker execution must be validated before a broad baseline.
+Containerized execution retains upstream's privileged Docker/socket requirements.
+Use dedicated benchmark accounts and VM resources. Real Docker execution must be
+validated before a broad baseline.

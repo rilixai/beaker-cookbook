@@ -1,4 +1,4 @@
-"""Beaker Integration for native and containerized Toolathlon tasks."""
+"""Beaker Integration for containerized Toolathlon tasks."""
 
 from __future__ import annotations
 
@@ -29,16 +29,12 @@ from beaker import (
     repository,
 )
 from pydantic import BaseModel, Field
+from toolathlon_docker import prepare_docker
 from toolathlon_native_trace import NativeTrace
-from toolathlon_setup import (
-    build_task_row,
-    collect_workspace_files,
-    evaluate_workspace,
-    prepare_toolathlon,
-    verify_sandbox_support,
-)
+from toolathlon_setup import build_task_row, prepare_toolathlon
+from upload_dataset import EXTERNAL_ACCOUNT_LOCAL_TOOLS, EXTERNAL_ACCOUNT_SERVERS
 
-from toolathlon_baseline import QUICKSTART_TASKS, UPSTREAM_REVISION
+from toolathlon_baseline import UPSTREAM_REVISION
 
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -97,7 +93,6 @@ class Setup(RunSetup[Row]):
     @asynccontextmanager
     async def prepare_run(self, *, runtime: SetupRuntime):
         del runtime
-        verify_sandbox_support()
         self.cache, self.source = prepare_toolathlon()
         yield {"repository": RepositoryRunSetupResult()}
 
@@ -106,30 +101,26 @@ class Setup(RunSetup[Row]):
         if row.input.task != row.id or row.expected.task != row.id:
             raise ValueError(f"Mismatched Toolathlon task id: {row.id!r}")
         canonical = build_task_row(self.source, row.id)
-        if row.id not in QUICKSTART_TASKS:
-            from toolathlon_docker import prepare_docker
-            from upload_dataset import EXTERNAL_ACCOUNT_LOCAL_TOOLS, EXTERNAL_ACCOUNT_SERVERS
-
-            needs_accounts = EXTERNAL_ACCOUNT_SERVERS.intersection(
-                canonical["input"]["mcp_servers"]
-            ) or EXTERNAL_ACCOUNT_LOCAL_TOOLS.intersection(canonical["input"]["local_tools"])
-            if needs_accounts and not (
-                os.environ.get("TOOLATHLON_CONFIG_JSON") or os.environ.get("TOOLATHLON_CONFIG_DIR")
-            ):
-                raise ValueError(
-                    f"Task {row.id} requires external-account configuration; "
-                    "set TOOLATHLON_CONFIG_JSON or TOOLATHLON_CONFIG_DIR before launching"
-                )
-            await asyncio.to_thread(prepare_docker, self.cache)
         if row.input.instruction != canonical["input"]["instruction"]:
             raise ValueError(f"Instruction mismatch for task {row.id!r}")
         if row.expected.model_dump() != canonical["expected"]:
             raise ValueError(f"Expected ground-truth specification mismatch for task {row.id!r}")
+        needs_accounts = EXTERNAL_ACCOUNT_SERVERS.intersection(
+            canonical["input"]["mcp_servers"]
+        ) or EXTERNAL_ACCOUNT_LOCAL_TOOLS.intersection(canonical["input"]["local_tools"])
+        if needs_accounts and not (
+            os.environ.get("TOOLATHLON_CONFIG_JSON") or os.environ.get("TOOLATHLON_CONFIG_DIR")
+        ):
+            raise ValueError(
+                f"Task {row.id} requires external-account configuration; "
+                "set TOOLATHLON_CONFIG_JSON or TOOLATHLON_CONFIG_DIR before launching"
+            )
+        await asyncio.to_thread(prepare_docker, self.cache)
         yield Case(
             id=row.id,
             input=row.input.model_dump(),
             expected=row.expected.model_dump(),
-            metadata=row.metadata,
+            metadata={**row.metadata, "runner": "containerized"},
         )
 
 
@@ -279,17 +270,18 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
                 stage.output({"status": "error_before_first_turn", "log_tail": log_tail})
                 raise RetryableCaseError(f"Toolathlon task {task!r} exited before completing a model turn: {log_tail}")
 
-            containerized = task not in QUICKSTART_TASKS
-            evaluation = summary.get("evaluation") if containerized else None
-            if containerized and (not isinstance(evaluation, Mapping) or type(evaluation.get("pass")) is not bool):
-                raise RetryableCaseError(f"Toolathlon {task!r} did not return a valid official evaluation")
-            workspace_dir = output_dir / "artifacts/workspace"
-            try:
-                workspace_files = (
-                    collect_workspace_files(workspace_dir) if agent_status == "success" and not containerized else {}
+            evaluation = summary.get("evaluation")
+            if (
+                summary.get("runner") != "containerized"
+                or not isinstance(evaluation, Mapping)
+                or type(evaluation.get("pass")) is not bool
+            ):
+                raise RetryableCaseError(
+                    f"Toolathlon {task!r} did not return a valid official containerized evaluation"
                 )
-            except (ValueError, OSError) as exc:
-                raise RetryableCaseError(f"Cannot transfer the complete workspace for {task!r}: {exc}") from exc
+            workspace_files = summary.get("workspace_files", [])
+            if not isinstance(workspace_files, list) or any(not isinstance(name, str) for name in workspace_files):
+                raise RetryableCaseError(f"Toolathlon {task!r} returned an invalid workspace file list")
 
             messages = trajectory.get("messages") if isinstance(trajectory.get("messages"), list) else []
             final_message = next(
@@ -303,81 +295,60 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
 
             observed_output: dict[str, JsonValue] = {
                 "task": task,
-                "runner": "containerized" if containerized else "native",
+                "runner": "containerized",
                 "upstream_revision": UPSTREAM_REVISION,
                 "agent_framework": "openai-agents==0.20.0",
                 "trace_source": "native_otlp",
                 "model": model_name,
                 "agent_status": agent_status,
                 "key_stats": key_stats if isinstance(key_stats, Mapping) else {},
-                "workspace_files": summary.get("workspace_files", [])
-                if containerized
-                else sorted(workspace_files.keys()),
+                "workspace_files": workspace_files,
+                "image": summary.get("image"),
+                "image_id": summary.get("image_id"),
                 "final_assistant_message": final_message,
             }
             stage.output(
                 {
                     "agent_status": agent_status,
                     "llm_requests": llm_requests,
-                    "workspace_file_count": len(observed_output["workspace_files"]),
+                    "workspace_file_count": len(workspace_files),
                 }
             )
             context: dict[str, JsonValue] = {
                 "task": task,
                 "agent_status": agent_status,
-                "workspace_files": workspace_files,
+                "runner": "containerized",
+                "official_evaluation": evaluation,
+                "groundtruth_hashes": build_task_row(source, task)["expected"]["groundtruth_hashes"],
             }
-            if containerized:
-                observed_output["image"] = summary.get("image")
-                observed_output["image_id"] = summary.get("image_id")
-                context["official_evaluation"] = evaluation
-                context["runner"] = "containerized"
-                context["groundtruth_hashes"] = build_task_row(source, task)["expected"]["groundtruth_hashes"]
             return CaseResult(output=observed_output, output_kind="record", context=context)
 
 
 async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) -> CaseScore:
     del case_files_dir
     expected = TaskExpected.model_validate(case.expected)
-    _, source = prepare_toolathlon()
-
     context = result.context if isinstance(result.context, Mapping) else {}
     if context.get("task") != expected.task or not isinstance(context.get("agent_status"), str):
         raise RetryableCaseError("Missing or mismatched Toolathlon scoring context; cannot assign a quality score")
-    if context.get("runner") == "containerized":
-        evaluation = context.get("official_evaluation")
-        if context.get("groundtruth_hashes") != expected.groundtruth_hashes:
-            raise RetryableCaseError("Containerized evaluation does not match the expected benchmark revision")
-        if not isinstance(evaluation, Mapping) or type(evaluation.get("pass")) is not bool:
-            raise RetryableCaseError("Missing official containerized evaluation")
-        passed = evaluation["pass"]
-        details = str(evaluation.get("details") or "Official Toolathlon evaluation failed.")
-    else:
-        agent_status = str(context.get("agent_status") or "") or None
-        raw_files = context.get("workspace_files")
-        if not isinstance(raw_files, Mapping) or any(
-            not isinstance(k, str) or not isinstance(v, str) for k, v in raw_files.items()
-        ):
-            raise RetryableCaseError(
-                "Missing or malformed Toolathlon workspace transfer; cannot assign a quality score"
-            )
-        workspace_files = dict(raw_files)
-
-        passed, details = await asyncio.to_thread(
-            evaluate_workspace,
-            source=source,
-            task=expected.task,
-            expected_hashes=expected.groundtruth_hashes,
-            workspace_files=workspace_files,
-            agent_status=agent_status,
-        )
+    if context.get("runner") != "containerized":
+        raise RetryableCaseError("Missing official containerized scoring context")
+    evaluation = context.get("official_evaluation")
+    if (
+        context.get("groundtruth_hashes") != expected.groundtruth_hashes
+        or expected.upstream_revision != UPSTREAM_REVISION
+    ):
+        raise RetryableCaseError("Containerized evaluation does not match the expected benchmark revision")
+    if not isinstance(evaluation, Mapping) or type(evaluation.get("pass")) is not bool:
+        raise RetryableCaseError("Missing official containerized evaluation")
+    passed = evaluation["pass"]
+    details = str(evaluation.get("details") or "Official Toolathlon evaluation failed.")
     score_value = 1.0 if passed else 0.0
     check = Check(
         name=f"{expected.task}.official_evaluation",
         group=expected.task,
         verdict="pass" if passed else "fail",
         message=None if passed else details,
-        description=f"Official Toolathlon evaluator ({expected.evaluation_module}) against groundtruth_workspace.",
+        description=f"Official Toolathlon evaluator ({expected.evaluation_module}).",
     )
     return CaseScore(
         objective=score_value,

@@ -69,7 +69,7 @@ def main() -> None:
     parser.add_argument(
         "--quickstart",
         action="store_true",
-        help="Upload the 3 native quickstart tasks instead (2 train, 1 test).",
+        help="Upload the 3 quickstart tasks instead (2 train, 1 test); Beaker executes them in Docker.",
     )
     parser.add_argument(
         "--no-external-accounts",

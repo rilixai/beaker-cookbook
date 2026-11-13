@@ -3,8 +3,8 @@
 Run [Toolathlon](https://github.com/hkust-nlp/Toolathlon)'s **original agent**, migrated
 in place to **OpenAI Agents 0.20.0**. The standalone CLI supports all 108 official
 tasks through the upstream container runner. Three tasks also run natively without
-Docker or application accounts. [Beaker onboarding](.beaker/README.md) uses the native
-path for those three tasks and isolated Docker environments for the others, with
+Docker or application accounts in the standalone CLI. [Beaker onboarding](.beaker/README.md)
+uses isolated Docker environments for every task, including the quickstart, with
 native OTLP tracing. The Docker path still needs an end-to-end VM validation.
 
 ## Native quickstart
@@ -127,8 +127,8 @@ Reset application state before another formal run using upstream's documented
 `deploy_containers.sh` workflow. Task containers do not undo remote API changes.
 Upstream uses host networking and mounts the container runtime socket, giving
 substantial host control. Use a dedicated benchmark VM/host and application accounts.
-Standalone native execution uses the current user's privileges. Beaker's additional
-Linux filesystem sandbox is described in [.beaker/README.md](.beaker/README.md).
+Standalone native execution uses the current user's privileges. Beaker's per-case
+Docker execution is described in [.beaker/README.md](.beaker/README.md).
 
 ## Configuration and reproducibility
 
@@ -137,7 +137,8 @@ The recipe starts from `scripts/formal_run_v0.json`, using the original single-t
 uses upstream's `TOOLATHLON_MODEL_PARAMS_FILE` mechanism. `--system-prompt FILE` is a
 native-only override for `docs/agent_system_prompt.md`; its upstream workspace
 placeholder `!!<<<<||||workspace_dir||||>>>>!!` remains supported. Full runs use
-prompts in the configured environment. Evaluators and references stay unchanged.
+prompts in the configured environment. Beaker applies its editable system prompt
+inside every task container. Evaluators and references stay unchanged.
 Keep OAuth state and run artifacts private; upstream logs can contain task config.
 
 Source and task data are pinned to
