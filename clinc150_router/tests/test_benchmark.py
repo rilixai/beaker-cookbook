@@ -202,7 +202,7 @@ async def test_run_case_uses_pinned_default_without_a_model_choice(
         case_input={"text": TEXT}, runtime=SimpleNamespace(model=None, trace=current_trace())
     )
     request = received[0]
-    assert request["model"] == "gpt-5.6-luna" and request["reasoning_effort"] == "low"
+    assert request["model"] == "gpt-6-luna" and request["reasoning_effort"] == "low"
     assert request["messages"][0]["content"].startswith("Candidate-specific routing instructions.")
     assert request["messages"][1] == {"role": "user", "content": TEXT}
     schema = request["response_format"]["json_schema"]["schema"]
