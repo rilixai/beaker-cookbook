@@ -68,9 +68,9 @@ def main() -> None:
     request = json.loads((CASE / "request.json").read_text())
     os.environ.pop("DOCKER_HOST", None)
     # Docker's default /etc/hosts is private to each nested container.
-    for port in request["relay_ports"]:
+    for port, bridge_port in request["relay_ports"].items():
         subprocess.Popen(
-            ["socat", f"TCP-LISTEN:{port},bind=127.0.0.1,reuseaddr,fork", f"TCP:host.docker.internal:{port}"]
+            ["socat", f"TCP-LISTEN:{port},bind=127.0.0.1,reuseaddr,fork", f"TCP:host.docker.internal:{bridge_port}"]
         )
     wait_docker()
     # The inner daemon has a private image store and cannot access other cases.

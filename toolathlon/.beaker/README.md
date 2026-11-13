@@ -77,7 +77,11 @@ The original `scripts/run_single_containerized.sh` keeps its phased workflow:
 preprocess, hide reference/evaluator files, run the original agent, restore trusted
 artifacts, and run the official grader while the same applications remain alive.
 A small reviewed shell patch forwards provider host mappings, public CA files and
-the case's OTLP token. The tracing entrypoint wraps the original prepared-agent
+the case's OTLP token. Per-case relays use free unprivileged ports on the outer
+Docker bridge; listeners inside the private host preserve the original provider
+and OTLP ports. Provider hostnames resolve to that private host's loopback. Relay
+process groups are removed on completion or failure, and startup errors include
+socat's diagnostic output. The tracing entrypoint wraps the original prepared-agent
 phase only. No private proxy key or local `.env` is mounted into the Docker host.
 
 Scoring returns the official verdict and bounded diagnostic text without
