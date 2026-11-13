@@ -1,0 +1,22 @@
+# Beaker configuration. Safe to commit; keep secret values out of this file.
+# integrations.<id>.required_env lists names used by setup and evaluation.
+# Keep local values in .beaker/.env and hosted values in encrypted agent settings.
+# source_dir is Git-root-relative; package_import_root is relative to source_dir.
+# Prefer the same immutable --dataset NAME@REVISION for smoke and launch.
+integrations:
+  toolathlon_baseline:
+    agent_key: toolathlon
+    entrypoint: beaker_integration:integration
+    package_import_root: .beaker
+    source_dir: toolathlon
+    required_env: []
+    environment_base: debian_slim:3.12
+    apt_install:
+      - git
+      - docker.io
+      - socat
+    pip_install:
+      - nodejs-wheel>=22,<23
+      - uv>=0.6
+      - beaker-sdk[tracing]==0.6.6
+default_integration: toolathlon_baseline
