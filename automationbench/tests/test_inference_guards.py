@@ -13,10 +13,9 @@ import pytest
 from anthropic.types import Message as AnthropicMessage
 from beaker.tracing import local_capture
 from openai import APIStatusError, AsyncOpenAI
-from openai.types.chat import ChatCompletion
 
 from automationbench_skills.clients import CostTrackingChatCompletionsClient
-from automationbench_skills.model_protocol import AnthropicMessagesClient, ModelError, OpenAIChatCompletionsClient
+from automationbench_skills.model_protocol import AnthropicMessagesClient, AssistantMessage, ModelError
 from automationbench_skills.runner import ModelSpec
 
 
@@ -115,8 +114,9 @@ async def test_deadline_cancels_a_stalled_request_or_backoff(backoff: bool) -> N
     assert backoff or cancelled.is_set()
 
 
-async def test_empty_response_retry_retains_usage_and_cost() -> None:
-    replies = [_reply(empty=True), _reply()]
+@pytest.mark.parametrize("recovers", [True, False])
+async def test_empty_response_retry_retains_usage_and_cost(recovers: bool) -> None:
+    replies = [_reply(empty=True), _reply()] if recovers else [_reply(empty=True) for _ in range(3)]
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=replies.pop(0))
@@ -124,26 +124,48 @@ async def test_empty_response_retry_retains_usage_and_cost() -> None:
     client = _client(handler)
     state: dict[str, Any] = {}
     try:
-        response = await client.get_native_response([], "gpt-5.6-luna", {}, state=state)
+        if recovers:
+            response = await client.get_native_response([], "gpt-5.6-luna", {}, state=state)
+            assert response.choices[0].message.content == "done"
+        else:
+            with pytest.raises(ModelError, match="no content"):
+                await client.get_native_response([], "gpt-5.6-luna", {}, state=state)
     finally:
         await client.close()
-    assert response.choices[0].message.content == "done"
-    assert state["_usage"] == {"input_tokens": 11, "output_tokens": 7}
-    assert state["_perf"]["model_calls"] == 2
-    assert state["_perf"]["cost_usd"] == pytest.approx(0.02)
+    assert not replies
+    discarded = 1 if recovers else 3
+    assert state["_usage"] == {"input_tokens": 11 * discarded, "output_tokens": 7 * discarded}
+    assert state["_perf"]["model_calls"] == (2 if recovers else 3)
+    assert state["_perf"]["cost_usd"] == pytest.approx(0.02 if recovers else 0.03)
 
 
 @pytest.mark.parametrize("signal", ["refusal", "reasoning_content", "reasoning_tokens"])
-async def test_valid_nonempty_provider_signals_are_not_rejected(signal: str) -> None:
+async def test_valid_nonempty_provider_signals_are_not_retried(signal: str) -> None:
     reply = _reply(empty=True)
     if signal == "reasoning_tokens":
         reply["usage"]["completion_tokens_details"] = {"reasoning_tokens": 7}
     else:
         reply["choices"][0]["message"][signal] = "Provider response"
-    native = ChatCompletion.model_validate(reply)
-    client = OpenAIChatCompletionsClient(object())
-    await client.raise_from_native_response(native)
-    response = await client.from_native_response(native)
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=reply)
+
+    client = _client(handler)
+    state: dict[str, Any] = {}
+    try:
+        prompt, extra = await client.to_native_prompt([AssistantMessage(content="Previous answer")])
+        native = await client.get_native_response(prompt, "gpt-5.6-luna", {}, state=state, **extra)
+        await client.raise_from_native_response(native)
+        response = await client.from_native_response(native)
+    finally:
+        await client.close()
+    assert len(requests) == 1
+    assert "reasoning_content" not in requests[0]["messages"][0]
+    assert state["_perf"]["model_calls"] == 1
+    assert state["_perf"]["cost_usd"] == pytest.approx(0.01)
+    assert "_usage" not in state  # No discarded replies; the environment counts the accepted one.
     if signal == "refusal":
         assert response.message.content == "Provider response"
     elif signal == "reasoning_content":
