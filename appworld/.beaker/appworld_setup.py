@@ -1,16 +1,38 @@
-"""Prepare the pinned public AppWorld assets in local and hosted evaluators."""
+"""Prepare the pinned public AppWorld assets in local and hosted evaluators, and check
+the agent's model setting."""
 
 from __future__ import annotations
 
 import fcntl
 import hashlib
+import os
 import tempfile
+import tomllib
 from pathlib import Path
 
 
 COMMIT = "a072b7a86e7c1d5b1d7175659d750ebb9b79f10a"
 APPS_SHA256 = "88d21fc526c1655bb3eee4adfca78ccac793921e4506f28f734ecdb19af77a62"
 PROJECT = Path(__file__).resolve().parents[1]
+# Names a configs/model.toml table to run without an optimization model, such as
+# youcom-glm-5.3-flash for the You.com Inference Router. Set it on the agent.
+MODEL_ENV = "APPWORLD_MODEL"
+
+
+def check_model_setting(runtime) -> None:
+    """Stop the run at setup if APPWORLD_MODEL names a missing table or an unset key.
+
+    An optimization model chosen at launch goes through Beaker's gateway and wins.
+    """
+    name = os.environ.get(MODEL_ENV)
+    if not name or getattr(runtime, "model", None):
+        return
+    table = tomllib.loads((PROJECT / "configs" / "model.toml").read_text()).get(name)
+    if not isinstance(table, dict):
+        raise ValueError(f"{MODEL_ENV}={name!r} is not a table in configs/model.toml.")
+    key_env = table.get("api_key_env")
+    if key_env and not os.environ.get(key_env):
+        raise ValueError(f"Set {key_env} on the agent to run {name}.")
 
 
 def prepare_appworld() -> Path:

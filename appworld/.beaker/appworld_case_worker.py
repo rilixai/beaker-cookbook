@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import time
 import traceback
@@ -12,10 +13,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
-from appworld_setup import PROJECT, prepare_appworld
+from appworld_setup import MODEL_ENV, PROJECT, prepare_appworld
 from beaker import CaseResult, RetryableCaseError, inference_target
 from beaker.tracing.core import LocalCaptureManager
 from beaker.tracing.integrations import openai_agents
+from openai import APIConnectionError, InternalServerError, RateLimitError
 
 
 class _EventLoop(asyncio.SelectorEventLoop):
@@ -42,7 +44,22 @@ async def _model_config(runtime):
     from openai import AsyncOpenAI
 
     if not runtime.model:
-        yield ModelProfile.from_toml(PROJECT / "configs/model.toml"), RunConfig(tracing_disabled=False)
+        profile = ModelProfile.from_toml(PROJECT / "configs/model.toml", model=os.environ.get(MODEL_ENV) or None)
+        if profile.base_url is None:
+            yield profile, RunConfig(tracing_disabled=False)
+            return
+        # Another OpenAI-compatible endpoint, such as the You.com Inference Router.
+        # These calls bypass Beaker's gateway, so Beaker records their tokens but not their cost.
+        from appworld_openai_agents_sdk.runner import endpoint_client
+
+        async with endpoint_client(profile) as client:
+            yield (
+                profile,
+                RunConfig(
+                    model=OpenAIChatCompletionsModel(model=profile.api_model, openai_client=client),
+                    tracing_disabled=False,
+                ),
+            )
         return
 
     target = inference_target(runtime)
@@ -78,17 +95,23 @@ async def run_in_process(*, case_input, runtime) -> CaseResult:
         set_tracing_disabled(False)
         async with _model_config(runtime) as (profile, run_config):
             with openai_agents.registered(runtime.trace):
-                await run_code_agent_on_tasks(
-                    experiment_name=experiment,
-                    task_ids=task_ids,
-                    profile=profile,
-                    prompt_file_path=str(PROMPTS_DIR / "react_code_agent/instructions.txt"),
-                    appworld_config={"random_seed": RANDOM_SEED},
-                    logger_config={"color": False, "verbose": False},
-                    max_steps=MAX_STEPS,
-                    run_config=run_config,
-                    raise_provider_errors=True,
-                )
+                try:
+                    await run_code_agent_on_tasks(
+                        experiment_name=experiment,
+                        task_ids=task_ids,
+                        profile=profile,
+                        prompt_file_path=str(PROMPTS_DIR / "react_code_agent/instructions.txt"),
+                        appworld_config={"random_seed": RANDOM_SEED},
+                        logger_config={"color": False, "verbose": False},
+                        max_steps=MAX_STEPS,
+                        run_config=run_config,
+                        raise_provider_errors=True,
+                    )
+                except (APIConnectionError, InternalServerError, RateLimitError) as exc:
+                    if profile.base_url is None:
+                        raise
+                    # A throttled or unavailable endpoint says nothing about the agent; Beaker retries the case.
+                    raise RetryableCaseError(f"{profile.base_url} kept failing: {type(exc).__name__}") from exc
     finally:
         set_trace_processors(processors)
         set_tracing_disabled(disabled)
