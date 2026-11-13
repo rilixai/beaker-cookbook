@@ -36,6 +36,7 @@ research, knowledge work, app control, and enterprise automation.
 | [`automationbench/`](automationbench/) | Zapier AutomationBench: a tool-calling agent on `verifiers` that can read a `skills/` folder — edit the skills, rerun, watch the score move. |
 | [`tau2_bench/`](tau2_bench/) | τ²-bench airline and retail: a customer-service agent in full conversations with a fixed LLM user simulator. Optimize the agent's instructions and loop; scored by τ²-bench's own evaluator. |
 | [`jev_banking77/`](jev_banking77/) | BANKING77: native Jev decisions route banking support messages to 77 intents. Optimize instructions and intent descriptions against fixed labels and exact-match scoring. |
+| [`clinc150_router/`](clinc150_router/) | CLINC150: a chat-model router sends virtual-assistant requests to 150 intents or out-of-scope. Optimize the prompts and router code with equal weight on in-scope accuracy and out-of-scope recall on validation. |
 
 Each recipe is a standalone uv project with its own README covering setup, commands, and expected scores.
 
