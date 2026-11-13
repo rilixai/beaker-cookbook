@@ -68,13 +68,18 @@ class RealClockLoop(asyncio.SelectorEventLoop):
         return time.clock_gettime(time.CLOCK_MONOTONIC)
 
 
+# Agent loops send model calls back to back, so an endpoint's rate limit is hit in
+# bursts. The client honors Retry-After and otherwise backs off exponentially.
+ENDPOINT_MAX_RETRIES = 8
+
+
 def endpoint_client(profile: ModelProfile) -> AsyncOpenAI:
     """A client for the profile's OpenAI-compatible endpoint."""
     assert profile.base_url is not None and profile.api_key_env is not None
     key = os.environ.get(profile.api_key_env)
     if not key:
         raise RuntimeError(f"Set {profile.api_key_env} to use {profile.base_url} ({profile.name}).")
-    return AsyncOpenAI(base_url=profile.base_url, api_key=key)
+    return AsyncOpenAI(base_url=profile.base_url, api_key=key, max_retries=ENDPOINT_MAX_RETRIES)
 
 
 def endpoint_run_config(profile: ModelProfile, client: AsyncOpenAI) -> RunConfig:
