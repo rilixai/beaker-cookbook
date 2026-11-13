@@ -1,24 +1,24 @@
 [project]
 name = "automationbench-skills"
 version = "0.1.0"
-description = "AutomationBench harness with a filesystem skills/ hook: a per-sample runner (run_one) over the verifiers tool-calling rollout, frozen train/test splits, and deterministic assertion scoring."
+description = "AutomationBench-PI harness with filesystem skills, a per-sample MCP tool-calling runner, frozen train/test splits, and deterministic assertion scoring."
 readme = "README.md"
 requires-python = ">=3.13"
 authors = [{ name = "rilixai" }]
 dependencies = [
-  # The benchmark itself: env (StatefulToolEnv), simulated tools, WorldState,
-  # deterministic rubric, and the 600 public task builders. NOT vendored.
-  # Pinned to the exact upstream commit this harness was built against.
-  "automation-bench @ git+https://github.com/zapier/AutomationBench.git@4a8e1061254004d9dac807054eed33fad7d1ff14",
-  # The generic tool-calling rollout loop + model clients. automation-bench
-  # declares >=0.2.0; pin the minor this recipe was verified against
-  # (run_rollout / RolloutInput / RolloutOutput surface).
-  "verifiers>=0.3.1,<0.4",
-  # Used directly for the combined task Dataset (also a verifiers dependency).
+  # PI provides the unmodified tasks, simulated services, MCP tools and graders.
+  "automation-bench @ git+https://github.com/xeophon/AutomationBench-PI.git@858718b19e5d66c74451432783d34ee64a550a15",
+  "verifiers>=0.4.0,<0.5",
+  # Provider SDKs used directly by the recipe's model adapters.
+  "anthropic>=1.0",
+  "openai>=2.54,<3",
+  "httpx>=0.28",
+  "mcp>=2,<3",
+  "pydantic>=2",
   "datasets>=3.0",
   "python-dotenv>=1.0",
-  # ``get_env`` instruments the env's tool calls as Beaker spans on every run.
-  "beaker-sdk[verifiers]>=0.6.5",
+  # The recipe emits Beaker model/tool spans directly (no legacy Verifiers extra).
+  "beaker-sdk[tracing]>=0.6.5",
 ]
 
 [project.scripts]

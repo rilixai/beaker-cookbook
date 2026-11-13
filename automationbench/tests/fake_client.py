@@ -1,4 +1,4 @@
-"""Hermetic test helpers: a scripted verifiers Client that never touches the
+"""Hermetic test helpers: a scripted recipe Client that never touches the
 network. Each ScriptedClient instance replays a fixed sequence of assistant
 turns (optionally with tool calls); the rollout, tool execution, state reset,
 and rubric scoring all run for real in-process."""
@@ -9,8 +9,7 @@ import json
 import time
 from typing import Any
 
-from verifiers.clients import Client
-from verifiers.legacy.types import Response, ResponseMessage, ToolCall, Usage
+from automationbench_skills.model_protocol import Client, Response, ResponseMessage, ToolCall, Usage
 
 
 class ScriptedClient(Client):
@@ -26,7 +25,7 @@ class ScriptedClient(Client):
         return object()
 
     async def to_native_tool(self, tool: Any) -> Any:
-        return tool
+        return tool.model_dump()
 
     async def to_native_prompt(self, messages: Any) -> tuple[Any, dict]:
         return messages, {}

@@ -16,6 +16,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import yaml
+from case_fixture import PI_COMMIT, CaseFixture
 
 from automationbench_skills.data.tasks import PUBLIC_DOMAINS, Sample, load_split
 
@@ -49,18 +50,32 @@ def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for domain in PUBLIC_DOMAINS:
         for sample in by_domain[domain][:per_domain]:
+            task = {"example_id": sample.index, "prompt": sample.prompt, "answer": sample.answer, "info": sample.info}
+            scenario = {
+                "source": "pi",
+                "fallback_time": "2026-02-20T12:00:00+00:00",
+                "tool_fault": None,
+                "trace_capture": "complete",
+            }
+            fixture = CaseFixture.model_validate({"task": task, "scenario": scenario})
             rows.append(
                 {
                     "id": sample.task_name,
-                    # The Integration loads the task by name; ``prompt`` is what the
-                    # agent was asked, so the case view shows the ask next to
-                    # the assertion checks.
+                    # Freeze task data rather than resolving its name at execution time.
                     "input": {"task_name": sample.task_name, "prompt": _user_prompt(sample)},
                     # The task's assertions are what "correct" means for this
                     # case; ``score_case`` evaluates them against the end state
                     # and emits one Check per assertion.
                     "expected": {"assertions": sample.info["assertions"]},
-                    "metadata": {"domain": domain, "source_split": split},
+                    "metadata": {
+                        "domain": domain,
+                        "source_split": split,
+                        "benchmark_commit": PI_COMMIT,
+                        "runtime_benchmark_commit": PI_COMMIT,
+                        "tool_interface": "pi_api",
+                        **fixture.hashes(),
+                    },
+                    "runtime_fixture": fixture.model_dump(mode="json"),
                     "group_key": domain,
                 }
             )

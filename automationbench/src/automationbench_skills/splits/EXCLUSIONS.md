@@ -1,4 +1,8 @@
-# Dataset exclusions
+# Dataset exclusion audit
+
+This audit describes the original AutomationBench revision linked below. The
+recipe applies its exclusion list to PI tasks as well; these findings are not an
+audit of PI fixes. For ordinary runs, use the [dataset guide](README.md).
 
 Exclude **122 of 600 cases (20.3%)**: **50 task/metadata issues** and **72 grading defects**. The remaining **478 cases are 374 train / 104 test**. Task requirements, fixture metadata, and grader implementations establish these findings; a baseline failure is not needed to justify a correction.
 

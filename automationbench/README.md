@@ -1,39 +1,29 @@
 # AutomationBench + filesystem skills
 
-[AutomationBench](https://github.com/zapier/AutomationBench) ([paper](https://arxiv.org/abs/2604.18934)) is Zapier's benchmark for business automation agents: 600 public tasks in six domains (sales, marketing, operations, support, finance, hr). The agent works in a simulated workspace of SaaS tools (Gmail, Sheets, Slack, CRMs, ...) and is scored by deterministic assertions on the final state of that workspace.
+Run an agent on business tasks in simulated apps such as Gmail, Sheets, Slack,
+and Salesforce, then improve its prompts and skills with Beaker. This recipe uses
+[AutomationBench-PI](https://github.com/xeophon/AutomationBench-PI/tree/858718b19e5d66c74451432783d34ee64a550a15),
+a fork of Zapier's AutomationBench. You do not need accounts for the simulated
+apps. Model calls use your provider account and incur charges.
 
-This present recipe runs the benchmark one task at a time (`run_one`). The agent uses a system prompt in `prompts/`, and a `skills/` folder it reads through with two tools, `list_skills` and `read_skill`. Both are read from disk on every call, so Beaker can improve the agent by editing those files between rollouts. The optimizer itself is not part of this recipe.
-
-> **The Beaker integration is already present in this recipe.** `.beaker/` holds a
-> working `beaker.yaml` and `beaker_integration.py`; there is nothing to write
-> before pointing Beaker at it.
-
-Beaker displays assertion conditions as **Checks**, without Expected/Predicted
-value pairs. Check names include the assertion type and complete parameter values,
-resolving record IDs to readable labels when available. Descriptions include the
-handler's first docstring line and the full condition parameters with original IDs;
-scoring metadata (`scored`, `excluded`) is omitted from both names and descriptions.
-Failed Checks show a readable summary of required conditions, recorded value
-comparisons, and the latest evaluator observations captured during scoring.
-Messages omit Python code and function traces, and explicitly note that the
-diagnostic is partial; it does not infer a cause from the last comparisons alone.
-**OUTPUT** shows app changes once per sample with size limits and omission markers.
-Display output is reduced or omitted when the combined result approaches Beaker's
-transport limit, preserving the complete scoring state before display details.
-The full final state remains in `context` for native scoring.
+The Beaker integration is already included in `.beaker/`.
 
 ## Quick start
 
+Requires `uv`, Python 3.13 or later, and a model API key. The CLI loads `.env` automatically.
+
 ```bash
 cd automationbench
-uv sync --group dev
+uv sync --group dev --locked
 export OPENAI_API_KEY=sk-...   # or copy .env.example to .env
 
-# Smoke run: 3 test tasks with the seed skills and prompt
-uv run automationbench-skills run --split test --limit 3 --skills-dir skills --prompts-dir prompts
+# Run one training task with the same API tool interface as hosted Beaker
+uv run automationbench-skills run --split train --limit 1 \
+  --skills-dir skills --prompts-dir prompts --toolset api \
+  --max-concurrent 1 --task-timeout 300 --output-dir runs/first-run
 
 # Aggregate a finished (or partial) run directory
-uv run automationbench-skills evaluate --output-dir runs/<run-dir>
+uv run automationbench-skills evaluate --output-dir runs/first-run
 ```
 
 `run` writes one JSON per task (scores, trajectory, final world state) plus
@@ -41,143 +31,102 @@ uv run automationbench-skills evaluate --output-dir runs/<run-dir>
 `runs/<split>-<timestamp>`). `evaluate` prints the pass rate (mean
 `task_completed_correctly`) and mean `partial_credit`, per domain and overall.
 `--task-timeout <seconds>` caps each rollout; a task that runs out of time is
-still scored on the world it has changed so far.
+still scored on the world it has changed so far. Setup and scoring can take
+additional time. `evaluate` reads saved scores; it does not rerun tasks.
+Use a new output directory for each experiment. A missing provider cost is not zero cost.
 
-## Baseline vs. skills
+The CLI defaults to `--toolset zapier`; use `--toolset api` to match hosted runs.
+Keep the model, tasks, toolset and limits fixed when comparing configurations.
+Use train for development and reserve test for the final, frozen configuration.
 
-- **Vanilla**: `--no-skills` (or no `--skills-dir`). No skill tools; the
-  system prompt is `prompts/system_no_skills.md`, which ships as the benchmark's
-  own prompt.
-- **Skills**: `--skills-dir skills`. The system prompt is `prompts/system.md`
-  (the benchmark's prompt plus a paragraph on using the skills) and the agent
-  has `list_skills()` / `read_skill(skill_id)` over the skills directory. An
-  empty skills directory is fine.
+## Understand the scores
 
-A skill is a folder with a `SKILL.md` (YAML frontmatter `name`/`description`,
-markdown body). Its ID is its path under `skills/`:
+The grader checks the simulated app state, not just the agent's final message.
+`partial_credit` is the fraction of scored requirements met; `task_completed_correctly`
+is 1 for full credit and 0 otherwise. The hosted objective combines **80% partial
+credit and 20% full-task completion**.
 
-```text
-skills/
-  domains/{sales,marketing,operations,support,finance,hr}/SKILL.md
-  apps/{gmail,google_sheets,google_drive,slack,salesforce,intercom,jira}/SKILL.md
-```
+Some checks are excluded, including conditions already satisfied at the start.
+Breaking a protected condition can still fail. Inspect `assertion_results` and
+`error` when investigating a score.
 
-The shipped skills are seeds (frontmatter plus a one-line stub); filling, adding,
-splitting and merging them is the optimizer's job. `list_skills` returns every ID
-with its description, no filtering. The seed apps are the most frequent ones in
-the tasks' `zapier_tools`.
+## Use Beaker
 
-## Splits
-
-We reviewed AutomationBench's task instructions, metadata, and grader code and
-identified **122 cases with data-integrity defects**. The loader excludes these
-cases before use, yielding **374 train and 104 test cases**, with case order and
-split membership preserved. Exclusions address defective tasks or grading, not
-case difficulty or agent performance.
-
-See [exclusion reasons and source links](src/automationbench_skills/splits/EXCLUSIONS.md)
-for the evidence and [split documentation](src/automationbench_skills/splits/README.md)
-for counts, generation, and held-out evaluation.
-
-`uv run python .beaker/upload_splits.py` uses the first six train and three test
-cases per domain from the filtered splits: **54 cases (36 train / 18 test)**.
-Hosted datasets change only when uploaded.
-
-## Models
-
-`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort medium`. Routing
-follows the benchmark (`vendored/model_setup.py`): `claude-*` goes to
-Anthropic, `gemini-*` to the Gemini interactions API. Other names served
-directly by OpenAI (no `--base-url` or `OPENAI_BASE_URL`) go to the Responses
-API, because OpenAI rejects function tools on chat completions for gpt-5.4+
-models unless `reasoning_effort` is `"none"`; a gateway stays on chat completions. `--api` overrides the choice.
-`--reasoning-effort` maps to each API's reasoning setting. For a gateway:
+Fork this repository and connect it using the
+[getting-started tutorial](https://www.withbeaker.ai/docs/getting-started/getting-started).
+From `automationbench`, replace `YOUR_GITHUB_NAME` with your fork owner:
 
 ```bash
-uv run automationbench-skills run --split test --limit 3 \
-  --model my-gateway/gemini-2.5-pro --base-url https://gateway.example/v1 --api-key-var GATEWAY_API_KEY
+uv run beaker login
+uv run beaker agent setup my-automationbench-agent \
+  --integration-id automationbench-skills --repo YOUR_GITHUB_NAME/beaker-cookbook
+uv run python .beaker/upload_splits.py
+# Replace REVISION with the revision returned by the upload
+uv run beaker run smoke --dataset automationbench-skills-quickstart@REVISION --strict
 ```
 
-`gemini-*` names are routed to Gemini's native API even through a gateway
-(upstream behavior). For a plain OpenAI-compatible gateway, use another model
-name or pass `--api chat_completions`.
+The uploader creates `automationbench-skills-quickstart` with **36 training and
+18 test tasks**. Smoke checks setup and dataset loading without running a model.
+Start an optimization run in Beaker with this integration and dataset revision.
+**Checks** show task requirements and available grading observations; **OUTPUT**
+summarizes changes to the simulated apps.
 
-A `vendor/model` name (e.g. `z-ai/glm-5.3-flash`) routes to OpenRouter using
-`OPENROUTER_API_KEY`; `--reasoning-enabled` toggles reasoning for models that
-only expose an on/off switch.
+## Improve the agent
 
-## Chat Completions limits
+Edit `prompts/system.md` and the starter files under `skills/`, then rerun training
+tasks. Each skill is a folder containing `SKILL.md` with YAML `name` and
+`description` fields and a Markdown instruction body. The agent discovers and
+reads skills through `list_skills` and `read_skill`.
 
-OpenAI-compatible Chat Completions calls use **32,768 output tokens** (a 24,576-token
-reasoning allowance plus 8,192 for the answer), at most **three attempts per model
-turn**, a **300-second timeout per attempt**, and a **600-second deadline** for the
-whole turn, covering every attempt and the backoff between them. SDK retries are
-disabled. These limits apply to the hosted Beaker gateway and local runs using
-`--api chat_completions`. Direct OpenAI CLI
-runs select native Responses by default; Responses, Anthropic, and Gemini clients
-retain their upstream behavior.
+Use `--no-skills` for a baseline with `prompts/system_no_skills.md` and no skill
+tools. Keep the model, tasks, toolset and limits the same in both runs. Reserve
+`--split test` for evaluating the configuration after development is complete.
 
-The defaults are named constants in `src/automationbench_skills/clients.py`.
-Reasoning counts toward the completion cap on most providers, so a reasoning
-budget in `ModelSpec.extra_body` (OpenRouter's `{"reasoning": {"max_tokens": N}}`)
-sets the cap to that budget plus the answer allowance; where the provider honors
-the budget, a call stops reasoning and still answers. The CLI does not expose
-`extra_body`, and a budget applies only to runs that call OpenRouter directly:
-hosted runs send none, and the Beaker gateway accepts `reasoning.effort`,
-`enabled`, and `exclude` but rejects a token budget. A lower output cap in
-`extra_body` is honored; a higher one cannot exceed the cap above. A call whose
-reasoning uses the whole cap without answering fails with a model error rather
-than ending the rollout as if the agent had finished. The client does not retry
-that call, since the same request would stop in the same place, but a hosted run
-re-runs the whole case after any model error, up to the run's case retry limit; a
-local run scores the world as the agent left it. The cap can still truncate a
-legitimate response, so compare task accuracy and truncation when changing it.
-Hosted model requests retain per-attempt traces, and returned responses retain
-usage/cost accounting.
-Tool arguments pass unchanged to the existing environment parser; this client
-adds no batch validation or format-recovery instructions. Rebuild the Integration
-image from the updated cookbook commit before starting hosted evaluations.
+## Choose a model
 
-## Reference numbers
+The default is `gpt-5.6-luna` with medium reasoning effort. Use `--model` and
+`--reasoning-effort` to change it. Without a gateway or API override:
 
-Upstream reports strict pass rates (`task_completed_correctly`) of roughly
-40–60% for frontier models on the public set. That is not the AutomationBench-AA
-number, which adds guardrail and hidden-task components and uses a different
-harness.
+| Provider | Key | API |
+| --- | --- | --- |
+| OpenAI | `OPENAI_API_KEY` | Responses |
+| Claude (`claude-*`) | `ANTHROPIC_API_KEY` | Anthropic Messages |
+| Gemini (`gemini-*`) | `GEMINI_API_KEY` | Gemini interactions |
+| OpenRouter (`vendor/model`) | `OPENROUTER_API_KEY` | Chat Completions |
 
-Historical result on the original, unfiltered 150-task test split (`--max-concurrent 16`, one seed;
-skills arm uses `--skills-dir skills`, the seed skills):
+For an OpenAI-compatible gateway, add `--base-url`, `--api chat_completions`,
+and `--api-key-var` to the run command. `--reasoning-enabled` supports OpenRouter
+models with an on/off reasoning setting. See `uv run automationbench-skills run --help`
+for all options.
 
-| model | arm | pass_rate | partial_credit |
-|---|---|---|---|
-| `gpt-6-astra` (`--reasoning-effort max`) | no skills | 0.510 | 0.829 |
-| `gpt-6-astra` (`--reasoning-effort max`) | skills | 0.507 | 0.837 |
-| `z-ai/glm-5.3-flash` via OpenRouter (`--reasoning-effort max`) | no skills | 0.333 | 0.701 |
-| `z-ai/glm-5.3-flash` via OpenRouter (`--reasoning-effort max`) | skills | 0.313 | 0.713 |
-| `qwen/qwen3.8-flash` via OpenRouter (`--reasoning-effort default --reasoning-enabled`) | no skills | 0.413 | 0.795 |
-| `qwen/qwen3.8-flash` via OpenRouter (`--reasoning-effort default --reasoning-enabled`) | skills | 0.447 | 0.802 |
+Chat Completions defaults to 32,768 output tokens, up to three attempts per turn,
+a 300-second request timeout, and a 600-second turn limit. `--task-timeout` can
+stop a task earlier. Native provider limits differ.
 
-### How a case is scored
+## Dataset and compatibility
 
-There is no expected answer. Each task is a prompt against a simulated world
-(Salesforce, Gmail, Sheets, ... as JSON records). After the agent acts, a list
-of assertions is checked against that world
-(`salesforce_campaign_member_exists`, `gmail_message_sent_to`, ...); each holds
-or does not. Assertions already true before the agent acted don't count, so
-doing nothing scores 0.
+Standard splits contain **374 training and 104 test tasks** across six domains.
+They exclude 122 task names based on an audit of the original benchmark, not an
+audit of PI's repairs. See the [split guide](src/automationbench_skills/splits/README.md)
+for selection details, exclusions, and held-out evaluation guidance.
 
-**Prefer `partial_credit` as the metric to optimize**, the share of assertions
-that hold (0–1). It is the objective in `.beaker/beaker_integration.py` and
-gives a much denser signal than `task_completed_correctly` (all assertions
-hold), which is the strict pass rate. It is also possible to optimize a combination
-of both.
+Older name-only datasets must be regenerated with `.beaker/upload_splits.py`.
+Custom rows must include frozen task data using the
+[`CaseFixture` schema](.beaker/case_fixture.py); preserve original task contents
+when rebuilding original-source cases. All fixtures run under the pinned PI runtime.
+
+Rebuild the hosted integration after code changes. The spreadsheet grading fix
+requires write history that older saved results do not contain. Rerun affected
+cases; rescoring the old final state cannot recover that history.
 
 ## Development
 
 ```bash
+uv sync --group dev --locked
 uv run ruff check && uv run ruff format --check
 uv run python -m mypy
-uv run pytest -q          # no network, scripted fake client
+uv build --no-sources
+BEAKER_AGENT_KEY= uv run python -m pytest -q  # scripted or mocked clients
 ```
 
 ## Attribution

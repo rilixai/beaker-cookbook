@@ -5,7 +5,8 @@ import math
 import time
 from typing import Any
 
-from automationbench.clients import (
+from automationbench_skills.model_protocol import ModelError, OpenAIChatCompletionsClient
+from automationbench_skills.vendored.clients import (
     _NON_RETRYABLE_CHAT,
     _is_safety_classifier_error,
     _parse_retry_after,
@@ -13,9 +14,6 @@ from automationbench.clients import (
     _record_model_call,
     _record_safety_classifier_error,
 )
-from verifiers.clients import OpenAIChatCompletionsClient
-from verifiers.clients.openai_chat_completions_client import parse_reasoning_content
-from verifiers.errors import ModelError
 
 
 # Reasoning counts toward the completion cap on most providers, so the cap is a
@@ -48,14 +46,6 @@ class CostTrackingChatCompletionsClient(OpenAIChatCompletionsClient):
         self.turn_timeout = turn_timeout
         self._client = self.client.with_options(max_retries=0, timeout=request_timeout)
 
-    async def to_native_prompt(self, messages: Any) -> Any:
-        # Preserve upstream's compatibility fix for strict gateway validators.
-        native, extra = await super().to_native_prompt(messages)
-        for message in native:
-            if message.get("reasoning_content") is None:
-                message.pop("reasoning_content", None)
-        return native, extra
-
     async def get_native_response(self, *args: Any, **kwargs: Any) -> Any:
         state = kwargs.get("state")
         async with asyncio.timeout(self.turn_timeout):
@@ -74,8 +64,6 @@ class CostTrackingChatCompletionsClient(OpenAIChatCompletionsClient):
                     continue
                 _record_model_call(state, time.monotonic() - started, response)
                 record_cost(state, response)
-                # Keep upstream's empty-response retry. Tool arguments pass through
-                # unchanged to the environment's existing parser and execution loop.
                 choices = getattr(response, "choices", None)
                 if choices:
                     choice = choices[0]
@@ -86,11 +74,16 @@ class CostTrackingChatCompletionsClient(OpenAIChatCompletionsClient):
                         # the rollout as if the agent had finished.
                         _count_discarded_usage(state, response)
                         raise ModelError("the model's reasoning used the whole output cap without answering")
-                    if not (message.content or message.tool_calls or parse_reasoning_content(message)):
-                        if attempt < self.max_attempts - 1:
-                            _count_discarded_usage(state, response)
-                            await asyncio.sleep(2**attempt)
-                            continue
+                # Use the rollout's validator so valid refusal and reasoning
+                # signals never trigger an empty-response retry.
+                try:
+                    await self.raise_from_native_response(response)
+                except ModelError:
+                    _count_discarded_usage(state, response)
+                    if attempt == self.max_attempts - 1:
+                        raise
+                    await asyncio.sleep(2**attempt)
+                    continue
                 return response
         raise RuntimeError("Model attempt budget exhausted")
 

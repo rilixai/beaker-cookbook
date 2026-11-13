@@ -1,22 +1,17 @@
 # Attribution
 
-This recipe builds on **AutomationBench** by Zapier, Inc.
+This recipe builds on **AutomationBench** by Zapier, Inc. and the **AutomationBench-PI** fork by xeophon.
 
-- Repository: https://github.com/zapier/AutomationBench
+- Dataset, tools, services and graders: https://github.com/xeophon/AutomationBench-PI
+- Pinned commit: `858718b19e5d66c74451432783d34ee64a550a15` (`automation-bench==1.1.0`)
+- Original repository: https://github.com/zapier/AutomationBench
 - Paper: https://arxiv.org/abs/2604.18934
-- License: MIT (copied verbatim to [LICENSE](LICENSE))
-- Pinned commit: `4a8e1061254004d9dac807054eed33fad7d1ff14` (package version `automation-bench==1.0.6`)
+- License: MIT (copied to [LICENSE](LICENSE))
 
-## What is used vs. copied
+The PI benchmark is an unmodified Git dependency. The recipe drives its MCP toolset and scores with its rubric.
 
-- The benchmark itself (environment, simulated tools, tasks, assertion rubric) is
-  **used as an unmodified dependency**, installed straight from the pinned Git
-  commit — nothing from it is vendored or altered.
-- `src/automationbench_skills/vendored/model_setup.py` **adapts a small portion**
-  of upstream `automationbench/scripts/eval.py` (same commit): the model→API
-  routing, sampling-args construction (reasoning-effort handling), and client
-  construction. The file carries a provenance header; batch-API code paths were
-  dropped because this recipe runs single rollouts.
+`src/automationbench_skills/vendored/clients.py` adapts Zapier's provider clients from `automationbench/clients.py` at `4a8e1061254004d9dac807054eed33fad7d1ff14`. Local adaptations cover protocol imports, Anthropic context-overflow handling, and Responses output validation and usage accounting.
 
-Everything else in this recipe (runner, skills tools, splits, CLI, tests) is
-original to this repository.
+`src/automationbench_skills/vendored/model_setup.py` extracts model/API routing, sampling arguments and client construction from the original `automationbench/scripts/eval.py` at the same commit. Routing helpers are now included locally; batch paths remain omitted.
+
+The recipe-owned rollout loop, model protocol, skills tools, splits, CLI and tests are maintained here. They do not replace PI's simulated service implementations or grading rules.

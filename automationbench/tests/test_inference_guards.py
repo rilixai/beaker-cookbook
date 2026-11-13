@@ -10,11 +10,12 @@ from typing import Any
 
 import httpx
 import pytest
+from anthropic.types import Message as AnthropicMessage
 from beaker.tracing import local_capture
 from openai import APIStatusError, AsyncOpenAI
-from verifiers.errors import ModelError
 
 from automationbench_skills.clients import CostTrackingChatCompletionsClient
+from automationbench_skills.model_protocol import AnthropicMessagesClient, AssistantMessage, ModelError
 from automationbench_skills.runner import ModelSpec
 
 
@@ -113,8 +114,9 @@ async def test_deadline_cancels_a_stalled_request_or_backoff(backoff: bool) -> N
     assert backoff or cancelled.is_set()
 
 
-async def test_empty_response_retry_retains_usage_and_cost() -> None:
-    replies = [_reply(empty=True), _reply()]
+@pytest.mark.parametrize("recovers", [True, False])
+async def test_empty_response_retry_retains_usage_and_cost(recovers: bool) -> None:
+    replies = [_reply(empty=True), _reply()] if recovers else [_reply(empty=True) for _ in range(3)]
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=replies.pop(0))
@@ -122,13 +124,93 @@ async def test_empty_response_retry_retains_usage_and_cost() -> None:
     client = _client(handler)
     state: dict[str, Any] = {}
     try:
-        response = await client.get_native_response([], "gpt-5.6-luna", {}, state=state)
+        if recovers:
+            response = await client.get_native_response([], "gpt-5.6-luna", {}, state=state)
+            assert response.choices[0].message.content == "done"
+        else:
+            with pytest.raises(ModelError, match="no content"):
+                await client.get_native_response([], "gpt-5.6-luna", {}, state=state)
     finally:
         await client.close()
-    assert response.choices[0].message.content == "done"
-    assert state["_usage"] == {"input_tokens": 11, "output_tokens": 7}
-    assert state["_perf"]["model_calls"] == 2
-    assert state["_perf"]["cost_usd"] == pytest.approx(0.02)
+    assert not replies
+    discarded = 1 if recovers else 3
+    assert state["_usage"] == {"input_tokens": 11 * discarded, "output_tokens": 7 * discarded}
+    assert state["_perf"]["model_calls"] == (2 if recovers else 3)
+    assert state["_perf"]["cost_usd"] == pytest.approx(0.02 if recovers else 0.03)
+
+
+@pytest.mark.parametrize("signal", ["refusal", "reasoning_content", "reasoning_tokens"])
+async def test_valid_nonempty_provider_signals_are_not_retried(signal: str) -> None:
+    reply = _reply(empty=True)
+    if signal == "reasoning_tokens":
+        reply["usage"]["completion_tokens_details"] = {"reasoning_tokens": 7}
+    else:
+        reply["choices"][0]["message"][signal] = "Provider response"
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=reply)
+
+    client = _client(handler)
+    state: dict[str, Any] = {}
+    try:
+        prompt, extra = await client.to_native_prompt([AssistantMessage(content="Previous answer")])
+        native = await client.get_native_response(prompt, "gpt-5.6-luna", {}, state=state, **extra)
+        await client.raise_from_native_response(native)
+        response = await client.from_native_response(native)
+    finally:
+        await client.close()
+    assert len(requests) == 1
+    assert "reasoning_content" not in requests[0]["messages"][0]
+    assert state["_perf"]["model_calls"] == 1
+    assert state["_perf"]["cost_usd"] == pytest.approx(0.01)
+    assert "_usage" not in state  # No discarded replies; the environment counts the accepted one.
+    if signal == "refusal":
+        assert response.message.content == "Provider response"
+    elif signal == "reasoning_content":
+        assert response.message.reasoning_content == "Provider response"
+
+
+@pytest.mark.parametrize(
+    ("content", "valid"),
+    [
+        (None, False),
+        ([], False),
+        ([{"type": "text", "text": ""}], False),
+        ([{"type": "thinking", "thinking": "", "signature": "test"}], False),
+        ([{"type": "redacted_thinking", "data": ""}], False),
+        ([{"type": "text", "text": "Done"}], True),
+        ([{"type": "tool_use", "id": "call", "name": "api_search", "input": {}}], True),
+        ([{"type": "thinking", "thinking": "Plan", "signature": "test"}], True),
+        ([{"type": "redacted_thinking", "data": "opaque"}], True),
+    ],
+)
+async def test_anthropic_response_validation(content: Any, valid: bool) -> None:
+    native = (
+        AnthropicMessage.model_validate(
+            {
+                "id": "reply",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-haiku-5-5",
+                "content": content,
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 10, "output_tokens": 1},
+            }
+        )
+        if content is not None
+        else None
+    )
+    client = AnthropicMessagesClient(object())
+    if valid:
+        await client.raise_from_native_response(native)
+        response = await client.from_native_response(native)
+        assert response.message.anthropic_content == [block.model_dump(mode="json") for block in native.content]
+    else:
+        with pytest.raises(ModelError, match="Model returned no"):
+            await client.raise_from_native_response(native)
 
 
 async def test_safety_rejection_is_not_retried_and_remains_visible() -> None:
@@ -204,7 +286,7 @@ async def test_hosted_trace_preserves_retry_and_malformed_tool_response(tmp_path
 
 
 @pytest.mark.parametrize("selected_model", [False, True])
-async def test_hosted_chat_client_creation_uses_the_limits(monkeypatch: Any, selected_model: bool) -> None:
+async def test_hosted_client_creation_uses_the_limits(monkeypatch: Any, selected_model: bool) -> None:
     sys.path.insert(0, str(Path(__file__).parents[1] / ".beaker"))
     import beaker_integration
 
@@ -338,3 +420,107 @@ async def test_a_retry_after_a_slow_failure_needs_room_in_the_turn(turn_timeout:
     finally:
         await client.close()
     assert len(requests) == 2
+
+
+def _responses_reply(output: list[dict], reasoning_tokens: int = 0) -> dict[str, Any]:
+    return {
+        "id": "reply",
+        "object": "response",
+        "created_at": 1,
+        "model": "gpt-5.6-luna",
+        "status": "completed",
+        "output": output,
+        "usage": {
+            "input_tokens": 11,
+            "output_tokens": 7,
+            "total_tokens": 18,
+            "output_tokens_details": {"reasoning_tokens": reasoning_tokens},
+        },
+    }
+
+
+@pytest.mark.parametrize("recovers", [True, False])
+async def test_responses_empty_output_has_bounded_retries(monkeypatch, recovers):
+    from automationbench_skills.vendored import clients
+
+    monkeypatch.setattr(clients, "_retry_delay", lambda *args: 0)
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        output = [
+            {
+                "type": "message",
+                "id": "msg",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "Done", "annotations": []}],
+            }
+        ]
+        return httpx.Response(200, json=_responses_reply(output if recovers and len(requests) == 2 else []))
+
+    client = clients.OpenAIResponsesClient(
+        AsyncOpenAI(
+            api_key="test", max_retries=0, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        )
+    )
+    state = {}
+    try:
+        if recovers:
+            native = await client.get_native_response([], "gpt-5.6-luna", {}, state=state)
+            assert (await client.from_native_response(native)).message.content == "Done"
+        else:
+            with pytest.raises(ModelError, match="no content"):
+                await client.get_native_response([], "gpt-5.6-luna", {}, state=state)
+    finally:
+        await client.close()
+    assert len(requests) == (2 if recovers else 3)
+    discarded = 1 if recovers else 3
+    assert state["_usage"] == {"input_tokens": 11 * discarded, "output_tokens": 7 * discarded}
+    assert state["_perf"]["model_calls"] == len(requests)
+
+
+@pytest.mark.parametrize(
+    ("output", "reasoning_tokens"),
+    [
+        (
+            [
+                {
+                    "type": "message",
+                    "id": "msg",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "refusal", "refusal": "Cannot comply"}],
+                }
+            ],
+            0,
+        ),
+        ([{"type": "reasoning", "id": "reason", "summary": [{"type": "summary_text", "text": "Plan"}]}], 0),
+        ([{"type": "reasoning", "id": "reason", "summary": [], "encrypted_content": "opaque"}], 0),
+        ([], 7),
+        ([{"type": "function_call", "id": "call", "call_id": "call", "name": "api_search", "arguments": "{}"}], 0),
+    ],
+)
+async def test_responses_valid_output_is_not_retried(output, reasoning_tokens):
+    from automationbench_skills.vendored.clients import OpenAIResponsesClient
+
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json=_responses_reply(output, reasoning_tokens))
+
+    client = OpenAIResponsesClient(
+        AsyncOpenAI(
+            api_key="test", max_retries=0, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        )
+    )
+    try:
+        native = await client.get_native_response([], "gpt-5.6-luna", {})
+        response = await client.from_native_response(native)
+        replay, _ = await client.to_native_prompt([response.message])
+    finally:
+        await client.close()
+    assert len(requests) == 1
+    assert replay == [item.model_dump(mode="json", exclude_none=True) for item in native.output]
+    assert response.usage.reasoning_tokens == reasoning_tokens
