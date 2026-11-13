@@ -185,8 +185,10 @@ turn**, a **300-second timeout per attempt**, and a **600-second deadline** for 
 whole turn, covering every attempt and the backoff between them. SDK retries are
 disabled. These limits apply to the hosted Beaker gateway and local runs using
 `--api chat_completions`. Direct OpenAI CLI
-runs select native Responses by default; Responses, Anthropic, and Gemini clients
-retain their upstream behavior.
+runs select native Responses by default. Responses retries empty output up to
+three attempts, then raises a model error; valid refusal and reasoning output
+is preserved. Anthropic context overflow preserves earned credit. Other native
+provider retry behavior follows the copied upstream clients.
 
 The defaults are named constants in `src/automationbench_skills/clients.py`.
 Reasoning counts toward the completion cap on most providers, so a reasoning

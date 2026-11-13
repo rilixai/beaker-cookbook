@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from anthropic import AsyncAnthropic
+from anthropic import BadRequestError as AnthropicBadRequestError
 from anthropic.types import Message as AnthropicMessage
 from automationbench.domains import get_combined_dataset
 from beaker import CaseResult, RetryableCaseError
@@ -294,7 +295,8 @@ async def test_hosted_failure_after_a_successful_write(row, tmp_path, monkeypatc
         assert cancelled.is_set()
 
 
-async def test_empty_anthropic_response_retries_the_case(row, tmp_path, monkeypatch):
+@pytest.mark.parametrize("failure", ["empty", "overflow", "bad_request"])
+async def test_anthropic_failure_after_a_successful_write(row, tmp_path, monkeypatch, failure):
     import beaker_integration as integration
 
     parsed = TaskRow.model_validate(row)
@@ -311,7 +313,30 @@ async def test_empty_anthropic_response_retries_the_case(row, tmp_path, monkeypa
             "usage": {"input_tokens": 10, "output_tokens": 0},
         }
     )
-    final_message = AsyncMock(return_value=reply)
+    write = AnthropicMessage.model_validate(
+        {
+            **reply.model_dump(),
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "update",
+                    "name": "api_fetch",
+                    "input": {
+                        "endpoint": "salesforce.sobjects.contact.update",
+                        "path": {"id": "003002"},
+                        "body": {"Email": "maria.santos@brightwave-global.example.com"},
+                    },
+                }
+            ],
+            "stop_reason": "tool_use",
+        }
+    )
+    error = AnthropicBadRequestError(
+        "prompt is too long: 210000 tokens > 200000 maximum" if failure == "overflow" else "Invalid request",
+        response=httpx.Response(400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")),
+        body={"type": "invalid_request_error"},
+    )
+    final_message = AsyncMock(side_effect=[write, reply if failure == "empty" else error])
 
     @asynccontextmanager
     async def stream(**kwargs):
@@ -324,7 +349,14 @@ async def test_empty_anthropic_response_retries_the_case(row, tmp_path, monkeypa
     )
     monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
     with local_capture(tmp_path, case_id=case.id, candidate_id="test", strict_evidence=False):
-        with pytest.raises(RetryableCaseError, match="no content"):
-            await integration.run_case(case_input=case.input, runtime=SimpleNamespace(trace=current_trace()))
-    final_message.assert_awaited_once()
+        runtime = SimpleNamespace(trace=current_trace())
+        if failure == "overflow":
+            result = await integration.run_case(case_input=case.input, runtime=runtime)
+            assert str(result.context["error"]).startswith("OverlongPromptError:")
+            score = await score_case(case=case, result=result, case_files_dir=tmp_path)
+            assert score.field_scores["partial_credit"] == 1
+        else:
+            with pytest.raises(RetryableCaseError, match="no content" if failure == "empty" else "ModelError"):
+                await integration.run_case(case_input=case.input, runtime=runtime)
+    assert final_message.await_count == 2
     assert client.client.is_closed()

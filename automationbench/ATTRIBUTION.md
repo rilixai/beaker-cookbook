@@ -10,7 +10,7 @@ This recipe builds on **AutomationBench** by Zapier, Inc. and the **AutomationBe
 
 The PI benchmark is an unmodified Git dependency. The recipe drives its MCP toolset and scores with its rubric.
 
-`src/automationbench_skills/vendored/clients.py` preserves Zapier's provider clients from `automationbench/clients.py` at `4a8e1061254004d9dac807054eed33fad7d1ff14`. Imports now refer to the recipe's model protocol because PI removed the legacy client API. This retains native Responses, Anthropic streaming and Gemini interactions behavior.
+`src/automationbench_skills/vendored/clients.py` adapts Zapier's provider clients from `automationbench/clients.py` at `4a8e1061254004d9dac807054eed33fad7d1ff14`. Imports refer to the recipe's model protocol because PI removed the legacy client API. Local fixes classify Anthropic context overflow as `OverlongPromptError` and validate Responses output, retrying empty replies up to three attempts while preserving discarded token usage. Native Responses, Anthropic streaming and Gemini interactions routing remains available.
 
 `src/automationbench_skills/vendored/model_setup.py` extracts model/API routing, sampling arguments and client construction from the original `automationbench/scripts/eval.py` at the same commit. Routing helpers are now included locally; batch paths remain omitted.
 

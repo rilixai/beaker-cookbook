@@ -1,5 +1,6 @@
 # Adapted from zapier/AutomationBench automationbench/clients.py at
-# 4a8e1061254004d9dac807054eed33fad7d1ff14 (MIT). Only client-protocol imports changed.
+# 4a8e1061254004d9dac807054eed33fad7d1ff14 (MIT). Local changes: protocol imports,
+# Anthropic context-overflow classification, and Responses empty-output handling.
 # Copyright 2026 Zapier, Inc.
 # SPDX-License-Identifier: MIT
 
@@ -36,6 +37,8 @@ from automationbench_skills.model_protocol import (
 # + jitter is the root-cause fix; only a genuinely non-transient error (e.g. a
 # 400 bad request) or exhausting every attempt is allowed to propagate.
 _RETRY_MAX_ATTEMPTS = 40
+# Empty Responses replies get a short retry budget separate from transient HTTP errors.
+_RESPONSES_EMPTY_MAX_ATTEMPTS = 3
 
 # Preserve every Responses API output item on the assistant message so a later
 # tool turn can replay reasoning items together with function calls. OpenAI
@@ -378,6 +381,14 @@ class StreamingAnthropicClient(AnthropicMessagesClient):
             except anthropic.APIStatusError as e:
                 status = getattr(e, "status_code", None)
                 err_str = str(e)
+                if status == 400 and any(
+                    marker in err_str.lower()
+                    for marker in (
+                        "prompt is too long", "exceed context limit", "exceeds context limit",
+                        "too many total text bytes", "context length", "input is too long",
+                    )
+                ):
+                    raise OverlongPromptError(str(e)) from e
                 is_retryable = (
                     (status is not None and (status == 429 or status >= 500))
                     or "overloaded_error" in err_str
@@ -503,17 +514,32 @@ class OpenAIResponsesClient(Client[AsyncOpenAI, list[dict], Any, dict]):
         tools: list[dict] | None = None,
         **kwargs,
     ) -> Any:
-        """Call the Responses API, retrying on rate limits."""
+        """Call the Responses API with bounded transient-error and empty-output retries."""
         # Keep state (not an API arg) so we can record per-task perf into it.
         state = kwargs.pop("state", None)
 
         call_kwargs = self.build_call_kwargs(prompt, model, sampling_args, tools, **kwargs)
+        empty_responses = 0
 
         for attempt in range(_RETRY_MAX_ATTEMPTS):
             try:
                 t0 = time.monotonic()
                 resp = await self.client.responses.create(**call_kwargs)
                 _record_model_call(state, time.monotonic() - t0, resp)
+                try:
+                    await self.raise_from_native_response(resp)
+                except ModelError:
+                    # The rollout never sees discarded replies, so count their tokens here.
+                    usage = getattr(resp, "usage", None)
+                    if state is not None and usage is not None:
+                        totals = state.setdefault("_usage", {"input_tokens": 0, "output_tokens": 0})
+                        totals["input_tokens"] += usage.input_tokens or 0
+                        totals["output_tokens"] += usage.output_tokens or 0
+                    empty_responses += 1
+                    if empty_responses >= _RESPONSES_EMPTY_MAX_ATTEMPTS or attempt == _RETRY_MAX_ATTEMPTS - 1:
+                        raise
+                    await asyncio.sleep(_retry_delay(empty_responses - 1))
+                    continue
                 return resp
             except openai.BadRequestError as e:
                 error_text = getattr(e, "message", str(e)).lower()
@@ -538,7 +564,19 @@ class OpenAIResponsesClient(Client[AsyncOpenAI, list[dict], Any, dict]):
         raise RuntimeError("unreachable")
 
     async def raise_from_native_response(self, response: Any) -> None:
-        pass
+        if response is None:
+            raise ModelError("Model returned no response")
+        parsed = await self.from_native_response(response)
+        if (
+            parsed.message.content
+            or parsed.message.tool_calls
+            or parsed.message.reasoning_content
+            or (parsed.usage and parsed.usage.reasoning_tokens)
+            # Native reasoning items can carry opaque state with no visible text.
+            or any(getattr(item, "type", None) == "reasoning" for item in response.output or [])
+        ):
+            return
+        raise ModelError("Model returned no content and did not call any tools")
 
     async def from_native_response(self, response: Any) -> Response:
         """Convert a Responses API response to vf.Response."""
