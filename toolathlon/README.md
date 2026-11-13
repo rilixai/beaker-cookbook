@@ -114,7 +114,7 @@ into containers, where upstream `uv run` installs the selected dependencies.
 Defaults are one worker and a 5,400-second per-task timeout. `--workers`, `--timeout`
 and `--max-steps` override them. `--runner containerized` selects this path explicitly;
 `auto` selects it for an environment, multiple tasks or `--all`. Native mode accepts
-one task at a time. The Docker/services path still needs validation
+one quickstart task at a time. The Docker/services path still needs validation
 on a configured benchmark host.
 
 Full-run artifacts are under `artifacts/finalpool/<task>/`; `result.json` records
