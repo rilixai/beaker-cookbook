@@ -17,8 +17,8 @@ from toolathlon_baseline.catalog import task_catalog
 
 QUICKSTART_TRAIN_TASKS = ("find-alita-paper", "excel-market-research")
 QUICKSTART_TEST_TASKS = ("interview-report",)
-# MCP servers backed by third-party accounts (tokens in upstream configs/token_key_session.py).
-# Canvas, emails, WooCommerce and k8s are local containers and need no account.
+# MCP servers and local tools backed by third-party accounts (tokens in upstream
+# configs/token_key_session.py). Canvas, emails, WooCommerce and k8s are local containers.
 EXTERNAL_ACCOUNT_SERVERS = frozenset(
     {
         "github",
@@ -36,6 +36,7 @@ EXTERNAL_ACCOUNT_SERVERS = frozenset(
         "youtube-transcript",
     }
 )
+EXTERNAL_ACCOUNT_LOCAL_TOOLS = frozenset({"web_search"})
 
 
 def _full_split_tasks(source: Path, *, no_external_accounts: bool = False) -> tuple[list[str], list[str]]:
@@ -44,7 +45,13 @@ def _full_split_tasks(source: Path, *, no_external_accounts: bool = False) -> tu
         entry["id"]
         for entry in task_catalog(source)
         if entry["id"] not in QUICKSTART_TASKS
-        and not (no_external_accounts and EXTERNAL_ACCOUNT_SERVERS & set(entry["mcp_servers"]))
+        and not (
+            no_external_accounts
+            and (
+                EXTERNAL_ACCOUNT_SERVERS & set(entry["mcp_servers"])
+                or EXTERNAL_ACCOUNT_LOCAL_TOOLS & set(entry["local_tools"])
+            )
+        )
     ]
     ordered = [*QUICKSTART_TASKS, *remaining]
     train_tasks = [task for idx, task in enumerate(ordered) if idx % 3 != 2]
@@ -67,7 +74,7 @@ def main() -> None:
     parser.add_argument(
         "--no-external-accounts",
         action="store_true",
-        help="Upload only the 49 tasks whose MCP servers need no third-party account (33 train, 16 test).",
+        help="Upload only the 38 tasks whose MCP servers and tools need no third-party account (26 train, 12 test).",
     )
     parser.add_argument(
         "--name",
