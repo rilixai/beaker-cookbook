@@ -333,3 +333,62 @@ async def test_a_retry_after_a_slow_failure_needs_room_in_the_turn(turn_timeout:
     finally:
         await client.close()
     assert len(requests) == 2
+
+
+def _endpoint_env(monkeypatch: Any, **overrides: str | None) -> None:
+    values = {
+        "AUTOMATIONBENCH_MODEL": "deepseek-v4.1-flash",
+        "AUTOMATIONBENCH_BASE_URL": "https://router.invalid/v1",
+        "AUTOMATIONBENCH_API_KEY_VAR": "ROUTER_KEY",
+        "AUTOMATIONBENCH_REASONING_EFFORT": "high",
+        "ROUTER_KEY": "test",
+    }
+    values.update(overrides)
+    for name, value in values.items():
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+
+
+async def test_an_agent_endpoint_model_is_called_directly(monkeypatch: Any) -> None:
+    sys.path.insert(0, str(Path(__file__).parents[1] / ".beaker"))
+    import beaker_integration
+
+    captured = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append((str(request.url), request.headers["authorization"], json.loads(request.content)))
+        return httpx.Response(200, json=_reply())
+
+    def sdk(**kwargs: Any) -> AsyncOpenAI:
+        return AsyncOpenAI(**kwargs, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+
+    _endpoint_env(monkeypatch)
+    monkeypatch.setattr(beaker_integration, "AsyncOpenAI", sdk)
+    client, model = beaker_integration._client_for(SimpleNamespace(model=None))
+    try:
+        assert client.max_attempts == beaker_integration.ENDPOINT_MAX_MODEL_ATTEMPTS
+        assert client.client.max_retries == 0
+        await client.get_native_response([], model.name, model.sampling_args())
+    finally:
+        await client.close()
+    url, authorization, body = captured[0]
+    assert url == "https://router.invalid/v1/chat/completions"
+    assert authorization == "Bearer test"
+    assert body["model"] == "deepseek-v4.1-flash"
+    assert body["reasoning_effort"] == "high"
+
+
+def test_incomplete_endpoint_settings_stop_at_setup(monkeypatch: Any) -> None:
+    sys.path.insert(0, str(Path(__file__).parents[1] / ".beaker"))
+    import beaker_integration
+
+    _endpoint_env(monkeypatch, AUTOMATIONBENCH_MODEL=None)
+    assert beaker_integration.endpoint_model_spec() is None
+    _endpoint_env(monkeypatch, AUTOMATIONBENCH_BASE_URL=None)
+    with pytest.raises(ValueError):
+        beaker_integration.endpoint_model_spec()
+    _endpoint_env(monkeypatch, ROUTER_KEY=None)
+    with pytest.raises(ValueError):
+        beaker_integration.endpoint_model_spec()

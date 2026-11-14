@@ -106,6 +106,24 @@ A `vendor/model` name (e.g. `z-ai/glm-5.3-flash`) routes to OpenRouter using
 `OPENROUTER_API_KEY`; `--reasoning-enabled` toggles reasoning for models that
 only expose an on/off switch.
 
+Hosted runs with `--optimization-model` call the model through Beaker's inference
+gateway. Without one, they use `gpt-5.6-luna`, or a model on another
+OpenAI-compatible endpoint set on the agent. The agent calls that endpoint directly
+over Chat Completions, with up to 8 attempts per model turn. Beaker records those
+calls' tokens but not their cost. For DeepSeek V4.1 Flash on the You.com Inference
+Router:
+
+```bash
+uv run beaker agent env set YDC_API_KEY --value-stdin   # paste a You.com API key
+uv run beaker agent env set AUTOMATIONBENCH_MODEL --value deepseek-v4.1-flash
+uv run beaker agent env set AUTOMATIONBENCH_BASE_URL --value https://api.you.com/v1
+uv run beaker agent env set AUTOMATIONBENCH_API_KEY_VAR --value YDC_API_KEY
+uv run beaker agent env set AUTOMATIONBENCH_REASONING_EFFORT --value high   # optional
+```
+
+Setup stops the run if `AUTOMATIONBENCH_MODEL` is set without a base URL, a key
+variable, or the key itself.
+
 ## Chat Completions limits
 
 OpenAI-compatible Chat Completions calls use **32,768 output tokens** (a 24,576-token
