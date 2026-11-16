@@ -1,6 +1,7 @@
 # Adapted from zapier/AutomationBench automationbench/clients.py at
 # 4a8e1061254004d9dac807054eed33fad7d1ff14 (MIT). Local changes: protocol imports,
-# Anthropic context-overflow classification, and Responses empty-output handling.
+# Anthropic context-overflow classification, Responses empty-output handling,
+# and removal of the unused legacy Chat Completions retry client.
 # Copyright 2026 Zapier, Inc.
 # SPDX-License-Identifier: MIT
 
@@ -23,7 +24,7 @@ import openai
 from openai import AsyncOpenAI
 
 from automationbench_skills.model_protocol import (
-    Client, AnthropicMessagesClient, OpenAIChatCompletionsClient, parse_reasoning_content,
+    Client, AnthropicMessagesClient,
     ModelError, OverlongPromptError, AssistantMessage, ClientConfig, FinishReason,
     Messages, Response, ResponseMessage, SamplingArgs, SystemMessage, TextMessage,
     Tool, ToolCall, ToolMessage, Usage, UserMessage, setup_openai_client,
@@ -49,7 +50,7 @@ _OPENAI_RESPONSES_OUTPUT_FIELD = "openai_responses_output"
 # 4xx client errors that will never succeed on retry — fail fast on these so a
 # misconfiguration surfaces immediately instead of burning the full backoff.
 # Everything NOT in this set is treated as a transient blip and retried (see
-# RetryingOpenAIChatCompletionsClient), which is what makes the proxy/alpha path
+# CostTrackingChatCompletionsClient), which is what makes the proxy/alpha path
 # resilient to proxy/gateway-wrapped exception types outside the openai.* hierarchy.
 _NON_RETRYABLE_CHAT = (
     openai.BadRequestError,
@@ -76,27 +77,6 @@ def _retry_delay(attempt: int, retry_after: float | None = None) -> float:
     """Capped exponential backoff with jitter, honoring a server Retry-After."""
     base = retry_after if retry_after is not None else min(60.0, 2.0**attempt)
     return base + random.uniform(0, 1)
-
-
-# _RETRY_MAX_ATTEMPTS attempts at min(60, 2**attempt) sum to ~35 minutes, all of it
-# inside one API call with no output. That is correct behaviour (better a slow rollout
-# than an aborted one) but it is indistinguishable from a hung run, and a whole
-# debugging session has been lost to exactly that ambiguity. Announce a retry storm
-# once it passes the point where a human would start suspecting a hang.
-_RETRY_NOISE_THRESHOLD = 4
-
-
-def _warn_retry_storm(attempt: int, err: Any, label: str) -> None:
-    """Print once past _RETRY_NOISE_THRESHOLD so long backoffs are visible, not silent."""
-    if attempt < _RETRY_NOISE_THRESHOLD:
-        return
-    kind = type(err).__name__ if err is not None else "empty-response"
-    print(
-        f"[retry] {label}: attempt {attempt + 1}/{_RETRY_MAX_ATTEMPTS} after {kind} — "
-        f"sleeping ~{min(60.0, 2.0**attempt):.0f}s (a run can legitimately stall for "
-        f"minutes here; it is retrying, not hung)",
-        flush=True,
-    )
 
 
 def _parse_retry_after(err: Any) -> float | None:
@@ -985,72 +965,3 @@ class GeminiInteractionsClient(Client[httpx.AsyncClient, list[dict], dict, dict]
                 is_truncated=truncated,
             ),
         )
-
-
-class RetryingOpenAIChatCompletionsClient(OpenAIChatCompletionsClient):
-    """Chat Completions client that retries the full transient-error family.
-
-    The stock verifiers client lets connection/timeout/5xx errors propagate,
-    which ends the rollout mid-work (a dangling tool-call tail scored 0). This is
-    the path used for gateway-routed and alpha models, where transient proxy 5xx
-    and dropped connections are the dominant abort cause — so it needs the same
-    backoff guard as the Anthropic and Responses clients.
-    """
-
-    async def to_native_prompt(self, messages):
-        # The stock serializer emits "reasoning_content": null on assistant
-        # messages whose turn produced no reasoning text; strict validators
-        # (e.g. Vercel AI Gateway) 400 on the null and abort the rollout.
-        native, extra = await super().to_native_prompt(messages)
-        for m in native:
-            d = cast(dict, m)
-            if d.get("reasoning_content") is None:
-                d.pop("reasoning_content", None)
-        return native, extra
-
-    async def get_native_response(self, *args, **kwargs):
-        state = kwargs.get("state")
-        for attempt in range(_RETRY_MAX_ATTEMPTS):
-            try:
-                t0 = time.monotonic()
-                resp = await super().get_native_response(*args, **kwargs)
-                _record_model_call(state, time.monotonic() - t0, resp)
-                # A fully empty message (no content, tool calls, or reasoning —
-                # a Gemini flakiness) would raise EmptyModelResponseError in
-                # from_native_response, outside this guard, killing the rollout.
-                # Treat it as one more transient blip and retry here instead.
-                choices = getattr(resp, "choices", None)
-                if choices:
-                    msg = choices[0].message
-                    if not (msg.content or msg.tool_calls or parse_reasoning_content(msg)):
-                        if attempt == _RETRY_MAX_ATTEMPTS - 1:
-                            return resp
-                        _warn_retry_storm(attempt, None, "chat/empty-response")
-                        await asyncio.sleep(_retry_delay(attempt))
-                        continue
-                return resp
-            except _NON_RETRYABLE_CHAT as e:
-                # Genuine client errors (bad request, auth, not-found, …) won't
-                # change on retry — fail fast and loud.
-                if _is_safety_classifier_error(e):
-                    _record_safety_classifier_error(state, e)
-                    raise ModelError("provider safety classifier rejected the request") from e
-                raise
-            except Exception as e:  # noqa: BLE001
-                # Gateway-wrapped safety rejections are deterministic model-side
-                # failures, not infrastructure flakes.  Preserve them as refusal
-                # stops instead of silently retrying into a different outcome.
-                if _is_safety_classifier_error(e):
-                    _record_safety_classifier_error(state, e)
-                    raise ModelError("provider safety classifier rejected the request") from e
-                # Everything else is treated as a transient blip and retried.
-                # This deliberately broad net catches proxy/gateway-wrapped
-                # exception types that don't subclass the openai.* classes
-                # (the dominant abort cause on the proxy/alpha path), as well as
-                # connection/timeout/5xx/rate-limit. After the last attempt it
-                # propagates, and the --ensure-complete gate re-runs the task.
-                if attempt == _RETRY_MAX_ATTEMPTS - 1:
-                    raise
-                _warn_retry_storm(attempt, e, "chat")
-                await asyncio.sleep(_retry_delay(attempt, _parse_retry_after(e)))
-        raise RuntimeError("unreachable")

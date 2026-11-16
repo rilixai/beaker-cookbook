@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fake_client import ScriptedClient
 
 from automationbench_skills import runner as runner_mod
@@ -324,13 +325,15 @@ class TestRunner:
         serialized = result.to_json()
         assert {"latency_s", "cost_usd", "usage", "perf"} <= serialized.keys()
 
-    def test_client_cache_is_per_event_loop(self, monkeypatch: Any) -> None:
+    @pytest.mark.parametrize("model", ["gpt-5-mini", "openai/gpt-5-mini"])
+    def test_client_cache_is_per_event_loop(self, monkeypatch: Any, model: str) -> None:
         import asyncio
 
+        from automationbench_skills.clients import CostTrackingChatCompletionsClient
         from automationbench_skills.runner import ModelSpec, get_client
 
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        spec = ModelSpec(name="gpt-5-mini")
+        spec = ModelSpec(name=model)
+        monkeypatch.setenv(spec.effective_api_key_var(), "test-key")
 
         async def grab() -> Any:
             return get_client(spec)
@@ -339,6 +342,10 @@ class TestRunner:
             return get_client(spec), get_client(spec)
 
         first, second = asyncio.run(grab_twice())
+        assert isinstance(first, CostTrackingChatCompletionsClient)
+        assert first.max_attempts == 3 and first.turn_timeout == 600
+        assert first.client.max_retries == 0 and first.client.timeout == 300
+        assert str(first.client.base_url).rstrip("/") == (spec.effective_base_url() or "https://api.openai.com/v1")
         assert first is second  # same loop -> shared client
         assert asyncio.run(grab()) is not first  # new asyncio.run -> fresh client
         # closed-loop entries are evicted, so the cache doesn't grow across runs

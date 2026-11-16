@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,11 +26,9 @@ from typing import Any
 from automationbench_skills.clients import (
     DEFAULT_MAX_ANSWER_TOKENS,
     DEFAULT_MAX_REASONING_TOKENS,
-    DEFAULT_MODEL_REQUEST_TIMEOUT,
-    CostTrackingChatCompletionsClient,
 )
 from automationbench_skills.data.tasks import Sample
-from automationbench_skills.model_protocol import Client, ClientConfig
+from automationbench_skills.model_protocol import Client
 from automationbench_skills.prompts import load_system_prompt, task_clock, with_system_prompt
 from automationbench_skills.skills_tools import SKILL_TOOLS, set_skills_dir
 from automationbench_skills.vendored.model_setup import (
@@ -207,22 +204,9 @@ def get_client(model: ModelSpec) -> Client:
         del _CLIENT_CACHE[stale]
     key = (model, asyncio.get_running_loop())
     if key not in _CLIENT_CACHE:
-        resolved = model.resolved_api()
-        key_var = model.effective_api_key_var()
-        if not os.environ.get(key_var):
-            raise ValueError(f"No API key found. Set the {key_var} environment variable.")
-        if resolved == "chat_completions":
-            _CLIENT_CACHE[key] = CostTrackingChatCompletionsClient(
-                ClientConfig(
-                    api_key_var=key_var,
-                    api_base_url=model.effective_base_url() or "https://api.openai.com/v1",
-                    extra_headers={},
-                    max_retries=0,
-                    timeout=DEFAULT_MODEL_REQUEST_TIMEOUT,
-                )
-            )
-        else:
-            _CLIENT_CACHE[key] = build_client(resolved, key_var, model.effective_base_url())
+        _CLIENT_CACHE[key] = build_client(
+            model.resolved_api(), model.effective_api_key_var(), model.effective_base_url()
+        )
     return _CLIENT_CACHE[key]
 
 

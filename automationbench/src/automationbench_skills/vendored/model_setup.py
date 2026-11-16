@@ -23,10 +23,10 @@ import json
 import os
 
 from anthropic import AsyncAnthropic
+from automationbench_skills.clients import CostTrackingChatCompletionsClient
 from automationbench_skills.vendored.clients import (
     GeminiInteractionsClient,
     OpenAIResponsesClient,
-    RetryingOpenAIChatCompletionsClient,
     StreamingAnthropicClient,
 )
 from automationbench_skills.model_protocol import Client, ClientConfig
@@ -187,4 +187,4 @@ def build_client(
     )
     if resolved_api == "responses":
         return OpenAIResponsesClient(config)
-    return RetryingOpenAIChatCompletionsClient(config)
+    return CostTrackingChatCompletionsClient(config)
