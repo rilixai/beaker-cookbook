@@ -15,12 +15,53 @@ from automationbench.rubric import partial_credit
 from automationbench.rubric.registry import AssertionRegistry
 from automationbench.schema.world import WorldState
 from beaker import Case, CaseResult
+from fake_client import ScriptedClient
 
 
 sys.path.insert(0, str(Path(__file__).parents[1] / ".beaker"))
 import beaker_integration as integration  # noqa: E402
 from assertion_diagnostics import _brief, capture_assertion_returns, failure_trace  # noqa: E402
 from world_diff import OUTPUT_MAX_BYTES, ServiceDiffs  # noqa: E402
+
+
+@pytest.mark.parametrize("update_contact", [False, True])
+async def test_simple_task_runs_and_scores_with_trusted_initial_state(monkeypatch, tmp_path, update_contact) -> None:
+    task_name = "simple.email_sf_contact_email_update"
+    sample = integration._sample_for({"task_name": task_name})
+    client = ScriptedClient(
+        turns=[
+            {
+                "tool_calls": [
+                    {
+                        "name": "execute_tool",
+                        "arguments": {
+                            "tool_name": "salesforce_contact_update",
+                            "arguments": json.dumps(
+                                {"id": "003002", "email": "maria.santos@brightwave-global.example.com"}
+                            ),
+                        },
+                    }
+                ]
+            }
+        ]
+        if update_contact
+        else []
+    )
+    monkeypatch.setattr(integration, "_client_for", lambda _: (client, integration.ModelSpec(name="scripted-model")))
+    monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
+
+    @contextmanager
+    def stage(*args, **kwargs):
+        yield SimpleNamespace(output=lambda _: None)
+
+    case = Case(id=task_name, input={"task_name": task_name}, expected={"assertions": sample.info["assertions"]})
+    result = await integration.run_case(
+        case_input=case.input, runtime=SimpleNamespace(trace=SimpleNamespace(stage=stage))
+    )
+    assert result.context["error"] is None
+    score = await integration.score_case(case=case, result=result, case_files_dir=tmp_path)
+    assert score.objective == float(update_contact)
+    assert [check.verdict for check in score.checks] == ["pass" if update_contact else "fail"]
 
 
 @pytest.mark.parametrize(

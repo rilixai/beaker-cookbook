@@ -43,11 +43,12 @@ def task_family(task_name: str) -> str:
 
 
 @cache
-def load_samples() -> tuple[Sample, ...]:
-    """Build the 600 public tasks in the benchmark's own deterministic order."""
+def load_samples(*, include_simple: bool = False) -> tuple[Sample, ...]:
+    """Build public tasks, optionally followed by the upstream simple tasks."""
     from automationbench.domains import get_combined_dataset
 
-    dataset = get_combined_dataset(PUBLIC_DOMAINS)
+    domains = [*PUBLIC_DOMAINS, "simple"] if include_simple else PUBLIC_DOMAINS
+    dataset = get_combined_dataset(domains)
     samples: list[Sample] = []
     for index, row in enumerate(dataset):
         info = row["info"]

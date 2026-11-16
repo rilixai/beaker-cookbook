@@ -82,6 +82,14 @@ class TestSplits:
         samples = load_samples()
         assert len({s.task_name for s in samples}) == len(samples) == 600
 
+    def test_simple_tasks_are_opt_in_and_preserve_public_indices(self) -> None:
+        public = load_samples()
+        extended = load_samples(include_simple=True)
+        assert extended[: len(public)] == public
+        assert len({s.task_name for s in extended}) == len(extended)
+        assert "simple.email_sf_contact_email_update" in {s.task_name for s in extended}
+        assert all(s.domain == "simple" for s in extended[len(public) :])
+
     def test_task_family(self) -> None:
         assert task_family("sales.docusign_contract_send") == "docusign"
 

@@ -85,8 +85,8 @@ from automationbench_skills.runner import (
 # as a smaller term so fully-correct runs are preferred.
 FIELD_WEIGHTS = {"partial_credit": 0.8, "task_completed_correctly": 0.2}
 DEFAULT_TIMEOUT_SECONDS = 2400.0
-# The scored benchmark domains (``upload_splits.py`` draws from the same set).
-_PUBLIC_DOMAINS = ("sales", "marketing", "operations", "support", "finance", "hr")
+# Uploaded datasets can also contain upstream simple tasks, beyond the public splits.
+_SUPPORTED_DOMAINS = ("sales", "marketing", "operations", "support", "finance", "hr", "simple")
 # Mirrors beaker_runtime.optimization.evaluation.repository.protocol's
 # MAX_EXECUTION_PAYLOAD_BYTES (not exposed by beaker-sdk 0.6.4).
 _RESULT_MAX_BYTES = 8 * 1024 * 1024
@@ -194,7 +194,7 @@ class _TracedAnthropicClient(StreamingAnthropicClient):
 
 @cache
 def _samples_by_name() -> dict[str, Sample]:
-    return {sample.task_name: sample for sample in load_samples()}
+    return {sample.task_name: sample for sample in load_samples(include_simple=True)}
 
 
 @cache
@@ -206,7 +206,7 @@ def _authored_initial_states() -> dict[str, dict[str, Any]]:
     than through the optimizer-editable ``src/`` loader ``run_case`` uses.
     """
     states: dict[str, dict[str, Any]] = {}
-    for row in get_combined_dataset(list(_PUBLIC_DOMAINS)):
+    for row in get_combined_dataset(list(_SUPPORTED_DOMAINS)):
         info = row["info"]
         if isinstance(info, str):
             info = json.loads(info)

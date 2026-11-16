@@ -8,6 +8,11 @@ This present recipe runs the benchmark one task at a time (`run_one`). The agent
 > working `beaker.yaml` and `beaker_integration.py`; there is nothing to write
 > before pointing Beaker at it.
 
+Uploaded Beaker datasets can also use tasks from the upstream `simple` domain,
+such as `simple.email_sf_contact_email_update`. The integration loads and scores
+these tasks from the pinned benchmark package. The frozen public train/test splits
+and `upload_splits.py` remain limited to the six public domains.
+
 Beaker displays assertion conditions as **Checks**, without Expected/Predicted
 value pairs. Check names include the assertion type and complete parameter values,
 resolving record IDs to readable labels when available. Descriptions include the
