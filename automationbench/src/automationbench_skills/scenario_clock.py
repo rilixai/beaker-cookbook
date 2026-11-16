@@ -54,7 +54,10 @@ def scenario_time(prompt: list[dict[str, Any]], initial_state: dict[str, Any]) -
     for message in prompt:
         if message.get("role") != "user":
             continue
-        for match in _CURRENT_DATE.finditer(str(message.get("content") or "")):
+        # Some upstream prompts contain literal \n separators. Normalize only
+        # the parsing copy so the task text and frozen fixtures stay unchanged.
+        text = str(message.get("content") or "").replace(r"\n", "\n")
+        for match in _CURRENT_DATE.finditer(text):
             value = match["value"]
             if value[0].isdigit() and "T" in value.upper():
                 stamp = datetime.fromisoformat(value.upper())

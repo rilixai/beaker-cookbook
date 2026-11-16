@@ -72,11 +72,22 @@ async def test_all_published_tasks_have_the_same_cli_and_hosted_clock():
         assert _rollout_input(sample)["prompt"] == _rollout_input(fixture.sample())["prompt"], sample.task_name
 
 
-async def test_generator_schedule_uses_february_ninth_in_prompt_and_execution():
-    name = "operations.generator_load_testing_schedule"
+@pytest.mark.parametrize(
+    "name",
+    [
+        "operations.generator_load_testing_schedule",
+        "operations.insurance_cert_validation",
+        "operations.sensor_monitoring_alert",
+    ],
+)
+async def test_authored_february_ninth_is_used_in_prompt_and_execution(name):
     sample = next(sample for sample in load_samples() if sample.task_name == name)
     expected = "2026-02-09T12:00:00+00:00"
+    prompt_before = copy.deepcopy(sample.prompt)
+    assert scenario_time(sample.prompt, {}) == expected
+    assert sample.prompt == prompt_before
     fixture = await standard_fixture(sample)
+    assert fixture.sample().prompt == prompt_before
     assert fixture.initial_state()["meta"]["current_time"] == expected
     client = ScriptedClient()
     output = await get_env(toolset="api", skills=False).run_rollout(_rollout_input(sample), client, "fake", {})
