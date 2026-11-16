@@ -74,6 +74,40 @@ async def test_native_tools_score_and_trace_through_hosted_integration(monkeypat
     assert "Gmail" in results[1] and "unknown skill" not in results[1]
 
 
+@pytest.mark.parametrize("content", [None, ""])
+async def test_empty_response_retries_and_preserves_trace_usage(content, monkeypatch, tmp_path):
+    case = await case_for(sample())
+    turns = [{"content": content}, {"tool_calls": [PHONE_UPDATE]}]
+    async with ScriptedEndpoint(turns) as endpoint:
+        model = ModelSpec(name="fake", base_url=endpoint.url)
+        monkeypatch.setattr(integration, "_model_for", lambda _: (model, "test-run-key"))
+        with local_capture(tmp_path, case_id=case.id, candidate_id="native", strict_evidence=True) as capture:
+            result = await integration.run_case(case_input=case.input, runtime=SimpleNamespace(trace=current_trace()))
+        score = await integration.score_case(case=case, result=result, case_files_dir=tmp_path)
+    assert len(endpoint.requests) == 3
+    assert endpoint.requests[0]["messages"] == endpoint.requests[1]["messages"]
+    assert score.field_scores == {"partial_credit": 1.0, "task_completed_correctly": 1.0}
+    receipt = capture.receipt.to_dict()
+    assert receipt["counts"]["model_calls"] == 3
+    assert receipt["projection"]["token_usage"]["total_tokens"] == 45
+
+
+async def test_exhausted_empty_responses_request_a_hosted_case_retry(monkeypatch, tmp_path):
+    case = await case_for(sample())
+    # Keep returning empty replies beyond the native SDK's retry budget.
+    turns = [{"tool_calls": [PHONE_UPDATE]}] + [{"content": None}] * 10
+    async with ScriptedEndpoint(turns) as endpoint:
+        model = ModelSpec(name="fake", base_url=endpoint.url)
+        monkeypatch.setattr(integration, "_model_for", lambda _: (model, "test-run-key"))
+        with local_capture(tmp_path, case_id=case.id, candidate_id="native", strict_evidence=False) as capture:
+            with pytest.raises(RetryableCaseError, match="ProviderError:.*empty response"):
+                await integration.run_case(case_input=case.input, runtime=SimpleNamespace(trace=current_trace()))
+    assert len(endpoint.requests) == 4  # One write, then three empty-response attempts.
+    receipt = capture.receipt.to_dict()
+    assert receipt["counts"]["model_calls"] == 4
+    assert receipt["projection"]["token_usage"]["total_tokens"] == 60
+
+
 @pytest.mark.parametrize("failure", ["deadline", "provider"])
 async def test_native_failure_preserves_completed_writes(failure, monkeypatch, tmp_path):
     turns = [

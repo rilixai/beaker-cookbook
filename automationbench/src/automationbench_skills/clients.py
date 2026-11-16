@@ -10,6 +10,7 @@ from beaker.tracing import current_trace
 from verifiers.v1.clients.client import RelayReply
 from verifiers.v1.clients.eval import EvalClient
 from verifiers.v1.dialects.base import is_sse_done_event
+from verifiers.v1.errors import ProviderError
 from verifiers.v1.interception.server import InterceptionServer
 
 
@@ -45,6 +46,12 @@ class TracedEvalClient(EvalClient):
                     yield chunk
                 response = parser.finish()
                 operation.output(response.raw)
+                message = response.message
+                if not (message.content or message.reasoning_content or message.tool_calls or message.provider_state):
+                    # The interception server buffers this stream before committing
+                    # the turn. A 502 uses the native SDK's bounded retry policy;
+                    # recording output first retains usage from discarded attempts.
+                    raise ProviderError("Model returned an empty response", status_code=502)
                 complete = True
             except BaseException as exc:
                 error = exc
