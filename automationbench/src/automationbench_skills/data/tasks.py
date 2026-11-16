@@ -15,6 +15,8 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
+from automationbench_skills.scenario_clock import scenario_time
+
 
 PI_COMMIT = "858718b19e5d66c74451432783d34ee64a550a15"
 BENCHMARK_DOMAINS = ["sales", "marketing", "operations", "support", "finance", "hr", "simple"]
@@ -44,7 +46,6 @@ def task_family(task_name: str) -> str:
 def load_samples() -> tuple[Sample, ...]:
     """Build all 800 published PI tasks in the benchmark's own deterministic order."""
     from automationbench.domains import get_combined_dataset
-    from automationbench.schema.world import WorldMeta
 
     dataset = get_combined_dataset(BENCHMARK_DOMAINS)
     samples: list[Sample] = []
@@ -54,7 +55,7 @@ def load_samples() -> tuple[Sample, ...]:
             info = json.loads(info)
         meta = info.setdefault("initial_state", {}).setdefault("meta", {})
         if not meta.get("current_time"):
-            meta["current_time"] = WorldMeta().current_time.isoformat()
+            meta["current_time"] = scenario_time(row["prompt"], info["initial_state"])
         task_name = info["task_name"]
         samples.append(
             Sample(

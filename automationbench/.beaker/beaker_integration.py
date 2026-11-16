@@ -66,6 +66,7 @@ from automationbench_skills.runner import (
     ModelSpec,
     run_rollout_raw,
 )
+from automationbench_skills.scenario_clock import scenario_time
 from automationbench_skills.vendored.clients import StreamingAnthropicClient
 
 
@@ -107,7 +108,10 @@ class TaskRow(BaseModel):
             fixture = CaseFixture.model_validate(
                 {
                     "task": task,
-                    "scenario": {"source": "pi", "fallback_time": "2026-02-20T12:00:00+00:00"},
+                    "scenario": {
+                        "source": "pi",
+                        "fallback_time": scenario_time(task["prompt"], task["info"]["initial_state"]),
+                    },
                 }
             )
             fixture.validate_reference(task_name, self.expected, {**self.metadata, **fixture.hashes()})

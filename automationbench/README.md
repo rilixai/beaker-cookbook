@@ -89,6 +89,12 @@ and matching hashes (see [the schema](.beaker/case_fixture.py)). Their saved tas
 data is preserved, including original-source examples. Both formats use PI API
 tools and graders in hosted runs; use `--toolset api` for the same CLI interface.
 
+Standard rows and CLI runs share one scenario clock. An explicit world timestamp
+takes precedence; otherwise, an authored current-date statement supplies the clock
+(noon UTC for a date without a time). Tasks with neither use February 20, 2026 at
+12:00 UTC. The host's current date is never used. Frozen pilot rows keep their saved
+scenario fallback times.
+
 ## Balanced 210-case demo
 
 The larger demo selects **20 train and 10 test tasks from each of the seven domains**:
