@@ -17,8 +17,6 @@ from pathlib import Path
 
 import yaml
 
-from automationbench_skills.data.demo import DATASET_NAME as DEMO_DATASET_NAME
-from automationbench_skills.data.demo import demo_rows
 from automationbench_skills.data.tasks import BENCHMARK_DOMAINS, PI_COMMIT, Sample, load_split
 
 
@@ -76,12 +74,10 @@ def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--agent", default=None, help="agent key; defaults to agent_key in .beaker/beaker.yaml")
-    parser.add_argument("--profile", choices=("quickstart", "demo"), default="quickstart")
     args = parser.parse_args()
     agent_key = args.agent or configured_agent_key()
-    train_rows = demo_rows("train") if args.profile == "demo" else _take_per_domain("train", TRAIN_PER_DOMAIN)
-    test_rows = demo_rows("test") if args.profile == "demo" else _take_per_domain("test", TEST_PER_DOMAIN)
-    dataset_name = DEMO_DATASET_NAME if args.profile == "demo" else DATASET_NAME
+    train_rows = _take_per_domain("train", TRAIN_PER_DOMAIN)
+    test_rows = _take_per_domain("test", TEST_PER_DOMAIN)
     with tempfile.TemporaryDirectory(prefix="beaker-dataset-") as temp_dir:
         dataset_dir = Path(temp_dir)
         splits = {"train": train_rows, "test": test_rows}
@@ -100,7 +96,7 @@ def main() -> None:
                 "upload",
                 str(dataset_dir),
                 "--name",
-                dataset_name,
+                DATASET_NAME,
                 "--agent",
                 agent_key,
                 "--total-count",

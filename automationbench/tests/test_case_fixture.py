@@ -173,11 +173,11 @@ def test_named_rows_reject_stale_assertions(row):
         TaskRow.model_validate(row)
 
 
-async def test_named_demo_rows_resolve_to_frozen_cases():
-    from automationbench_skills.data.demo import demo_rows
+async def test_named_quickstart_rows_resolve_to_frozen_cases():
+    from upload_splits import TEST_PER_DOMAIN, TRAIN_PER_DOMAIN, _take_per_domain
 
-    for split in ("train", "test"):
-        for row in demo_rows(split):
+    for split, count in (("train", TRAIN_PER_DOMAIN), ("test", TEST_PER_DOMAIN)):
+        for row in _take_per_domain(split, count):
             case = await anext(TaskSetup().load_cases(TaskRow.model_validate(row), runtime=SimpleNamespace()))
             fixture = CaseFixture.model_validate(case.input["runtime_fixture"])
             assert fixture.task.info.task_name == row["input"]["task_name"]
