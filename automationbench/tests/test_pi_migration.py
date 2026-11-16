@@ -161,7 +161,7 @@ async def test_hosted_score_reports_pi_negative_credit_gating(monkeypatch, tmp_p
         {"type": "gmail_message_sent_to", "to": "target@example.com"},
         {"type": "gmail_message_not_sent_to", "to": "excluded@example.com"},
     ]
-    monkeypatch.setattr(integration, "_authored_initial_states", lambda: {"sample": {}})
+    monkeypatch.setattr(integration, "_fixture_for", lambda _: SimpleNamespace(initial_state=lambda: {}))
     score = await integration.score_case(
         case=Case(id="sample", input={"task_name": "sample"}, expected={"assertions": assertions}),
         result=CaseResult(output=None, context={"end_state": WorldState().model_dump(mode="json")}),

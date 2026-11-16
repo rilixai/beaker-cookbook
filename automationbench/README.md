@@ -20,7 +20,9 @@ diagnostic is partial; it does not infer a cause from the last comparisons alone
 **OUTPUT** shows app changes once per sample with size limits and omission markers.
 Display output is reduced or omitted when the combined result approaches Beaker's
 transport limit, preserving the complete scoring state before display details.
-The full final state remains in `context` for native scoring.
+The full final state and spreadsheet write history remain in `context` for native
+scoring. Older saved results lack this history; rerun affected spreadsheet cases
+with the rebuilt integration rather than rescoring the old final state.
 
 ## Quick start
 
@@ -80,6 +82,12 @@ cases per domain: **63 cases (42 train / 21 test)**. It uploads under
 Rebuild the hosted integration and upload a fresh dataset before using this recipe;
 old dataset assertions belong to the previous benchmark. This source change does
 not update existing hosted datasets or agents.
+
+Standard PI rows resolve by task name and must identify the pinned benchmark
+commit. Frozen pilot rows also carry `runtime_fixture` with the task, scenario,
+and matching hashes (see [the schema](.beaker/case_fixture.py)). Their saved task
+data is preserved, including original-source examples. Both formats use PI API
+tools and graders in hosted runs; use `--toolset api` for the same CLI interface.
 
 ## Balanced 210-case demo
 
@@ -146,8 +154,9 @@ turn**, a **300-second timeout per attempt**, and a **600-second deadline** for 
 whole turn, covering every attempt and the backoff between them. SDK retries are
 disabled. These limits apply to the hosted Beaker gateway and local runs using
 `--api chat_completions`. Direct OpenAI CLI
-runs select native Responses by default; Responses, Anthropic, and Gemini clients
-retain their upstream behavior.
+runs select native Responses by default. Responses retries empty output up to
+three attempts, and Anthropic context overflow preserves earned credit. Other
+native provider behavior follows the copied upstream clients.
 
 The defaults are named constants in `src/automationbench_skills/clients.py`.
 Reasoning counts toward the completion cap on most providers, so a reasoning

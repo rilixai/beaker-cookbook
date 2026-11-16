@@ -11,7 +11,7 @@ import os
 from typing import Any, Generic, Literal, TypeVar
 
 from anthropic import AsyncAnthropic
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -29,15 +29,6 @@ class InfraError(Error):
 
 class OverlongPromptError(Error):
     """The candidate exceeded the model context limit."""
-
-
-def is_error_data(value: Any) -> bool:
-    return isinstance(value, dict) and "error" in value
-
-
-def error_from_data(value: dict[str, Any]) -> Error:
-    classes = {c.__name__: c for c in (Error, ModelError, InfraError, OverlongPromptError)}
-    return classes.get(value.get("type", ""), Error)(str(value["error"]))
 
 
 class ClientConfig(BaseModel):
@@ -115,7 +106,6 @@ class Response(BaseModel):
 Messages = list[Message]
 SamplingArgs = dict[str, Any]
 FinishReason = str
-RolloutInput = dict
 
 
 A = TypeVar("A")
@@ -200,13 +190,45 @@ class OpenAIChatCompletionsClient(Client):
         self, prompt: Any, model: str, sampling_args: Any, tools: Any = None, **kwargs: Any
     ) -> Any:
         kwargs.pop("state", None)
-        return await self.client.chat.completions.create(
-            model=model,
-            messages=prompt,
-            **({"tools": tools} if tools else {}),
-            **sampling_args,
-            **kwargs,
-        )
+        try:
+            return await self.client.chat.completions.create(
+                model=model,
+                messages=prompt,
+                **({"tools": tools} if tools else {}),
+                **sampling_args,
+                **kwargs,
+            )
+        except BadRequestError as exc:
+            # Preserve the legacy client's distinction between candidate context
+            # overflow and provider failures, including compatible gateway responses.
+            error_text = exc.response.text.lower()
+            if any(
+                marker in error_text
+                for marker in (
+                    "context_length_exceeded",
+                    "prompt_too_long",
+                    "context length",
+                    "maximum model length",
+                    "prompt is too long",
+                )
+            ):
+                raise OverlongPromptError(str(exc)) from exc
+            raise
+
+    async def raise_from_native_response(self, response: Any) -> None:
+        choices = getattr(response, "choices", None)
+        if not choices or len(choices) != 1:
+            raise ModelError("Model must return exactly one response choice")
+        message = choices[0].message
+        details = getattr(getattr(response, "usage", None), "completion_tokens_details", None)
+        if not (
+            message.content
+            or message.tool_calls
+            or getattr(message, "refusal", None)
+            or parse_reasoning_content(message)
+            or getattr(details, "reasoning_tokens", 0)
+        ):
+            raise ModelError("Model returned no content and did not call any tools")
 
     async def from_native_response(self, response: Any) -> Response:
         choice = response.choices[0]
@@ -224,7 +246,7 @@ class OpenAIChatCompletionsClient(Client):
             if usage
             else None,
             message=ResponseMessage(
-                content=msg.content,
+                content=msg.content or getattr(msg, "refusal", None),
                 reasoning_content=parse_reasoning_content(msg),
                 tool_calls=[
                     ToolCall(id=c.id, name=c.function.name, arguments=c.function.arguments)
@@ -238,6 +260,19 @@ class OpenAIChatCompletionsClient(Client):
 
 
 class AnthropicMessagesClient(Client):
+    async def raise_from_native_response(self, response: Any) -> None:
+        if response is None:
+            raise ModelError("Model returned no response")
+        for block in response.content or []:
+            if (
+                block.type == "tool_use"
+                or (block.type == "text" and block.text)
+                or (block.type == "thinking" and block.thinking)
+                or (block.type == "redacted_thinking" and block.data)
+            ):
+                return
+        raise ModelError("Model returned no content and did not call any tools")
+
     def setup_client(self, config: ClientConfig) -> AsyncAnthropic:
         return AsyncAnthropic(
             api_key=os.environ[config.api_key_var], max_retries=config.max_retries, timeout=config.timeout

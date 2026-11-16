@@ -6,6 +6,7 @@ import asyncio
 import copy
 import json
 import time
+from contextlib import nullcontext
 from typing import Any
 
 from automationbench.rubric import partial_credit
@@ -22,6 +23,7 @@ from beaker.tracing import current_trace
 from mcp import Client as MCPClient
 from mcp.server.mcpserver import MCPServer
 
+from automationbench_skills.grading_state import capture_grading_state
 from automationbench_skills.model_protocol import (
     AssistantMessage,
     Client,
@@ -32,6 +34,7 @@ from automationbench_skills.model_protocol import (
     ToolMessage,
     UserMessage,
 )
+from automationbench_skills.scenarios import ScenarioAPIContract
 
 
 class AutomationBenchEnv:
@@ -49,11 +52,10 @@ class AutomationBenchEnv:
         client: Client,
         model: str,
         sampling_args: dict[str, Any],
-        *,
-        state_columns: list[str] | None = None,
     ) -> dict[str, Any]:
-        del state_columns
+        """Return the final state; rollout errors remain exception objects in-process."""
         info = strip_none_values(copy.deepcopy(row["info"]))
+        scenario = info.pop("_case_scenario", {})
         initial = info["initial_state"]
         toolset = AutomationBenchToolset(
             AutomationBenchToolsetConfig(
@@ -75,6 +77,10 @@ class AutomationBenchEnv:
                 ),
             )
         )
+        if scenario:
+            if self.toolset != "api":
+                raise ValueError("Frozen data-quality fixtures require the PI API interface")
+            toolset._api = ScenarioAPIContract(toolset._world, scenario.get("tool_fault"))
         server = MCPServer("automationbench-skills")
         toolset.register(server)
         for tool in self.tools:
@@ -90,6 +96,7 @@ class AutomationBenchEnv:
             native_tools = [await client.to_native_tool(t) for t in definitions]
 
             async def loop() -> None:
+                tool_number = 0
                 for _ in range(self.max_turns):
                     prompt, extra = await client.to_native_prompt(messages)
                     native = await client.get_native_response(
@@ -113,10 +120,18 @@ class AutomationBenchEnv:
                             if not isinstance(arguments, dict):
                                 raise ValueError("Tool arguments must be a JSON object")
                             started = time.monotonic()
-                            with current_trace().tool_call(call.name, arguments=arguments, call_id=call.id) as span:
+                            tool_number += 1
+                            capture = scenario.get("trace_capture") != "incomplete" or tool_number % 2 == 0
+                            trace_span = (
+                                current_trace().tool_call(call.name, arguments=arguments, call_id=call.id)
+                                if capture
+                                else nullcontext()
+                            )
+                            with trace_span as span:
                                 result = await session.call_tool(call.name, arguments)
                                 content = "\n".join(c.text for c in result.content if c.type == "text")
-                                span.output(content)
+                                if span is not None:
+                                    span.output(content)
                             perf = state.setdefault("_perf", {})
                             perf["tool_time_s"] = perf.get("tool_time_s", 0.0) + time.monotonic() - started
                             perf["tool_calls"] = perf.get("tool_calls", 0) + 1
@@ -128,11 +143,16 @@ class AutomationBenchEnv:
                 state["stop_condition"] = "max_turns"
 
             # Expiry stops inference but preserves the world for deterministic scoring.
+            deadline = asyncio.timeout(self.timeout_seconds)
             try:
-                async with asyncio.timeout(self.timeout_seconds):
+                async with deadline:
                     await loop()
-            except TimeoutError:
-                state["stop_condition"] = "timeout_reached"
+            except TimeoutError as exc:
+                if deadline.expired():
+                    state["stop_condition"] = "timeout_reached"
+                else:
+                    # A provider turn can expire before the task budget is exhausted.
+                    state["error"] = ModelError(f"Provider turn timed out: {exc}")
             except Error as exc:
                 state["error"] = exc
             except Exception as exc:
@@ -170,6 +190,7 @@ class AutomationBenchEnv:
             for a, passed in zip(assertions, final_results, strict=True)
         ]
         state["_end_state"] = toolset._world.model_dump(mode="json")
+        state["_grading_state"] = capture_grading_state(toolset._world)
         state.setdefault("_perf", {})
         state.pop("world")
         return state

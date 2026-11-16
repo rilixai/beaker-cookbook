@@ -16,7 +16,6 @@ from automationbench_skills.prompts import load_system_prompt, task_clock, with_
 from automationbench_skills.runner import (
     DEFAULT_REASONING_EFFORT,
     OPENROUTER_BASE_URL,
-    STATE_COLUMNS,
     ModelSpec,
     _rollout_input,
     _to_result,
@@ -41,7 +40,6 @@ async def _rollout(
         client,
         "scripted-model",
         {},
-        state_columns=STATE_COLUMNS,
     )
 
 

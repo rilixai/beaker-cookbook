@@ -41,6 +41,7 @@ _ADAPTIVE_MODELS_PUBLIC = (
     "opus-5",
     "sonnet-4-6",
     "sonnet-5",
+    "haiku-5-5",
     "fable-5",
 )
 
