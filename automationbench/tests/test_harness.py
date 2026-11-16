@@ -1,47 +1,32 @@
-"""Hermetic end-to-end tests: real environment, real tools, real rubric,
-scripted (network-free) model client."""
+"""Dataset, prompt and native PI integration regression tests."""
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
+import sys
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
 
 import pytest
-from fake_client import ScriptedClient
+from automationbench.schema.world import WorldState
+from beaker import CaseResult
+from fake_client import ScriptedEndpoint
 
-from automationbench_skills import runner as runner_mod
 from automationbench_skills.data import BENCHMARK_DOMAINS, load_samples, load_split, task_family
 from automationbench_skills.evaluation.summary import format_summary, summarize
 from automationbench_skills.prompts import load_system_prompt, task_clock, with_system_prompt
-from automationbench_skills.runner import (
-    DEFAULT_REASONING_EFFORT,
-    OPENROUTER_BASE_URL,
-    ModelSpec,
-    _rollout_input,
-    _to_result,
-    get_env,
-)
+from automationbench_skills.runner import ModelSpec, _rollout_input, run_rollout_raw
+from automationbench_skills.scenario_clock import DEFAULT_SCENARIO_TIME, scenario_time
 from automationbench_skills.skills_tools import list_skills, read_skill, set_skills_dir
 
 
-RECIPE_ROOT = Path(__file__).parent.parent
-
-
-def _sample() -> Any:
-    return load_split("test")[0]
-
-
-async def _rollout(
-    client: ScriptedClient, *, skills: bool, sample: Any = None, system_prompt: str | None = None
-) -> dict[str, Any]:
-    env = get_env(skills=skills)
-    return await env.run_rollout(
-        _rollout_input(sample or _sample(), system_prompt),
-        client,
-        "scripted-model",
-        {},
-    )
+RECIPE_ROOT = Path(__file__).parents[1]
+sys.path.insert(0, str(RECIPE_ROOT / ".beaker"))
+from beaker_integration import TaskRow, TaskSetup, _fixture_for, score_case  # noqa: E402
+from case_fixture import PI_COMMIT, CaseFixture  # noqa: E402
 
 
 class TestSplits:
@@ -118,7 +103,8 @@ class TestSkillsTools:
         set_skills_dir(shipped)
         listing = list_skills()
         for domain in BENCHMARK_DOMAINS:
-            assert f"domains/{domain}: " in listing
+            if domain != "simple":
+                assert f"domains/{domain}: " in listing
         for app in ["gmail", "google_sheets", "google_drive", "slack", "salesforce"]:
             assert f"apps/{app}: " in listing
         assert "unknown skill" not in read_skill("apps/gmail").lower()
@@ -195,326 +181,6 @@ class TestPrompts:
         assert "list_skills" in text and "read_skill" in text
 
 
-class TestRunner:
-    def test_openrouter_routing(self) -> None:
-        openrouter = ModelSpec(name="z-ai/glm-5.3-flash", reasoning_effort="max")
-        assert openrouter.is_openrouter()
-        assert openrouter.resolved_api() == "chat_completions"
-        assert openrouter.effective_base_url() == OPENROUTER_BASE_URL
-        assert openrouter.effective_api_key_var() == "OPENROUTER_API_KEY"
-        assert openrouter.sampling_args() == {
-            "extra_body": {"reasoning": {"effort": "max"}},
-            "max_completion_tokens": 32768,
-        }
-
-        qwen = ModelSpec(name="qwen/qwen3.8-flash", reasoning_effort="default", reasoning_enabled=True)
-        assert qwen.sampling_args() == {"extra_body": {"reasoning": {"enabled": True}}, "max_completion_tokens": 32768}
-
-        native = ModelSpec(name="gpt-6-astra")
-        assert not native.is_openrouter()
-        assert native.effective_api_key_var() == "OPENAI_API_KEY"
-        assert native.sampling_args() == {"reasoning_effort": DEFAULT_REASONING_EFFORT, "max_completion_tokens": 32768}
-
-        explicit = ModelSpec(name="z-ai/glm-5.3-flash", api_key_var="CUSTOM_API_KEY")
-        assert explicit.effective_api_key_var() == "CUSTOM_API_KEY"
-
-    def test_record_cost_reads_openrouter_usage(self) -> None:
-        from types import SimpleNamespace
-
-        import pytest
-        from openai.types import CompletionUsage
-
-        from automationbench_skills.clients import record_cost
-
-        usage = CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2, cost=0.0123)
-        response = SimpleNamespace(usage=usage)
-        state: dict[str, Any] = {}
-        record_cost(state, response)
-        record_cost(state, response)
-        assert state["_perf"]["cost_usd"] == pytest.approx(0.0246)
-        record_cost(None, response)
-
-    async def test_baseline_has_no_skill_tools(self) -> None:
-        client = ScriptedClient()
-        output = await _rollout(client, skills=False)
-        tool_names = {t["name"] for t in client.calls[0]["tools"]}
-        assert "list_skills" not in tool_names and "read_skill" not in tool_names
-        result = _to_result(_sample(), output)
-        assert result.task_completed_correctly == 0.0
-        assert 0.0 <= result.partial_credit <= 1.0
-        assert result.trajectory and result.end_state is not None
-
-    async def test_skills_arm_reads_live_files(self, tmp_path: Path) -> None:
-        howto = tmp_path / "apps" / "howto" / "SKILL.md"
-        howto.parent.mkdir(parents=True)
-        howto.write_text("---\nname: howto\ndescription: How to do the thing\n---\nSECRET-PROCEDURE\n")
-        set_skills_dir(tmp_path)
-        client = ScriptedClient(
-            turns=[
-                {"tool_calls": [{"name": "list_skills"}]},
-                {"tool_calls": [{"name": "read_skill", "arguments": {"skill_id": "apps/howto"}}]},
-                {"content": "done"},
-            ]
-        )
-        output = await _rollout(client, skills=True)
-        tool_names = {t["name"] for t in client.calls[0]["tools"]}
-        assert {"list_skills", "read_skill"} <= tool_names
-        dump = json.dumps([m if isinstance(m, dict) else m.model_dump(mode="json") for m in output["completion"]])
-        assert "How to do the thing" in dump
-        assert "SECRET-PROCEDURE" in dump
-
-    async def test_system_prompt_reaches_the_model(self) -> None:
-        sample = _sample()
-        baseline = ScriptedClient()
-        await _rollout(baseline, skills=True, sample=sample)
-        ours = ScriptedClient()
-        await _rollout(ours, skills=True, sample=sample, system_prompt="READ YOUR SKILLS FIRST")
-        base_system = baseline.calls[0]["prompt"][0]
-        system = ours.calls[0]["prompt"][0]
-        assert base_system.role == system.role == "system"
-        clock = task_clock(sample.info)
-        line = f"Current date and time: {clock}" if clock else None
-        expected_base = f"{sample.prompt[0]['content']}\n\n{line}" if line else sample.prompt[0]["content"]
-        expected_ours = f"READ YOUR SKILLS FIRST\n\n{line}" if line else "READ YOUR SKILLS FIRST"
-        assert base_system.content == expected_base
-        assert system.content == expected_ours
-        assert ours.calls[0]["prompt"][1:] == baseline.calls[0]["prompt"][1:]
-
-    async def test_state_resets_between_rollouts(self) -> None:
-        sample = _sample()
-        out1 = await _rollout(ScriptedClient(), skills=False, sample=sample)
-        out2 = await _rollout(ScriptedClient(), skills=False, sample=sample)
-        r1, r2 = _to_result(sample, out1), _to_result(sample, out2)
-        assert r1.partial_credit == r2.partial_credit
-        assert r1.task_completed_correctly == r2.task_completed_correctly
-        # end-state entity ids are freshly generated per rollout, but the
-        # world structure must be identical across resets
-        assert r1.end_state is not None and r2.end_state is not None
-        assert set(r1.end_state) == set(r2.end_state)
-
-    async def test_task_timeout_scores_the_work_done_so_far(self, monkeypatch: Any) -> None:
-        import asyncio
-
-        class StallingClient(ScriptedClient):
-            """Acts once, then hangs like a stuck API request."""
-
-            async def get_native_response(self, *args: Any, **kwargs: Any) -> Any:
-                response = await super().get_native_response(*args, **kwargs)
-                if len(self.calls) > 1:
-                    await asyncio.sleep(30)
-                return response
-
-        client = StallingClient(turns=[{"tool_calls": [{"name": "search_tools", "arguments": {"query": "email"}}]}])
-        monkeypatch.setattr(runner_mod, "get_client", lambda model: client)
-        result = await runner_mod.run_one_async(_sample(), skills_dir=None, timeout=0.5)
-        # The env stops its loop and the rubric still grades the world, so the
-        # rollout keeps its trajectory and whatever credit it earned.
-        assert len(client.calls) == 2  # the second call is the one that hangs
-        assert result.error is None
-        assert result.end_state is not None
-        assert [m["role"] for m in result.trajectory] == ["assistant", "tool"]
-        assert 0.0 <= result.partial_credit <= 1.0
-
-    async def test_result_records_latency_and_usage(self, monkeypatch: Any) -> None:
-        monkeypatch.setattr(runner_mod, "get_client", lambda model: ScriptedClient())
-        result = await runner_mod.run_one_async(_sample(), skills_dir=None)
-        assert isinstance(result.latency_s, float) and result.latency_s > 0
-        assert result.cost_usd is None
-        assert isinstance(result.usage, dict)
-        assert isinstance(result.perf, dict)
-        serialized = result.to_json()
-        assert {"latency_s", "cost_usd", "usage", "perf"} <= serialized.keys()
-
-    @pytest.mark.parametrize("model", ["gpt-5-mini", "openai/gpt-5-mini"])
-    def test_client_cache_is_per_event_loop(self, monkeypatch: Any, model: str) -> None:
-        import asyncio
-
-        from automationbench_skills.clients import CostTrackingChatCompletionsClient
-        from automationbench_skills.runner import ModelSpec, get_client
-
-        spec = ModelSpec(name=model)
-        monkeypatch.setenv(spec.effective_api_key_var(), "test-key")
-
-        async def grab() -> Any:
-            return get_client(spec)
-
-        async def grab_twice() -> tuple[Any, Any]:
-            return get_client(spec), get_client(spec)
-
-        first, second = asyncio.run(grab_twice())
-        assert isinstance(first, CostTrackingChatCompletionsClient)
-        assert first.max_attempts == 3 and first.turn_timeout == 600
-        assert first.client.max_retries == 0 and first.client.timeout == 300
-        assert str(first.client.base_url).rstrip("/") == (spec.effective_base_url() or "https://api.openai.com/v1")
-        assert first is second  # same loop -> shared client
-        assert asyncio.run(grab()) is not first  # new asyncio.run -> fresh client
-        # closed-loop entries are evicted, so the cache doesn't grow across runs
-        assert len([k for k in runner_mod._CLIENT_CACHE if k[0] == spec]) == 1
-
-    def test_beaker_single_model_spec_is_pinned(self) -> None:
-        import sys
-
-        sys.path.insert(0, str(RECIPE_ROOT / ".beaker"))
-        from beaker_integration import default_model_spec
-
-        # Independent of ModelSpec's defaults, so the CLI default can change freely.
-        spec = default_model_spec()
-        assert (spec.name, spec.resolved_api(), spec.sampling_args()) == (
-            "gpt-5.6-luna",
-            "chat_completions",
-            {"reasoning_effort": "medium", "max_completion_tokens": 32768},
-        )
-
-    async def test_beaker_no_model_uses_traced_anthropic_client(self, monkeypatch: Any) -> None:
-        import sys
-        from types import SimpleNamespace
-
-        from automationbench_skills.vendored.clients import StreamingAnthropicClient
-
-        sys.path.insert(0, str(RECIPE_ROOT / ".beaker"))
-        import beaker_integration
-        from beaker_integration import _client_for, _TracedAnthropicClient
-
-        monkeypatch.setattr(
-            beaker_integration,
-            "default_model_spec",
-            lambda: ModelSpec(name="claude-sonnet-5-5", api="anthropic", reasoning_effort="max"),
-        )
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        client, model = _client_for(SimpleNamespace(model=None))
-        try:
-            assert isinstance(client, _TracedAnthropicClient)
-            assert isinstance(client, StreamingAnthropicClient)
-            assert model.name == "claude-sonnet-5-5"
-        finally:
-            await client.close()
-
-    def test_cli_api_routing(self, monkeypatch: Any) -> None:
-        from automationbench_skills.cli import _default_api
-
-        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-        assert _default_api("gpt-5.6-luna", None, "auto") == "responses"
-        assert _default_api("gpt-5.6-luna", None, "chat_completions") == "chat_completions"
-        assert _default_api("gpt-5.6-luna", "https://gw.example/v1", "auto") == "auto"
-        assert _default_api("claude-opus-5-5", None, "auto") == "auto"
-        assert _default_api("gemini-3-pro", None, "auto") == "auto"
-        assert _default_api("openai/gpt-5.6-luna", None, "auto") == "auto"
-        monkeypatch.setenv("OPENAI_BASE_URL", "https://gw.example/v1")
-        assert _default_api("gpt-5.6-luna", None, "auto") == "auto"
-
-    def test_cli_reports_errors_and_fails_when_all_errored(self, capsys: Any) -> None:
-        from automationbench_skills.cli import _report_errors
-        from automationbench_skills.runner import RunResult
-
-        def result(name: str, error: Any = None) -> RunResult:
-            return RunResult(name, "crm", 0.0, 0.0, [], None, error=error)
-
-        assert _report_errors([result("a"), result("b")]) == 0
-        assert _report_errors([result("a"), result("b", {"error": "BadRequestError: 400"})]) == 0
-        assert "1/2 task(s) errored" in capsys.readouterr().err
-        assert _report_errors([result("a", "BadRequestError: 400"), result("b", "BadRequestError: 400")]) == 1
-
-    def test_env_is_cached(self) -> None:
-        assert get_env(skills=False) is get_env(skills=False)
-        assert get_env(skills=True) is not get_env(skills=False)
-
-    def test_limited_zapier_with_skills_rejected(self) -> None:
-        import pytest
-
-        with pytest.raises(ValueError):
-            get_env(toolset="limited_zapier", skills=True)
-
-    async def test_tool_executions_become_tool_spans(self, tmp_path: Path) -> None:
-        from beaker.tracing import local_capture
-        from beaker.tracing.projection import parse_jsonl, project
-
-        client = ScriptedClient(
-            turns=[
-                {"tool_calls": [{"name": "list_skills"}]},
-                {"tool_calls": [{"name": "search_tools", "arguments": {"query": "send email", "top_k": 1}}]},
-                {"content": "done"},
-            ]
-        )
-        with local_capture(tmp_path, case_id="case", candidate_id="cand", strict_evidence=False) as capture:
-            await _rollout(client, skills=True)
-        assert capture.receipt is not None
-        projection = capture.receipt.to_dict()["projection"]
-        assert projection["tool_counts"] == {"list_skills": 1, "search_tools": 1}
-        by_name = {call["tool_name"]: call for call in projection["tool_calls"]}
-        assert by_name["search_tools"]["args"] == {"query": "send email", "top_k": 1}
-        assert by_name["search_tools"]["tool_call_id"]
-        assert "world" not in by_name["search_tools"]["args"]
-        assert by_name["list_skills"]["return_content"]
-        # a second rollout on the same cached env is traced independently
-        with local_capture(tmp_path / "second", case_id="case", candidate_id="cand", strict_evidence=False) as again:
-            await _rollout(ScriptedClient(), skills=True)
-        assert again.receipt is not None
-        assert again.receipt.to_dict()["projection"]["tool_counts"] == {}
-        captures = list((tmp_path / "captures").glob("*.otlp.jsonl"))
-        assert len(captures) == 1
-        assert project(parse_jsonl(captures[0].read_bytes()), artifacts=()).tool_counts == projection["tool_counts"]
-
-    async def test_traced_anthropic_client_records_model_call(self, tmp_path: Path, monkeypatch: Any) -> None:
-        import sys
-
-        from anthropic import AsyncAnthropic
-        from anthropic.types import Message, TextBlock, Usage
-        from beaker.tracing import local_capture
-
-        from automationbench_skills.vendored.clients import StreamingAnthropicClient
-
-        sys.path.insert(0, str(RECIPE_ROOT / ".beaker"))
-        from beaker_integration import _TracedAnthropicClient
-
-        async def fake_get_native_response(
-            self: Any, prompt: Any, model: str, sampling_args: Any, tools: Any = None, **kwargs: Any
-        ) -> Message:
-            del self, prompt, model, sampling_args, tools, kwargs
-            return Message(
-                id="msg_test",
-                type="message",
-                role="assistant",
-                model="claude-sonnet-5-5",
-                content=[TextBlock(type="text", text="ok")],
-                stop_reason="end_turn",
-                stop_sequence=None,
-                usage=Usage(input_tokens=11, output_tokens=7),
-            )
-
-        monkeypatch.setattr(StreamingAnthropicClient, "get_native_response", fake_get_native_response)
-        client = _TracedAnthropicClient(AsyncAnthropic(api_key="test-key"))
-        try:
-            with local_capture(tmp_path, case_id="case", candidate_id="cand", strict_evidence=False) as capture:
-                await client.get_native_response(
-                    prompt=[{"role": "user", "content": "hi"}],
-                    model="claude-sonnet-5-5",
-                    sampling_args={},
-                    system="SYS",
-                )
-        finally:
-            await client.close()
-        assert capture.receipt is not None
-        projection = capture.receipt.to_dict()["projection"]
-        assert len(projection["model_calls"]) == 1
-        call = projection["model_calls"][0]
-        assert call["provider"] == "anthropic"
-        assert call["model"] == "claude-sonnet-5-5"
-        assert call["usage"]["input_tokens"] == 11
-        assert call["usage"]["output_tokens"] == 7
-        assert call["usage"]["total_tokens"] == 18
-        assert '"role": "system"' in json.dumps(call["messages"])
-        assert "SYS" in json.dumps(call["messages"])
-
-    async def test_run_split_concurrency(self, monkeypatch: Any) -> None:
-        samples = load_split("test")[:3]
-        client = ScriptedClient()
-        monkeypatch.setattr(runner_mod, "get_client", lambda model: ScriptedClient())
-        results = await runner_mod.run_split_async(samples, model="scripted-model", skills_dir=None, max_concurrent=2)
-        assert [r.task_name for r in results] == [s.task_name for s in samples]
-        assert all(r.task_completed_correctly in (0.0, 1.0) for r in results)
-        del client
-
-
 class TestSummary:
     def test_summarize_and_format(self) -> None:
         rows = [
@@ -548,3 +214,245 @@ class TestSummary:
         text = format_summary(summary)
         assert "overall" in text and "sales" in text
         assert "3.0" in text and "0.0290" in text and "-" in text
+
+
+@pytest.fixture
+def row():
+    sample = copy.deepcopy(next(s for s in load_samples() if s.task_name == "simple.email_sf_contact_phone_update"))
+    task = {"example_id": sample.index, "prompt": sample.prompt, "answer": sample.answer, "info": sample.info}
+    fixture = {
+        "task": task,
+        "scenario": {
+            "source": "pi",
+            "fallback_time": DEFAULT_SCENARIO_TIME,
+            "tool_fault": None,
+            "trace_capture": "complete",
+        },
+    }
+    return {
+        "id": "frozen-phone",
+        "input": {"task_name": sample.task_name},
+        "expected": {"assertions": copy.deepcopy(sample.info["assertions"])},
+        "metadata": {"benchmark_commit": PI_COMMIT, **hashes(fixture)},
+        "runtime_fixture": fixture,
+    }
+
+
+def hashes(fixture: dict) -> dict:
+    return {
+        f"{name}_sha256": hashlib.sha256((json.dumps(value, indent=2, sort_keys=True) + "\n").encode()).hexdigest()
+        for name, value in fixture.items()
+    }
+
+
+def test_all_pi_tasks_preserve_their_metadata_and_hashes(row):
+    from automationbench_skills.data.tasks import load_samples
+
+    samples = load_samples()
+    assert len(samples) == 800
+    for sample in samples:
+        raw = {
+            "task": {
+                "example_id": sample.index,
+                "prompt": sample.prompt,
+                "answer": sample.answer,
+                "info": sample.info,
+            },
+            "scenario": row["runtime_fixture"]["scenario"],
+        }
+        fixture = CaseFixture.model_validate(raw)
+        assert fixture.model_dump(mode="json") == raw, sample.task_name
+        fixture.validate_reference(
+            sample.task_name,
+            {"assertions": sample.info["assertions"]},
+            {"benchmark_commit": PI_COMMIT, **hashes(raw)},
+        )
+        assert fixture.sample().info.get("meta") == sample.info.get("meta")
+
+
+def test_task_metadata_is_covered_by_the_hash(row):
+    row["runtime_fixture"]["task"]["info"]["meta"] = {"current_time": "2026-02-10T09:00:00"}
+    row["metadata"].update(hashes(row["runtime_fixture"]))
+    TaskRow.model_validate(row)
+    row["runtime_fixture"]["task"]["info"]["meta"]["current_time"] = "2026-02-11T09:00:00"
+    with pytest.raises(ValueError, match="task_sha256"):
+        TaskRow.model_validate(row)
+
+
+def test_named_rows_reject_stale_assertions(row):
+    row.pop("runtime_fixture")
+    row["metadata"] = {"benchmark_commit": PI_COMMIT}
+    row["expected"]["assertions"][0]["value"] = "stale@example.com"
+    with pytest.raises(ValueError, match="expected.assertions"):
+        TaskRow.model_validate(row)
+
+
+async def test_named_quickstart_rows_resolve_to_frozen_cases():
+    from upload_splits import TEST_PER_DOMAIN, TRAIN_PER_DOMAIN, _take_per_domain
+
+    for split, count in (("train", TRAIN_PER_DOMAIN), ("test", TEST_PER_DOMAIN)):
+        for row in _take_per_domain(split, count):
+            case = await anext(TaskSetup().load_cases(TaskRow.model_validate(row), runtime=SimpleNamespace()))
+            fixture = CaseFixture.model_validate(case.input["runtime_fixture"])
+            assert fixture.task.info.task_name == row["input"]["task_name"]
+            assert fixture.task.info.assertions == row["expected"]["assertions"]
+
+
+@pytest.mark.parametrize("mutation", ["missing", "task", "assertions", "source"])
+def test_rejects_missing_or_inconsistent_fixture(row, mutation):
+    if mutation == "missing":
+        row.pop("runtime_fixture")
+    elif mutation == "task":
+        row["runtime_fixture"]["task"]["info"]["initial_state"] = {}
+    elif mutation == "assertions":
+        row["expected"] = {"assertions": []}
+    else:
+        row["metadata"]["benchmark_commit"] = "unrecognized"
+    with pytest.raises(ValueError):
+        TaskRow.model_validate(row)
+
+
+async def standard_fixture(sample):
+    row = TaskRow.model_validate(
+        {
+            "id": sample.task_name,
+            "input": {"task_name": sample.task_name},
+            "expected": {"assertions": sample.info["assertions"]},
+            "metadata": {"benchmark_commit": PI_COMMIT},
+        }
+    )
+    case = await anext(TaskSetup().load_cases(row, runtime=None))
+    return _fixture_for(case.input)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Today is 2026-02-09.", "2026-02-09T12:00:00+00:00"),
+        ("Today is Monday, 2026-02-09.", "2026-02-09T12:00:00+00:00"),
+        ("Today is January 27, 2026.", "2026-01-27T12:00:00+00:00"),
+        ("Today is Feb 9, 2026.", "2026-02-09T12:00:00+00:00"),
+        ("Today is October 9, 2026.", "2026-10-09T12:00:00+00:00"),
+        ("Use today's date (2026-01-21).", "2026-01-21T12:00:00+00:00"),
+        ("Due within 14 days from today (2026-02-09).", "2026-02-09T12:00:00+00:00"),
+        ("Current time is 2026-02-09T14:00:00Z.", "2026-02-09T14:00:00+00:00"),
+        ("Today is 2026-02-09. Current time is 2026-02-09T14:00:00Z.", "2026-02-09T14:00:00+00:00"),
+        ("The event is February 28, 2026. Schedule it for tomorrow.", DEFAULT_SCENARIO_TIME),
+        ("Send the report today. Its deadline is 2026-02-28.", DEFAULT_SCENARIO_TIME),
+    ],
+)
+def test_explicit_current_dates_and_deterministic_fallback(text, expected):
+    assert scenario_time([{"role": "user", "content": text}], {}) == expected
+
+
+def test_authored_world_clock_takes_precedence_and_inputs_are_unchanged():
+    prompt = [{"role": "user", "content": "Today is 2026-02-09."}]
+    initial = {"meta": {"current_time": "2026-02-09T08:30:00-05:00"}}
+    before = copy.deepcopy((prompt, initial))
+    assert scenario_time(prompt, initial) == "2026-02-09T08:30:00-05:00"
+    assert (prompt, initial) == before
+
+
+def test_conflicting_current_dates_fail_instead_of_selecting_one():
+    with pytest.raises(ValueError, match="conflicting"):
+        scenario_time([{"role": "user", "content": "Today is 2026-02-09. Today is 2026-02-10."}], {})
+
+
+async def test_all_published_tasks_have_the_same_cli_and_hosted_clock():
+    for sample in load_samples():
+        fixture = await standard_fixture(sample)
+        assert sample.info["initial_state"] == fixture.initial_state(), sample.task_name
+        assert _rollout_input(sample)["prompt"] == _rollout_input(fixture.sample())["prompt"], sample.task_name
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "operations.generator_load_testing_schedule",
+        "operations.insurance_cert_validation",
+        "operations.sensor_monitoring_alert",
+    ],
+)
+async def test_authored_february_ninth_is_used_in_prompt_and_execution(name):
+    sample = next(sample for sample in load_samples() if sample.task_name == name)
+    expected = "2026-02-09T12:00:00+00:00"
+    prompt_before = copy.deepcopy(sample.prompt)
+    assert scenario_time(sample.prompt, {}) == expected
+    assert sample.prompt == prompt_before
+    fixture = await standard_fixture(sample)
+    assert fixture.sample().prompt == prompt_before
+    assert fixture.initial_state()["meta"]["current_time"] == expected
+    async with ScriptedEndpoint([]) as endpoint:
+        output = await run_rollout_raw(sample, model=ModelSpec(name="fake", base_url=endpoint.url))
+    assert endpoint.requests[0]["messages"][0]["content"].endswith(f"Current date and time: {expected}")
+    assert datetime.fromisoformat(output["_end_state"]["meta"]["current_time"]) == datetime.fromisoformat(expected)
+
+
+async def test_frozen_fixture_keeps_its_saved_fallback_and_hashes():
+    sample = next(
+        sample for sample in load_samples() if sample.task_name == "operations.generator_load_testing_schedule"
+    )
+    fixture = await standard_fixture(sample)
+    fixture.scenario.fallback_time = "2026-02-20T12:00:00+00:00"
+    raw = fixture.model_dump(mode="json")
+    hashes = fixture.hashes()
+    restored = _fixture_for({"runtime_fixture": raw})
+    assert restored.initial_state()["meta"]["current_time"] == fixture.scenario.fallback_time
+    assert restored.hashes() == hashes
+    assert restored.model_dump(mode="json") == raw
+
+
+@pytest.mark.parametrize("writes", ["changed", "reverted", "none"])
+async def test_sheet_update_history_survives_hosted_scoring(row, tmp_path, writes):
+    from automationbench.domains import get_combined_dataset
+
+    for task in get_combined_dataset(["finance"]):
+        info = json.loads(task["info"]) if isinstance(task["info"], str) else task["info"]
+        if info["task_name"] == "finance.duplicate_payment_detection":
+            task["info"] = info
+            break
+    row["runtime_fixture"]["task"] = task
+    row["input"]["task_name"] = info["task_name"]
+    row["expected"]["assertions"] = info["assertions"]
+    row["metadata"].update(hashes(row["runtime_fixture"]))
+    parsed = TaskRow.model_validate(row)
+    case = await anext(TaskSetup().load_cases(parsed, runtime=SimpleNamespace()))
+    sheets = WorldState(**parsed.runtime_fixture.initial_state()).google_sheets
+    worksheet = next(ws for ws in sheets.worksheets if ws.id == "ws_jan_pmts")
+    initial_rows = {r.row_id: r.cells for r in sheets.rows if r.worksheet_id == worksheet.id}
+    headers = worksheet.headers or list(initial_rows[2])
+    column = chr(ord("A") + headers.index("Flag"))
+    calls = []
+    row_ids = [] if writes == "none" else [2, 4, 5, 7]
+    for row_id in row_ids:
+        original = initial_rows[row_id]["Flag"]
+        values = ["Potential duplicate"]
+        if writes == "reverted":
+            values.append(original)
+        for value in values:
+            calls.append(
+                {
+                    "name": "api_fetch",
+                    "arguments": {
+                        "endpoint": "sheets.spreadsheets.values.update",
+                        "path": {"spreadsheetId": "ss_vendor_pmts", "range": f"'{worksheet.title}'!{column}{row_id}"},
+                        "params": {"valueInputOption": "RAW"},
+                        "body": {"values": [[value]]},
+                    },
+                }
+            )
+    async with ScriptedEndpoint([{"tool_calls": calls}]) as endpoint:
+        live = await run_rollout_raw(
+            parsed.runtime_fixture.sample(), model=ModelSpec(name="fake", base_url=endpoint.url)
+        )
+    result = CaseResult(
+        output=None, context={"end_state": live["_end_state"], "grading_state": live["_grading_state"]}
+    )
+    # Exercise the hosted JSON boundary, not just in-process object passing.
+    transported = CaseResult(output=result.output, context=json.loads(json.dumps(result.context)))
+    score = await score_case(case=case, result=transported, case_files_dir=tmp_path)
+    assert not live.get("error")
+    expected = [True] * 6 if writes in {"changed", "reverted"} else [False, False, True, True, False, False]
+    assert [a["passed"] for a in live["_assertion_results"][:6]] == expected
+    assert [c.verdict == "pass" for c in score.checks[:6]] == expected
+    assert score.field_scores == live["metrics"]

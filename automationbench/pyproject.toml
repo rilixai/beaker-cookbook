@@ -9,15 +9,11 @@ dependencies = [
   # PI provides the unmodified tasks, simulated services, MCP tools and graders.
   "automation-bench @ git+https://github.com/xeophon/AutomationBench-PI.git@858718b19e5d66c74451432783d34ee64a550a15",
   "verifiers>=0.4.0,<0.5",
-  # Provider SDKs used directly by the recipe's model adapters.
-  "anthropic>=1.0",
-  "openai>=2.54,<3",
-  "httpx>=0.28",
   "mcp>=2,<3",
   "pydantic>=2",
   "datasets>=3.0",
   "python-dotenv>=1.0",
-  # The recipe emits Beaker model/tool spans directly (no legacy Verifiers extra).
+  # Native runtime calls are traced through the Beaker adapter.
   "beaker-sdk[tracing]>=0.6.5",
 ]
 
@@ -50,10 +46,6 @@ asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 119
-# The vendored subtree mirrors upstream AutomationBench (imports/structure
-# aside); keep it out of lint/format so diffs against upstream stay reviewable.
-extend-exclude = ["src/automationbench_skills/vendored"]
-
 [tool.ruff.lint]
 ignore = ["C901", "E501"]
 select = ["C", "E", "F", "I", "W", "UP006", "UP007", "UP045"]
@@ -79,13 +71,6 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 show_error_codes = true
 files = ["src/automationbench_skills"]
-# The vendored subtree is typed to upstream's standard, not this repo's.
-exclude = ["src/automationbench_skills/vendored"]
-
-[[tool.mypy.overrides]]
-module = ["automationbench_skills.vendored.*"]
-follow_imports = "skip"
-
 # Upstream deps that ship without complete typing for our checks.
 [[tool.mypy.overrides]]
 module = ["automationbench", "automationbench.*", "verifiers", "verifiers.*", "datasets", "datasets.*"]

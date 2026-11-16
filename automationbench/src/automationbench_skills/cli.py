@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -45,8 +44,8 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
         default="OPENAI_API_KEY",
         help="API key environment variable (default OPENAI_API_KEY, OPENROUTER_API_KEY for OpenRouter models)",
     )
-    p.add_argument("--api", default="auto", help="auto|chat_completions|responses|anthropic|gemini_interactions")
-    p.add_argument("--toolset", choices=["zapier", "api"], default="zapier")
+    p.add_argument("--api", choices=["auto", "chat_completions"], default="auto")
+    p.add_argument("--toolset", choices=["zapier", "api"], default="api")
     p.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
     p.add_argument("--max-concurrent", type=int, default=8)
     p.add_argument(
@@ -57,22 +56,6 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--limit", type=int, default=None, help="Run only the first N tasks of the split")
     p.add_argument("--output-dir", type=Path, default=None, help="Default: runs/<split>-<timestamp>")
-
-
-def _default_api(model: str, base_url: str | None, api: str) -> str:
-    """Route models served directly by OpenAI to the Responses API.
-
-    On /v1/chat/completions OpenAI rejects function tools for gpt-5.4+ models
-    unless ``reasoning_effort`` is ``"none"``. Claude, Gemini and OpenRouter (``vendor/model``)
-    names already resolve to APIs that work; a gateway (``--base-url`` or
-    ``OPENAI_BASE_URL``) or an explicit ``--api`` is left as given. CLI only:
-    ``ModelSpec``'s own default stays on Chat Completions.
-    """
-    if api != "auto" or base_url or os.environ.get("OPENAI_BASE_URL"):
-        return api
-    if "/" in model or model.startswith(("claude-", "gemini-")):
-        return api
-    return "responses"
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -98,16 +81,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     output_dir = args.output_dir or Path("runs") / f"{args.split}-{time.strftime('%Y%m%d-%H%M%S')}"
     output_dir.mkdir(parents=True, exist_ok=True)
-    api = _default_api(args.model, args.base_url, args.api)
-    if api != args.api:
-        print(
-            f"note: using --api {api} (OpenAI rejects function tools on chat completions for gpt-5.4+ with reasoning on)"
-        )
     model = ModelSpec(
         name=args.model,
         base_url=args.base_url,
         api_key_var=args.api_key_var,
-        api=api,
+        api=args.api,
         reasoning_effort=args.reasoning_effort,
         reasoning_enabled=args.reasoning_enabled,
     )

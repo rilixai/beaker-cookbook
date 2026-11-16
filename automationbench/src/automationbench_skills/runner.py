@@ -1,42 +1,31 @@
-"""The core export: a single agent inference on a single task, as a function.
-
-``run_one(sample, model=..., skills_dir=..., prompts_dir=...)`` executes ONE
-PI rollout (``env.run_rollout`` — generate + deterministic rubric
-scoring) and returns both metrics plus the trajectory and end-of-rollout world
-state. The Beaker optimizer calls it in a loop: run a train sample, inspect
-trajectory+score, edit files in ``skills_dir`` and ``prompts_dir``, repeat,
-then run held-out test.
-
-The ``AutomationBenchEnv`` is built once per (toolset, skills on/off,
-max_turns) and reused across calls — each rollout creates its own per-task
-world. Only the sample, the ``skills_dir`` contents and the
-prompt file in ``prompts_dir`` vary per call; both are read live, so editing
-them between calls changes agent behavior with no env rebuild.
-"""
+"""Run the PI-native task and NullHarness through an OpenAI-compatible endpoint."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import verifiers.v1 as vf
+from automationbench.rubric import partial_credit
+from automationbench.runner import AutomationBenchTaskConfig, AutomationBenchToolsetConfig, compute_connected_services
+from automationbench.schema.world import WorldState
+from verifiers.v1.configs.agent import TimeoutConfig
+from verifiers.v1.harnesses.null.harness import NullHarnessConfig
+
 from automationbench_skills.clients import (
     DEFAULT_MAX_ANSWER_TOKENS,
     DEFAULT_MAX_REASONING_TOKENS,
+    TracedInterception,
 )
 from automationbench_skills.data.tasks import Sample
-from automationbench_skills.model_protocol import Client
+from automationbench_skills.environment import BeakerData, BeakerTask
+from automationbench_skills.grading_state import assertion_outcomes
 from automationbench_skills.prompts import load_system_prompt, task_clock, with_system_prompt
-from automationbench_skills.skills_tools import SKILL_TOOLS, set_skills_dir
-from automationbench_skills.vendored.model_setup import (
-    build_client,
-    build_sampling_args,
-    resolve_api,
-    resolve_api_key_var,
-)
 
 
 DEFAULT_MODEL = "gpt-5.6-luna"
@@ -44,25 +33,23 @@ DEFAULT_REASONING_EFFORT = "medium"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_API_KEY_VAR = "OPENROUTER_API_KEY"
 DEFAULT_MAX_STEPS = 50  # upstream eval.py's --max-turns default
-# Scoring and cleanup run after the env's own timeout stops the loop; the outer
-# guard only catches a rollout stuck outside that loop.
-TIMEOUT_GRACE_SECONDS = 60.0
 
 
 @dataclass(frozen=True)
 class ModelSpec:
-    """A model selection threaded straight into AutomationBench's own routing
-    (Anthropic-native for claude-*, Gemini interactions for gemini-*, OpenAI
-    chat/responses; gateway models via base_url), plus OpenRouter for
-    ``vendor/model`` names. Not a capability profile."""
+    """A model served through a Chat Completions-compatible endpoint."""
 
     name: str = DEFAULT_MODEL
     base_url: str | None = None
     api_key_var: str = "OPENAI_API_KEY"
-    api: str = "auto"  # or: anthropic | chat_completions | responses | gemini_interactions
+    api: str = "auto"
     reasoning_effort: str | None = DEFAULT_REASONING_EFFORT
     reasoning_enabled: bool | None = None
-    extra_body: str | None = None  # raw JSON merged into every request body
+    extra_body: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.api not in {"auto", "chat_completions"}:
+            raise ValueError("PI's native harness requires Chat Completions; use a compatible gateway for this model")
 
     def is_openrouter(self) -> bool:
         return "openrouter.ai" in (self.base_url or "") or (self.base_url is None and "/" in self.name)
@@ -75,12 +62,7 @@ class ModelSpec:
     def effective_api_key_var(self) -> str:
         if self.is_openrouter() and self.api_key_var == "OPENAI_API_KEY":
             return OPENROUTER_API_KEY_VAR
-        return str(resolve_api_key_var(self.resolved_api(), self.api_key_var))
-
-    def resolved_api(self) -> str:
-        if self.is_openrouter() and self.api == "auto":
-            return "chat_completions"
-        return str(resolve_api(self.name, self.base_url, self.api))
+        return self.api_key_var
 
     def sampling_args(self) -> dict[str, Any]:
         args: dict[str, Any]
@@ -96,25 +78,26 @@ class ModelSpec:
                 extra_body = {**extra_body, **json.loads(self.extra_body)}
             args = {"extra_body": extra_body} if extra_body else {}
         else:
-            args = build_sampling_args(self.name, self.resolved_api(), effort, self.extra_body) or {}
-        if self.resolved_api() == "chat_completions":
-            extra = args.get("extra_body") or {}
-            # Reasoning shares the completion cap. An explicit reasoning budget
-            # (OpenRouter's reasoning.max_tokens) sets the allowance; otherwise the
-            # default allowance applies.
-            requested_reasoning = extra.get("reasoning")
-            budget = requested_reasoning.get("max_tokens") if isinstance(requested_reasoning, dict) else None
-            if budget is not None and (not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0):
-                raise ValueError("reasoning.max_tokens must be a positive integer")
-            cap = (budget or DEFAULT_MAX_REASONING_TOKENS) + DEFAULT_MAX_ANSWER_TOKENS
-            for key in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
-                for container in (args, extra):
-                    requested = container.pop(key, None)
-                    if requested is not None:
-                        if not isinstance(requested, int) or isinstance(requested, bool) or requested <= 0:
-                            raise ValueError(f"{key} must be a positive integer")
-                        cap = min(cap, requested)
-            args["max_completion_tokens"] = cap
+            args = {"reasoning_effort": effort} if effort else {}
+            if self.extra_body:
+                args["extra_body"] = json.loads(self.extra_body)
+        extra = args.get("extra_body") or {}
+        # Reasoning shares the completion cap. An explicit reasoning budget
+        # (OpenRouter's reasoning.max_tokens) sets the allowance; otherwise the
+        # default allowance applies.
+        requested_reasoning = extra.get("reasoning")
+        budget = requested_reasoning.get("max_tokens") if isinstance(requested_reasoning, dict) else None
+        if budget is not None and (not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0):
+            raise ValueError("reasoning.max_tokens must be a positive integer")
+        cap = (budget or DEFAULT_MAX_REASONING_TOKENS) + DEFAULT_MAX_ANSWER_TOKENS
+        for key in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
+            for container in (args, extra):
+                requested = container.pop(key, None)
+                if requested is not None:
+                    if not isinstance(requested, int) or isinstance(requested, bool) or requested <= 0:
+                        raise ValueError(f"{key} must be a positive integer")
+                    cap = min(cap, requested)
+        args["max_completion_tokens"] = cap
         return args
 
 
@@ -151,63 +134,6 @@ class RunResult:
             "usage": self.usage,
             "perf": self.perf,
         }
-
-
-_ENV_CACHE: dict[tuple[str, bool, int, float | None], Any] = {}
-_CLIENT_CACHE: dict[tuple[ModelSpec, Any], Client] = {}
-
-
-def get_env(
-    toolset: str = "zapier",
-    skills: bool = True,
-    max_steps: int = DEFAULT_MAX_STEPS,
-    timeout: float | None = None,
-) -> Any:
-    """Build (once) and return the shared AutomationBenchEnv.
-
-    The skill tools are added to PI's MCP server for each rollout. The recipe
-    retains its existing policy of using skills with ``zapier`` or ``api``;
-    ``limited_zapier`` remains a baseline-only condition.
-
-    ``timeout`` (seconds) bounds the rollout loop inside the env: the loop
-    stops on expiry and the rubric still scores the world the agent has
-    mutated so far.
-    """
-    if toolset == "limited_zapier" and skills:
-        raise ValueError(
-            "toolset='limited_zapier' is reserved for the baseline without skill tools. "
-            "Use toolset='zapier' (default) with skills."
-        )
-    key = (toolset, skills, max_steps, timeout)
-    if key not in _ENV_CACHE:
-        from automationbench_skills.environment import AutomationBenchEnv
-
-        _ENV_CACHE[key] = AutomationBenchEnv(
-            tools=list(SKILL_TOOLS) if skills else [],
-            max_turns=max_steps,
-            toolset=toolset,
-            timeout_seconds=timeout,
-        )
-    return _ENV_CACHE[key]
-
-
-def get_client(model: ModelSpec) -> Client:
-    """Return the client for ``model`` on the current event loop.
-
-    The cache is keyed by (model, running loop): the async client's connection
-    pool binds to the loop it first runs under, so a client built inside one
-    ``asyncio.run`` cannot be reused inside the next. Repeated ``run_one``
-    calls therefore get a fresh client per loop, while rollouts sharing a loop
-    (e.g. ``run_split``) share one client and its connection pool.
-    """
-    for stale in [k for k in _CLIENT_CACHE if k[1].is_closed()]:
-        del _CLIENT_CACHE[stale]
-    key = (model, asyncio.get_running_loop())
-    if key not in _CLIENT_CACHE:
-        _CLIENT_CACHE[key] = build_client(
-            model.resolved_api(), model.effective_api_key_var(), model.effective_base_url()
-        )
-    return _CLIENT_CACHE[key]
 
 
 def _rollout_input(sample: Sample, system_prompt: str | None = None) -> dict[str, Any]:
@@ -248,31 +174,76 @@ async def run_rollout_raw(
     sample: Sample,
     *,
     model: ModelSpec,
-    client: Client,
+    api_key: str | None = None,
     skills_dir: Path | str | None = None,
     prompts_dir: Path | str | None = None,
-    toolset: str = "zapier",
+    toolset: str = "api",
     max_steps: int = DEFAULT_MAX_STEPS,
     timeout: float | None = None,
 ) -> dict[str, Any]:
-    """Run ONE agent rollout with ``client`` and return the raw rollout output.
-
-    The shared execution path behind :func:`run_one_async` and the Beaker
-    integration: environment, skills directory, system prompt, sampling
-    arguments and the outer watchdog are set up identically for both. Raises
-    ``TimeoutError`` when the rollout outlives ``timeout`` plus its grace.
-    """
-    env = get_env(toolset=toolset, skills=skills_dir is not None, max_steps=max_steps, timeout=timeout)
-    set_skills_dir(skills_dir)
-    sampling_args = model.sampling_args()
-    rollout = env.run_rollout(
-        _rollout_input(sample, load_system_prompt(prompts_dir, skills=skills_dir is not None)),
-        client,
-        model.name,
-        sampling_args or {},
+    """Run PI's native task/harness, retaining world evidence for trusted scoring."""
+    row = _rollout_input(sample, load_system_prompt(prompts_dir, skills=skills_dir is not None))
+    info = row["info"]
+    messages = row["prompt"]
+    data = BeakerData(
+        idx=sample.index,
+        name=sample.task_name,
+        prompt="\n\n".join(m["content"] for m in messages if m["role"] != "system"),
+        system_prompt="\n\n".join(m["content"] for m in messages if m["role"] == "system") or None,
+        domain=sample.domain,
+        assertions=info["assertions"],
+        initial_state=info["initial_state"],
+        connected_services=compute_connected_services(info["initial_state"], info["assertions"], info["zapier_tools"]),
+        skills_dir=str(Path(skills_dir).resolve()) if skills_dir is not None else None,
+        scenario=info.get("_case_scenario", {}),
     )
-    output = await (asyncio.wait_for(rollout, timeout + TIMEOUT_GRACE_SECONDS) if timeout else rollout)
-    return dict(output)
+    task = BeakerTask(
+        data,
+        AutomationBenchTaskConfig(
+            tools=AutomationBenchToolsetConfig(
+                mode=toolset, allowed_tools=info["zapier_tools"] if toolset == "limited_zapier" else []
+            )
+        ),
+    )
+    config = vf.AgentConfig(
+        model=model.name,
+        harness=NullHarnessConfig(id="null"),
+        runtime=vf.SubprocessConfig(),
+        client=vf.EvalClientConfig(
+            base_url=model.effective_base_url() or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1",
+            api_key_var=model.effective_api_key_var(),
+        ),
+        sampling=vf.SamplingConfig(**model.sampling_args()),
+        max_turns=max_steps,
+        timeout=TimeoutConfig(setup=120, rollout=timeout, finalize=30, scoring=30),
+    )
+    try:
+        async with TracedInterception(api_key) as interception:
+            trace = await vf.Agent(config, interception=interception).run(task)
+    finally:
+        task.close_spans()
+    artifacts = trace.state.artifacts
+    initial = info["initial_state"]
+    end_state = json.loads(artifacts["world.json"]) if "world.json" in artifacts else initial
+    grading_state = json.loads(artifacts["grading-state.json"]) if "grading-state.json" in artifacts else None
+    world = WorldState(**end_state)
+    from automationbench_skills.grading_state import restore_grading_state
+
+    restore_grading_state(world, grading_state)
+    score = float(partial_credit({"info": info, "world": world, "initial_state": initial}))
+    usage = trace.usage
+    return {
+        "metrics": {"partial_credit": score, "task_completed_correctly": float(score == 1.0)},
+        "reward": score,
+        "completion": [m.model_dump(mode="json") for m in trace.messages if m.role in {"assistant", "tool"}],
+        "error": trace.last_error,
+        "stop_condition": "timeout_reached" if trace.is_timeout else trace.stop_condition,
+        "_end_state": end_state,
+        "_grading_state": grading_state,
+        "_assertion_results": assertion_outcomes(world, info["assertions"], WorldState(**initial)),
+        "_usage": {"prompt_tokens": usage.input_tokens, "completion_tokens": usage.completion_tokens} if usage else {},
+        "_perf": {"cost_usd": usage.cost if usage else None},
+    }
 
 
 async def run_one_async(
@@ -281,7 +252,7 @@ async def run_one_async(
     model: ModelSpec | str = DEFAULT_MODEL,
     skills_dir: Path | str | None = None,
     prompts_dir: Path | str | None = None,
-    toolset: str = "zapier",
+    toolset: str = "api",
     max_steps: int = DEFAULT_MAX_STEPS,
     timeout: float | None = None,
 ) -> RunResult:
@@ -304,7 +275,6 @@ async def run_one_async(
         output = await run_rollout_raw(
             sample,
             model=model,
-            client=get_client(model),
             skills_dir=skills_dir,
             prompts_dir=prompts_dir,
             toolset=toolset,
@@ -331,7 +301,7 @@ def run_one(
     model: ModelSpec | str = DEFAULT_MODEL,
     skills_dir: Path | str | None = None,
     prompts_dir: Path | str | None = None,
-    toolset: str = "zapier",
+    toolset: str = "api",
     max_steps: int = DEFAULT_MAX_STEPS,
     timeout: float | None = None,
 ) -> RunResult:
@@ -355,7 +325,7 @@ async def run_split_async(
     model: ModelSpec | str = DEFAULT_MODEL,
     skills_dir: Path | str | None = None,
     prompts_dir: Path | str | None = None,
-    toolset: str = "zapier",
+    toolset: str = "api",
     max_steps: int = DEFAULT_MAX_STEPS,
     max_concurrent: int = 8,
     timeout: float | None = None,
@@ -388,7 +358,7 @@ def run_split(
     model: ModelSpec | str = DEFAULT_MODEL,
     skills_dir: Path | str | None = None,
     prompts_dir: Path | str | None = None,
-    toolset: str = "zapier",
+    toolset: str = "api",
     max_steps: int = DEFAULT_MAX_STEPS,
     max_concurrent: int = 8,
     timeout: float | None = None,

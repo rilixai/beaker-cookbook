@@ -60,7 +60,7 @@ markdown body). Its ID is its path under `skills/`:
 
 ```text
 skills/
-  domains/{sales,marketing,operations,support,finance,hr,simple}/SKILL.md
+  domains/{sales,marketing,operations,support,finance,hr}/SKILL.md
   apps/{gmail,google_sheets,google_drive,slack,salesforce,intercom,jira}/SKILL.md
 ```
 
@@ -87,7 +87,7 @@ Standard PI rows resolve by task name and must identify the pinned benchmark
 commit. Frozen pilot rows also carry `runtime_fixture` with the task, scenario,
 and matching hashes (see [the schema](.beaker/case_fixture.py)). Their saved task
 data is preserved, including original-source examples. Both formats use PI API
-tools and graders in hosted runs; use `--toolset api` for the same CLI interface.
+tools and graders in hosted runs and the default CLI interface.
 
 Standard rows and CLI runs share one scenario clock. An explicit world timestamp
 takes precedence; otherwise, an authored current-date statement supplies the clock
@@ -97,67 +97,38 @@ scenario fallback times.
 
 ## PI runtime
 
-PI removed the legacy Verifiers environment and model clients. This recipe runs
-its unmodified MCP toolset in a separate in-process session for each rollout,
-adds the skill tools, and calls the pinned PI rubric. Provider adapters retain
-Chat Completions, Responses, Anthropic and Gemini routing. Model requests and MCP
-tool calls emit Beaker spans directly. No legacy Verifiers instrumentation is used.
+The recipe uses PI's native Verifiers V1 task and `NullHarness`. PI owns the
+agent loop, MCP execution, turn limits, and retries. The Beaker adapter adds skill
+tools, traces model/tool calls, and exports the final world and spreadsheet write
+history for trusted scoring. Hosted runs and the CLI default to the API toolset.
 
 ## Models
 
-`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort medium`. Routing
-follows the benchmark (`vendored/model_setup.py`): `claude-*` goes to
-Anthropic, `gemini-*` to the Gemini interactions API. Other names served
-directly by OpenAI (no `--base-url` or `OPENAI_BASE_URL`) go to the Responses
-API, because OpenAI rejects function tools on chat completions for gpt-5.4+
-models unless `reasoning_effort` is `"none"`; a gateway stays on chat completions. `--api` overrides the choice.
-`--reasoning-effort` maps to each API's reasoning setting. For a gateway:
+`--model` defaults to `gpt-5.6-luna` with `--reasoning-effort medium`. The native
+harness requires a Chat Completions-compatible endpoint. Use `--base-url` (or
+`OPENAI_BASE_URL`) for a gateway. Separate Anthropic Messages, OpenAI Responses,
+and Gemini Interactions adapters are no longer included.
 
 ```bash
 uv run automationbench-skills run --split test --limit 3 \
   --model my-gateway/gemini-2.5-pro --base-url https://gateway.example/v1 --api-key-var GATEWAY_API_KEY
 ```
 
-`gemini-*` names are routed to Gemini's native API even through a gateway
-(upstream behavior). For a plain OpenAI-compatible gateway, use another model
-name or pass `--api chat_completions`.
+A `vendor/model` name routes to OpenRouter using `OPENROUTER_API_KEY` unless an
+explicit base URL is supplied. `--reasoning-enabled` supports gateway models with
+an on/off reasoning switch.
 
-A `vendor/model` name (e.g. `z-ai/glm-5.3-flash`) routes to OpenRouter using
-`OPENROUTER_API_KEY`; `--reasoning-enabled` toggles reasoning for models that
-only expose an on/off switch.
+## Execution limits
 
-## Chat Completions limits
+Each run allows 50 model turns by default (`--max-steps`). The default output cap
+is 32,768 tokens, including reasoning. Python callers can set a lower cap or an
+explicit reasoning budget through `ModelSpec.extra_body`. Provider-specific
+sampling values must be supported by the selected endpoint.
 
-OpenAI-compatible Chat Completions calls use **32,768 output tokens** (a 24,576-token
-reasoning allowance plus 8,192 for the answer), at most **three attempts per model
-turn**, a **300-second timeout per attempt**, and a **600-second deadline** for the
-whole turn, covering every attempt and the backoff between them. SDK retries are
-disabled. These limits apply to the hosted Beaker gateway and local runs using
-`--api chat_completions`. Direct OpenAI CLI
-runs select native Responses by default. Responses retries empty output up to
-three attempts, and Anthropic context overflow preserves earned credit. Other
-native provider behavior follows the copied upstream clients.
-
-The defaults are named constants in `src/automationbench_skills/clients.py`.
-Reasoning counts toward the completion cap on most providers, so a reasoning
-budget in `ModelSpec.extra_body` (OpenRouter's `{"reasoning": {"max_tokens": N}}`)
-sets the cap to that budget plus the answer allowance; where the provider honors
-the budget, a call stops reasoning and still answers. The CLI does not expose
-`extra_body`, and a budget applies only to runs that call OpenRouter directly:
-hosted runs send none, and the Beaker gateway accepts `reasoning.effort`,
-`enabled`, and `exclude` but rejects a token budget. A lower output cap in
-`extra_body` is honored; a higher one cannot exceed the cap above. A call whose
-reasoning uses the whole cap without answering fails with a model error rather
-than ending the rollout as if the agent had finished. The client does not retry
-that call, since the same request would stop in the same place, but a hosted run
-re-runs the whole case after any model error, up to the run's case retry limit; a
-local run scores the world as the agent left it. The cap can still truncate a
-legitimate response, so compare task accuracy and truncation when changing it.
-Hosted model requests retain per-attempt traces, and returned responses retain
-usage/cost accounting.
-Tool arguments pass unchanged to PI's MCP tool validation; this client
-adds no batch validation or format-recovery instructions. Rebuild the Integration
-image from the updated cookbook commit before starting hosted evaluations.
+`--task-timeout` bounds the agent's solve attempt. Completed writes are preserved
+for scoring after a timeout. Provider failures request a case retry in hosted
+Beaker runs. Request retries are managed by PI's native harness, not a separate
+recipe retry loop. Rebuild the Integration image after updating the recipe.
 
 ## Reference numbers
 
@@ -201,7 +172,7 @@ of both.
 ```bash
 uv run ruff check && uv run ruff format --check
 uv run python -m mypy
-BEAKER_AGENT_KEY= uv run python -m pytest -q  # no network, scripted fake client
+BEAKER_AGENT_KEY= uv run python -m pytest -q  # local HTTP/MCP servers, no paid model calls
 uv build --no-sources
 ```
 

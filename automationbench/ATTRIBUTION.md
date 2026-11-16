@@ -10,8 +10,6 @@ This recipe builds on **AutomationBench** by Zapier, Inc. and the **AutomationBe
 
 The PI benchmark is an unmodified Git dependency. The recipe drives its MCP toolset and scores with its rubric.
 
-`src/automationbench_skills/vendored/clients.py` preserves Zapier's provider clients from `automationbench/clients.py` at `4a8e1061254004d9dac807054eed33fad7d1ff14`. Imports now refer to the recipe's model protocol because PI removed the legacy client API. Local changes also cover Anthropic context-overflow handling and Responses output validation and usage accounting.
-
-`src/automationbench_skills/vendored/model_setup.py` extracts model/API routing, sampling arguments and client construction from the original `automationbench/scripts/eval.py` at the same commit. Routing helpers are now included locally; batch paths remain omitted.
-
-The recipe-owned rollout loop, model protocol, skills tools, splits, CLI and tests are maintained here. They do not replace PI's simulated service implementations or grading rules.
+The recipe uses the native PI task, MCP toolset, and Verifiers V1 `NullHarness`.
+Its local extensions add Beaker tracing, skill tools, frozen inputs, and scoring
+state transport. They do not replace PI's service implementations or grading rules.

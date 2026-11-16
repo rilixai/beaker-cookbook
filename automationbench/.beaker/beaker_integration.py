@@ -15,13 +15,11 @@ observations. The app diff is displayed once per case.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import AsyncIterator, Mapping
 from functools import cache
 from pathlib import Path
 from typing import Any
 
-from anthropic import AsyncAnthropic
 from assertion_diagnostics import capture_assertion_returns, failure_trace
 from automationbench.domains import get_combined_dataset
 from automationbench.rubric import partial_credit
@@ -43,30 +41,19 @@ from beaker import (
     repository,
 )
 from beaker.sdk.utils import to_json_safe
-from beaker.tracing import current_trace
 from case_fixture import PI_COMMIT, CaseFixture
-from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, model_validator
 from world_diff import ServiceDiffs, service_for
 
-from automationbench_skills.clients import DEFAULT_MODEL_REQUEST_TIMEOUT, CostTrackingChatCompletionsClient
 from automationbench_skills.data.tasks import BENCHMARK_DOMAINS
 from automationbench_skills.grading_state import assertion_outcomes, restore_grading_state
-from automationbench_skills.model_protocol import (
-    Client,
-    ClientConfig,
-    ModelError,
-    OpenAIChatCompletionsClient,
-)
 from automationbench_skills.prompts import load_system_prompt
 from automationbench_skills.runner import (
     DEFAULT_MAX_STEPS,
-    TIMEOUT_GRACE_SECONDS,
     ModelSpec,
     run_rollout_raw,
 )
 from automationbench_skills.scenario_clock import scenario_time
-from automationbench_skills.vendored.clients import StreamingAnthropicClient
 
 
 # Hill-climb mostly on assertion partial credit, with strict task completion
@@ -134,62 +121,6 @@ class TaskSetup(RunSetup[TaskRow]):
         )
 
 
-class _SpanPerRequest(OpenAIChatCompletionsClient):
-    """One Beaker ``model_call`` span per provider request.
-
-    Sits below ``CostTrackingChatCompletionsClient`` in the MRO so its retry
-    loop calls into here on every attempt: a retried request (empty response,
-    5xx, dropped connection) gets its own span with its own usage or error,
-    instead of only the final attempt being recorded.
-    """
-
-    async def get_native_response(
-        self, prompt: Any, model: str, sampling_args: Any, tools: Any = None, **kwargs: Any
-    ) -> Any:
-        with current_trace().model_call(
-            operation="chat.completions",
-            provider="openai",
-            model=str(model),
-            input_messages=prompt,
-        ) as call:
-            response = await super().get_native_response(prompt, model, sampling_args, tools, **kwargs)
-            call.output(to_json_safe(response))
-            return response
-
-
-class _TracedChatCompletionsClient(CostTrackingChatCompletionsClient, _SpanPerRequest):
-    """Same client the harness already accepts, with Beaker spans on each request.
-
-    The recipe drives the agent loop itself and takes the client object as a
-    parameter, so Beaker's LiteLLM/OpenAI/Anthropic integrations never see the
-    calls. Subclassing keeps the exact type the harness checks for; each span
-    carries the full message list for that turn (tool calls and simulated tool
-    results included, since they come back as messages) and the provider
-    response, which is where the run's token usage and model-call counts come
-    from. Only the candidate's calls are traced; the assertion rubric is
-    deterministic and makes none.
-    """
-
-
-class _TracedAnthropicClient(StreamingAnthropicClient):
-    """Trace each Messages request, including the streaming client's retries."""
-
-    async def get_native_response(
-        self, prompt: Any, model: str, sampling_args: Any, tools: Any = None, **kwargs: Any
-    ) -> Any:
-        system = kwargs.get("system")
-        input_messages = [{"role": "system", "content": system}, *prompt] if system else prompt
-        with current_trace().model_call(
-            operation="messages",
-            provider="anthropic",
-            model=str(model),
-            input_messages=input_messages,
-        ) as call:
-            response = await super().get_native_response(prompt, model, sampling_args, tools, **kwargs)
-            call.output(to_json_safe(response))
-            return response
-
-
 def _candidate_root() -> Path:
     """Directory holding the ``skills/`` and ``prompts/`` trees."""
     for candidate in (Path.cwd(), Path(__file__).resolve().parents[1]):
@@ -221,37 +152,16 @@ def default_model_spec() -> ModelSpec:
 
     Pinned here rather than taken from ``ModelSpec()`` so that changing the
     app's (and CLI's) default model never changes what Beaker optimizes. Chat
-    Completions and Anthropic Messages requests are both traced.
+    Completions requests use the native runtime and Beaker tracing.
     """
     return ModelSpec(name="gpt-5.6-luna", api="chat_completions", reasoning_effort="medium")
 
 
-def _client_for(runtime: RolloutRuntime[Any]) -> tuple[Client, ModelSpec]:
-    """The model the run selected, through Beaker's inference gateway; else the app's own defaults.
-
-    A run started with a model choice (model-swap runs) resolves to a gateway
-    endpoint, a run-scoped token and a canonical model name; the gateway applies
-    the run's reasoning effort, so none is sent. With no selection the app's
-    default model and its provider key are used as-is, which inside a hosted
-    rollout routes through Beaker's provider proxy.
-    """
+def _model_for(runtime: RolloutRuntime[Any]) -> tuple[ModelSpec, str | None]:
     if runtime.model:
         target = inference_target(runtime)
-        model = ModelSpec(name=target.model, base_url=target.base_url, api="chat_completions", reasoning_effort=None)
-        api_key: str | None = target.api_key
-    else:
-        model = default_model_spec()
-        api_key = os.environ.get(model.effective_api_key_var())
-    sdk = ClientConfig(api_key_var=model.effective_api_key_var())
-    if not runtime.model and model.resolved_api() == "anthropic":
-        client = AsyncAnthropic(
-            api_key=api_key, base_url=model.effective_base_url(), max_retries=sdk.max_retries, timeout=sdk.timeout
-        )
-        return _TracedAnthropicClient(client), model
-    client = AsyncOpenAI(
-        api_key=api_key, base_url=model.effective_base_url(), max_retries=0, timeout=DEFAULT_MODEL_REQUEST_TIMEOUT
-    )
-    return _TracedChatCompletionsClient(client), model
+        return ModelSpec(name=target.model, base_url=target.base_url, reasoning_effort=None), target.api_key
+    return default_model_spec(), None
 
 
 async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> CaseResult:
@@ -270,18 +180,14 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             "system_prompt_chars": len(system_prompt or ""),
         },
     ) as stage:
-        client, model = _client_for(runtime)
+        model, api_key = _model_for(runtime)
         try:
-            # Same execution path as the app's own ``run_one_async``; only the
-            # client (traced, run-scoped) and the scoring below are Beaker's.
-            # The env stops its own loop at ``DEFAULT_TIMEOUT_SECONDS`` and
-            # scores the world as the agent left it; the helper's watchdog only
-            # catches a rollout stuck outside that loop, which leaves nothing
-            # to grade.
+            # The native runner is shared with the CLI. The gateway credential
+            # stays in the host client and is not serialized into the task.
             output = await run_rollout_raw(
                 sample,
                 model=model,
-                client=client,
+                api_key=api_key,
                 skills_dir=skills_dir,
                 prompts_dir=prompts_dir,
                 toolset="api",
@@ -289,37 +195,27 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
                 timeout=DEFAULT_TIMEOUT_SECONDS,
             )
         except TimeoutError as exc:
-            timeout = f"timeout after {DEFAULT_TIMEOUT_SECONDS + TIMEOUT_GRACE_SECONDS}s"
+            timeout = "Native runtime timed out"
             stage.output({"error": timeout})
             raise RetryableCaseError(timeout) from exc
-        finally:
-            await client.close()
 
         completion = output.get("completion") or []
         result_error = output.get("error")
         end_state = output.get("_end_state")
-        # The recipe stores rollout exceptions into ``state["error"]`` and
-        # still grades the world as the agent left it. A model, provider, or
-        # infrastructure failure, even one partway through the rollout, is not
-        # the candidate's fault, so the case is re-run rather than scored on
-        # what the agent did before it; an agent-side failure (bad tool call,
-        # overlong prompt) is the candidate's fault and keeps its earned score.
-        if isinstance(result_error, ModelError):
-            message = f"{type(result_error).__name__}: {result_error}"
+        # Native provider/runtime failures ask Beaker to retry the case.
+        if result_error is not None:
+            message = f"{result_error.type}: {result_error.message}"
             stage.output({"error": message})
-            raise RetryableCaseError(message) from result_error
-        # The client retries provider failures for longer than the env's time
-        # budget, so a run whose every request failed ends by the env's own
-        # timeout with no completed turn (``completion`` is empty) and an
-        # untouched world: the agent never acted.
+            raise RetryableCaseError(message)
+        # An untouched world after a stalled first turn is not a completed evaluation.
         if output.get("stop_condition") == "timeout_reached" and not completion:
             message = "timed out before the first completed model turn"
             stage.output({"error": message})
             raise RetryableCaseError(message)
 
-        error = None if result_error is None else f"{type(result_error).__name__}: {result_error}"
+        error = None if result_error is None else f"{result_error.type}: {result_error.message}"
         # The scorer needs the error and the end state; the model/tool turns are
-        # already in the trace via the traced Chat Completions or Anthropic client.
+        # already in the trace via the native runtime adapter.
         stage.output({"error": error, "messages": len(completion)})
         observed = None
         if isinstance(end_state, Mapping):

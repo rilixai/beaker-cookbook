@@ -119,8 +119,7 @@ async def test_run_case_displays_changes_once_and_native_scoring_uses_full_conte
         ),
     )
     monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
-    client = SimpleNamespace(close=AsyncMock())
-    monkeypatch.setattr(integration, "_client_for", lambda _: (client, None))
+    monkeypatch.setattr(integration, "_model_for", lambda _: (None, None))
     monkeypatch.setattr(
         integration, "run_rollout_raw", AsyncMock(return_value={"completion": ["done"], "_end_state": end})
     )
@@ -132,7 +131,6 @@ async def test_run_case_displays_changes_once_and_native_scoring_uses_full_conte
     result = await integration.run_case(case_input={}, runtime=SimpleNamespace(trace=SimpleNamespace(stage=stage)))
     assert result.output_kind == "record" and result.context["end_state"] == end
     assert result.output["gmail.added"][0]["record"]["body_plain"] == "Total: $19,500"
-    client.close.assert_awaited_once()
     case = Case(
         id="sample",
         input={"task_name": "sample"},
@@ -203,7 +201,7 @@ async def test_large_scoring_state_takes_priority_over_display_output(
         ),
     )
     monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
-    monkeypatch.setattr(integration, "_client_for", lambda _: (SimpleNamespace(close=AsyncMock()), None))
+    monkeypatch.setattr(integration, "_model_for", lambda _: (integration.ModelSpec(), None))
     monkeypatch.setattr(
         integration,
         "run_rollout_raw",
@@ -456,3 +454,35 @@ def test_failure_summary_total_size_is_bounded_with_many_unicode_observations() 
     )
     assert len(message.encode("utf-8")) <= 6_000 and "diagnostic truncated" in message
     assert "Partial diagnostic:" in message and "overall failure" in message
+
+
+@pytest.mark.parametrize("initial", [None, "unchanged", "correct"])
+@pytest.mark.parametrize("correct", [False, True])
+@pytest.mark.parametrize("flags", [{}, {"excluded": False}, {"excluded": True}, {"scored": False, "excluded": False}])
+def test_reported_exclusions_match_pi_rubric(initial, correct, flags):
+    from automationbench.rubric import partial_credit
+
+    from automationbench_skills.data import load_samples
+    from automationbench_skills.grading_state import assertion_outcomes
+
+    sample = next(s for s in load_samples() if s.task_name == "simple.email_sf_contact_phone_update")
+    world = WorldState(**sample.info["initial_state"])
+    initial_world = world.model_copy(deep=True) if initial else None
+    if initial == "correct":
+        initial_world.salesforce.contacts[0].phone = "+1-555-0101"
+    if correct:
+        world.salesforce.contacts[0].phone = "+1-555-0101"
+    assertions = [
+        {**sample.info["assertions"][0], **flags},
+        {"type": "gmail_message_not_sent_to", "to": "excluded@example.com", **flags},
+    ]
+    outcomes = assertion_outcomes(world, assertions, initial_world)
+    scored = [o for o in outcomes if not o["excluded"]]
+    reported_score = sum(o["passed"] for o in scored) / len(scored) if scored else 0.0
+    assert reported_score == partial_credit(
+        {
+            "info": {"assertions": assertions},
+            "world": world,
+            "initial_state": initial_world.model_dump(mode="json") if initial_world else {},
+        }
+    )
