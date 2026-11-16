@@ -16,6 +16,7 @@ from automationbench.runner import AutomationBenchTaskConfig, AutomationBenchToo
 from automationbench.schema.world import WorldState
 from verifiers.v1.configs.agent import TimeoutConfig
 from verifiers.v1.harnesses.null.harness import NullHarnessConfig
+from verifiers.v1.types import Usage
 
 from automationbench_skills.clients import (
     DEFAULT_MAX_ANSWER_TOKENS,
@@ -231,7 +232,7 @@ async def run_rollout_raw(
 
     restore_grading_state(world, grading_state)
     score = float(partial_credit({"info": info, "world": world, "initial_state": initial}))
-    usage = trace.usage
+    usage = Usage.aggregate(value for value in (trace.usage, interception.rejected_usage) if value is not None)
     return {
         "metrics": {"partial_credit": score, "task_completed_correctly": float(score == 1.0)},
         "reward": score,

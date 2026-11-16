@@ -12,6 +12,7 @@ from verifiers.v1.clients.eval import EvalClient
 from verifiers.v1.dialects.base import is_sse_done_event
 from verifiers.v1.errors import ProviderError
 from verifiers.v1.interception.server import InterceptionServer
+from verifiers.v1.types import Usage
 
 
 DEFAULT_MAX_ANSWER_TOKENS = 8192
@@ -19,6 +20,10 @@ DEFAULT_MAX_REASONING_TOKENS = 24576
 
 
 class TracedEvalClient(EvalClient):
+    def __init__(self, config: Any) -> None:
+        super().__init__(config)
+        self.rejected_usage: Usage | None = None
+
     async def relay(self, dialect: Any, body: dict, session_id: str | None = None, headers: Any = None) -> RelayReply:
         # The stream can be consumed/closed in a different asyncio task. Keep
         # the span's context separate so its context tokens close in their owner.
@@ -47,11 +52,26 @@ class TracedEvalClient(EvalClient):
                 response = parser.finish()
                 operation.output(response.raw)
                 message = response.message
-                if not (message.content or message.reasoning_content or message.tool_calls or message.provider_state):
+                failure = None
+                if response.finish_reason == "length" and not (message.content or message.tool_calls):
+                    # Do not repeat the same request when its output cap leaves
+                    # no room for an answer. Hosted execution can retry the case.
+                    failure = ProviderError(
+                        "Model exhausted the output cap without an answer or tool call", status_code=400
+                    )
+                elif not (
+                    message.content or message.reasoning_content or message.tool_calls or message.provider_state
+                ):
                     # The interception server buffers this stream before committing
-                    # the turn. A 502 uses the native SDK's bounded retry policy;
-                    # recording output first retains usage from discarded attempts.
-                    raise ProviderError("Model returned an empty response", status_code=502)
+                    # the turn. A 502 uses the native SDK's bounded retry policy.
+                    failure = ProviderError("Model returned an empty response", status_code=502)
+                if failure is not None:
+                    # Rejected streams never reach the native trace's usage
+                    # records. Keep their usage for the CLI as well as Beaker.
+                    self.rejected_usage = Usage.aggregate(
+                        usage for usage in (self.rejected_usage, response.usage) if usage is not None
+                    )
+                    raise failure
                 complete = True
             except BaseException as exc:
                 error = exc
@@ -73,6 +93,12 @@ class TracedInterception(InterceptionServer):
     def __init__(self, api_key: str | None = None) -> None:
         super().__init__(requires_tunnel=False)
         self.api_key = api_key
+
+    @property
+    def rejected_usage(self) -> Usage | None:
+        """Usage absent from the native trace, scoped to this rollout's clients."""
+        usages = (cast(TracedEvalClient, client).rejected_usage for client in self.clients.values())
+        return Usage.aggregate(usage for usage in usages if usage is not None)
 
     def _client(self, config: Any) -> TracedEvalClient:
         key = config.model_dump_json()

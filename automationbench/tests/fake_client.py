@@ -37,6 +37,9 @@ class ScriptedEndpoint:
             return web.json_response({"error": {"message": "scripted provider error"}}, status=turn["status"])
         await asyncio.sleep(turn.get("delay", 0))
         message = {"role": "assistant", "content": turn.get("content")}
+        for key in ("reasoning", "reasoning_content", "reasoning_details"):
+            if key in turn:
+                message[key] = turn[key]
         if calls := turn.get("tool_calls"):
             message["tool_calls"] = [
                 {
@@ -52,8 +55,14 @@ class ScriptedEndpoint:
             {**common, "choices": [{"index": 0, "delta": message, "finish_reason": None}]},
             {
                 **common,
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls" if calls else "stop"}],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": turn.get("finish_reason", "tool_calls" if calls else "stop"),
+                    }
+                ],
+                "usage": turn.get("usage", {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
             },
         ]
         return web.Response(

@@ -13,7 +13,7 @@ from beaker.tracing import current_trace, local_capture
 from fake_client import ScriptedEndpoint
 
 from automationbench_skills.data import load_samples
-from automationbench_skills.runner import ModelSpec, run_rollout_raw
+from automationbench_skills.runner import ModelSpec, run_one_async, run_rollout_raw
 
 
 sys.path.insert(0, str(Path(__file__).parents[1] / ".beaker"))
@@ -106,6 +106,76 @@ async def test_exhausted_empty_responses_request_a_hosted_case_retry(monkeypatch
     receipt = capture.receipt.to_dict()
     assert receipt["counts"]["model_calls"] == 4
     assert receipt["projection"]["token_usage"]["total_tokens"] == 60
+
+
+@pytest.mark.parametrize("recovers", [True, False])
+async def test_cli_usage_includes_rejected_attempts(recovers):
+    empty = {
+        "content": None,
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "prompt_tokens_details": {"cached_tokens": 4},
+            "cost": 0.04,
+        },
+    }
+    turns = (
+        [empty, {"tool_calls": [PHONE_UPDATE], "usage": {**empty["usage"], "cost": 0.02}}]
+        if recovers
+        else [empty] * 10
+    )
+    async with ScriptedEndpoint(turns) as endpoint:
+        result = await run_one_async(sample(), model=ModelSpec(name="fake", base_url=endpoint.url), timeout=30)
+    saved = result.to_json()
+    assert len(endpoint.requests) == 3
+    assert saved["usage"] == {"prompt_tokens": 30, "completion_tokens": 15}
+    assert saved["cost_usd"] == pytest.approx(0.06 if recovers else 0.12)
+    assert saved["partial_credit"] == float(recovers)
+    assert (saved["error"] is None) == recovers
+
+
+@pytest.mark.parametrize(
+    "reasoning",
+    [
+        {},
+        {"reasoning_content": "Still thinking"},
+        {"reasoning_details": [{"type": "reasoning.encrypted", "data": "abc"}]},
+    ],
+)
+async def test_output_cap_without_an_answer_requests_a_case_retry(reasoning, monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+
+    turn = {
+        **reasoning,
+        "finish_reason": "length",
+        "usage": {"prompt_tokens": 10, "completion_tokens": 512, "total_tokens": 522, "cost": 0.03},
+    }
+    async with ScriptedEndpoint([turn]) as endpoint:
+        model = ModelSpec(name="fake", base_url=endpoint.url, extra_body='{"max_tokens": 512}')
+        with local_capture(tmp_path, case_id="cap", candidate_id="native", strict_evidence=False) as capture:
+            result = await run_rollout_raw(sample(), model=model, timeout=30)
+    # Repeating this capped request cannot provide more room for an answer.
+    assert len(endpoint.requests) == 1
+    assert result["error"].type == "ProviderError"
+    assert "output cap" in result["error"].message
+    assert result["_usage"] == {"prompt_tokens": 10, "completion_tokens": 512}
+    assert result["_perf"]["cost_usd"] == pytest.approx(0.03)
+    assert capture.receipt.to_dict()["projection"]["token_usage"]["total_tokens"] == 522
+    monkeypatch.setattr(integration, "run_rollout_raw", AsyncMock(return_value=result))
+    monkeypatch.setattr(integration, "_model_for", lambda _: (model, None))
+    case = await case_for(sample())
+    with pytest.raises(RetryableCaseError, match="output cap"):
+        await integration.run_case(case_input=case.input, runtime=SimpleNamespace(trace=current_trace()))
+
+
+@pytest.mark.parametrize("turn", [{"content": "Done"}, {"tool_calls": [PHONE_UPDATE]}])
+async def test_output_cap_with_an_answer_or_tool_call_remains_usable(turn):
+    async with ScriptedEndpoint([{**turn, "finish_reason": "length"}]) as endpoint:
+        result = await run_rollout_raw(sample(), model=ModelSpec(name="fake", base_url=endpoint.url), timeout=30)
+    assert result["error"] is None
+    assert result["reward"] == float("tool_calls" in turn)
+    assert len(endpoint.requests) == (2 if "tool_calls" in turn else 1)
 
 
 @pytest.mark.parametrize("failure", ["deadline", "provider"])
