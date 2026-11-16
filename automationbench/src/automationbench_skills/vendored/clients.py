@@ -15,7 +15,6 @@ import os
 import random
 import time
 from collections.abc import Mapping
-from datetime import datetime
 from typing import Any, cast
 
 import anthropic
@@ -321,10 +320,6 @@ class StreamingAnthropicClient(AnthropicMessagesClient):
             create_kwargs["system"] = [
                 {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
             ]
-        if create_kwargs.get("tools"):
-            cached_tools = [dict(t) for t in create_kwargs["tools"]]
-            cached_tools[-1]["cache_control"] = {"type": "ephemeral"}
-            create_kwargs["tools"] = cached_tools
 
         return create_kwargs
 
@@ -380,7 +375,7 @@ class StreamingAnthropicClient(AnthropicMessagesClient):
         raise RuntimeError("unreachable")
 
 
-class OpenAIResponsesClient(Client[AsyncOpenAI, list[dict], Any, dict]):
+class OpenAIResponsesClient(Client):
     """Client for the OpenAI Responses API (supports reasoning_effort + tools)."""
 
     def setup_client(self, config: ClientConfig) -> AsyncOpenAI:
@@ -618,9 +613,6 @@ class OpenAIResponsesClient(Client[AsyncOpenAI, list[dict], Any, dict]):
         }
 
         return Response(
-            id=getattr(response, "id", ""),
-            created=getattr(response, "created_at", 0),
-            model=getattr(response, "model", ""),
             usage=usage,
             message=ResponseMessage.model_validate(message_data),
         )
@@ -661,23 +653,7 @@ def _is_overlong_prompt_error(text: str) -> bool:
     )
 
 
-def _parse_created(created: Any) -> int:
-    """Best-effort unix timestamp from the API's `created` field.
-
-    Cosmetic metadata: an epoch int, an ISO string, or something unparseable must
-    never take down a rollout, so this degrades to 0 rather than raising.
-    """
-    if created is None:
-        return 0
-    if isinstance(created, (int, float)):
-        return int(created)
-    try:
-        return int(datetime.fromisoformat(created).timestamp())
-    except (TypeError, ValueError):
-        return 0
-
-
-class GeminiInteractionsClient(Client[httpx.AsyncClient, list[dict], dict, dict]):
+class GeminiInteractionsClient(Client):
     """Client for the Gemini Interactions API (POST /v1beta/interactions).
 
     Runs the API in stateless mode: every turn resends the full transcript as
@@ -951,12 +927,7 @@ class GeminiInteractionsClient(Client[httpx.AsyncClient, list[dict], dict, dict]
                 total_tokens=input_toks + output_toks + thought_toks,
             )
 
-        created_ts = _parse_created(response.get("created"))
-
         return Response(
-            id=response.get("id", ""),
-            created=created_ts,
-            model=response.get("model", ""),
             usage=usage,
             message=ResponseMessage(
                 content=text_content or None,

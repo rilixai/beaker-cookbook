@@ -16,6 +16,7 @@ from fake_client import ScriptedClient
 
 from automationbench_skills.data import load_samples, load_split
 from automationbench_skills.data.tasks import read_split_names
+from automationbench_skills.grading_state import assertion_outcomes
 from automationbench_skills.model_protocol import SystemMessage, ToolMessage, UserMessage
 from automationbench_skills.runner import _rollout_input, get_env
 from automationbench_skills.vendored.clients import (
@@ -171,6 +172,33 @@ async def test_hosted_score_reports_pi_negative_credit_gating(monkeypatch, tmp_p
     assert not score.checks[0].informational
     assert score.checks[1].informational
     assert "positive requirements" in score.checks[1].message
+
+
+@pytest.mark.parametrize("initial", [None, "unchanged", "correct"])
+@pytest.mark.parametrize("correct", [False, True])
+@pytest.mark.parametrize("flags", [{}, {"excluded": False}, {"excluded": True}, {"scored": False, "excluded": False}])
+def test_reported_exclusions_match_pi_rubric(initial, correct, flags):
+    sample = phone_sample()
+    world = WorldState(**sample.info["initial_state"])
+    initial_world = world.model_copy(deep=True) if initial else None
+    if initial == "correct":
+        initial_world.salesforce.contacts[0].phone = "+1-555-0101"
+    if correct:
+        world.salesforce.contacts[0].phone = "+1-555-0101"
+    assertions = [
+        {**sample.info["assertions"][0], **flags},
+        {"type": "gmail_message_not_sent_to", "to": "excluded@example.com", **flags},
+    ]
+    outcomes = assertion_outcomes(world, assertions, initial_world)
+    scored = [o for o in outcomes if not o["excluded"]]
+    reported_score = sum(o["passed"] for o in scored) / len(scored) if scored else 0.0
+    assert reported_score == partial_credit(
+        {
+            "info": {"assertions": assertions},
+            "world": world,
+            "initial_state": initial_world.model_dump(mode="json") if initial_world else {},
+        }
+    )
 
 
 async def test_responses_adapter_replays_reasoning_and_function_call_items():

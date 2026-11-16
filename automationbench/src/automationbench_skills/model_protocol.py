@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Literal
 
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI, BadRequestError
@@ -21,10 +21,6 @@ class Error(Exception):
 
 class ModelError(Error):
     """A provider request failed after retries."""
-
-
-class InfraError(Error):
-    """Infrastructure failed before the agent could finish."""
 
 
 class OverlongPromptError(Error):
@@ -96,9 +92,6 @@ class Usage(BaseModel):
 
 
 class Response(BaseModel):
-    id: str
-    created: int
-    model: str
     usage: Usage | None = None
     message: ResponseMessage
 
@@ -108,13 +101,7 @@ SamplingArgs = dict[str, Any]
 FinishReason = str
 
 
-A = TypeVar("A")
-B = TypeVar("B")
-C = TypeVar("C")
-D = TypeVar("D")
-
-
-class Client(Generic[A, B, C, D]):
+class Client:
     """Small protocol shared by scripted clients and provider adapters."""
 
     def __init__(self, client_or_config: Any) -> None:
@@ -235,9 +222,6 @@ class OpenAIChatCompletionsClient(Client):
         msg = choice.message
         usage = response.usage
         return Response(
-            id=response.id,
-            created=response.created,
-            model=response.model,
             usage=Usage(
                 prompt_tokens=usage.prompt_tokens,
                 completion_tokens=usage.completion_tokens,
@@ -323,9 +307,6 @@ class AnthropicMessagesClient(Client):
             + (getattr(usage, "cache_creation_input_tokens", 0) or 0)
         )
         return Response(
-            id=response.id,
-            created=0,
-            model=response.model,
             usage=Usage(
                 prompt_tokens=input_tokens,
                 completion_tokens=usage.output_tokens,

@@ -6,7 +6,6 @@ and rubric scoring all run for real in-process."""
 from __future__ import annotations
 
 import json
-import time
 from typing import Any
 
 from automationbench_skills.model_protocol import Client, Response, ResponseMessage, ToolCall, Usage
@@ -60,9 +59,6 @@ class ScriptedClient(Client):
             is_truncated=False,
         )
         return Response(
-            id=f"scripted-{len(self.calls)}",
-            created=int(time.time()),
-            model=model,
             usage=Usage(prompt_tokens=1, reasoning_tokens=0, completion_tokens=1, total_tokens=2),
             message=message,
         )
