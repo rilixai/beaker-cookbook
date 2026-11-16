@@ -80,7 +80,8 @@ class AutomationBenchEnv:
         if scenario:
             if self.toolset != "api":
                 raise ValueError("Frozen data-quality fixtures require the PI API interface")
-            toolset._api = ScenarioAPIContract(toolset._world, scenario.get("tool_fault"))
+            if fault := scenario.get("tool_fault"):
+                toolset._api = ScenarioAPIContract(toolset._world, fault)
         server = MCPServer("automationbench-skills")
         toolset.register(server)
         for tool in self.tools:

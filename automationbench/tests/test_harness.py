@@ -10,7 +10,7 @@ from typing import Any
 from fake_client import ScriptedClient
 
 from automationbench_skills import runner as runner_mod
-from automationbench_skills.data import PUBLIC_DOMAINS, load_samples, load_split, task_family
+from automationbench_skills.data import BENCHMARK_DOMAINS, load_samples, load_split, task_family
 from automationbench_skills.evaluation.summary import format_summary, summarize
 from automationbench_skills.prompts import load_system_prompt, task_clock, with_system_prompt
 from automationbench_skills.runner import (
@@ -66,7 +66,7 @@ class TestSplits:
             "hr": (73, 24),
             "simple": (150, 50),
         }
-        for domain in PUBLIC_DOMAINS:
+        for domain in BENCHMARK_DOMAINS:
             assert (sum(s.domain == domain for s in train), sum(s.domain == domain for s in test)) == expected[domain]
 
     def test_split_regeneration_is_deterministic(self) -> None:
@@ -116,7 +116,7 @@ class TestSkillsTools:
         shipped = RECIPE_ROOT / "skills"
         set_skills_dir(shipped)
         listing = list_skills()
-        for domain in PUBLIC_DOMAINS:
+        for domain in BENCHMARK_DOMAINS:
             assert f"domains/{domain}: " in listing
         for app in ["gmail", "google_sheets", "google_drive", "slack", "salesforce"]:
             assert f"apps/{app}: " in listing
@@ -189,7 +189,7 @@ class TestPrompts:
         text = load_system_prompt(RECIPE_ROOT / "prompts")
         assert text is not None
         assert text.startswith(benchmark)
-        for domain in PUBLIC_DOMAINS:
+        for domain in BENCHMARK_DOMAINS:
             assert domain in text
         assert "list_skills" in text and "read_skill" in text
 

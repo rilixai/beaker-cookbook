@@ -19,7 +19,7 @@ import yaml
 
 from automationbench_skills.data.demo import DATASET_NAME as DEMO_DATASET_NAME
 from automationbench_skills.data.demo import demo_rows
-from automationbench_skills.data.tasks import PUBLIC_DOMAINS, Sample, load_split
+from automationbench_skills.data.tasks import BENCHMARK_DOMAINS, PI_COMMIT, Sample, load_split
 
 
 TRAIN_PER_DOMAIN = 6
@@ -49,7 +49,7 @@ def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
     for sample in load_split(split):
         by_domain[sample.domain].append(sample)
     rows: list[dict[str, object]] = []
-    for domain in PUBLIC_DOMAINS:
+    for domain in BENCHMARK_DOMAINS:
         for sample in by_domain[domain][:per_domain]:
             rows.append(
                 {
@@ -65,7 +65,7 @@ def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
                     "metadata": {
                         "domain": domain,
                         "source_split": split,
-                        "benchmark_commit": "858718b19e5d66c74451432783d34ee64a550a15",
+                        "benchmark_commit": PI_COMMIT,
                     },
                     "group_key": domain,
                 }

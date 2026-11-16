@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Any
 
 
-PUBLIC_DOMAINS = ["sales", "marketing", "operations", "support", "finance", "hr", "simple"]
+PI_COMMIT = "858718b19e5d66c74451432783d34ee64a550a15"
+BENCHMARK_DOMAINS = ["sales", "marketing", "operations", "support", "finance", "hr", "simple"]
 SPLITS_DIR = Path(__file__).parent.parent / "splits"
 
 
@@ -45,7 +46,7 @@ def load_samples() -> tuple[Sample, ...]:
     from automationbench.domains import get_combined_dataset
     from automationbench.schema.world import WorldMeta
 
-    dataset = get_combined_dataset(PUBLIC_DOMAINS)
+    dataset = get_combined_dataset(BENCHMARK_DOMAINS)
     samples: list[Sample] = []
     for index, row in enumerate(dataset):
         info = row["info"]

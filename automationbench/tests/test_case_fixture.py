@@ -118,6 +118,12 @@ async def test_named_and_frozen_simple_rows_run_through_hosted_integration(row, 
         row["metadata"] = {"benchmark_commit": PI_COMMIT}
     parsed = TaskRow.model_validate(row)
     case = await anext(TaskSetup().load_cases(parsed, runtime=SimpleNamespace()))
+
+    # Once setup freezes the case, neither execution nor scoring can reload it.
+    def unexpected_lookup():
+        raise AssertionError("Benchmark lookup after setup")
+
+    monkeypatch.setattr(integration, "_published_tasks", unexpected_lookup)
     # Exercise the JSON boundary used by hosted datasets, not just the Python model.
     case_input = json.loads(json.dumps(case.input))
     client = ScriptedClient(
@@ -143,6 +149,20 @@ async def test_named_and_frozen_simple_rows_run_through_hosted_integration(row, 
     assert score.field_scores == {"partial_credit": 1.0, "task_completed_correctly": 1.0}
     assert result.context["tool_interface"] == "pi_api"
     assert {tool["name"] for tool in client.calls[0]["tools"]} >= {"api_fetch", "api_search"}
+
+
+async def test_execution_and_scoring_reject_unprepared_named_rows(row, tmp_path):
+    import beaker_integration as integration
+    from beaker import Case
+
+    with pytest.raises(ValueError, match="missing runtime_fixture"):
+        await integration.run_case(case_input=row["input"], runtime=SimpleNamespace())
+    with pytest.raises(ValueError, match="missing runtime_fixture"):
+        await score_case(
+            case=Case(id=row["id"], input=row["input"], expected=row["expected"]),
+            result=CaseResult(output=None, context={}),
+            case_files_dir=tmp_path,
+        )
 
 
 def test_named_rows_reject_stale_assertions(row):
@@ -279,8 +299,19 @@ async def test_sheet_update_history_survives_hosted_scoring(row, tmp_path, monke
     assert score.field_scores == live["metrics"]
 
 
-async def test_lookup_fault_preserves_emails_and_trace_gap_preserves_execution(row, tmp_path):
+async def test_lookup_fault_preserves_emails_and_trace_gap_preserves_execution(row, tmp_path, monkeypatch):
     from beaker.tracing import local_capture
+
+    import automationbench_skills.environment as environment
+
+    original_contract = environment.ScenarioAPIContract
+    injected_faults = []
+
+    def fault_contract(world, fault):
+        injected_faults.append(fault)
+        return original_contract(world, fault)
+
+    monkeypatch.setattr(environment, "ScenarioAPIContract", fault_contract)
 
     raw = copy.deepcopy(row["runtime_fixture"])
     turns = [{"tool_calls": [{"name": "api_fetch", "arguments": {"endpoint": "gmail.users.messages.list"}}]}]
@@ -308,6 +339,7 @@ async def test_lookup_fault_preserves_emails_and_trace_gap_preserves_execution(r
     assert base["metrics"] == broken["metrics"] == gap["metrics"]
     assert tool_counts["base"] == tool_counts["broken"] == {"api_fetch": 1}
     assert tool_counts["gap"] == {}
+    assert injected_faults == ["empty_email_lookup"]
 
 
 @pytest.mark.parametrize(

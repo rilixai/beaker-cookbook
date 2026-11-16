@@ -50,6 +50,7 @@ from pydantic import BaseModel, Field, model_validator
 from world_diff import ServiceDiffs, service_for
 
 from automationbench_skills.clients import DEFAULT_MODEL_REQUEST_TIMEOUT, CostTrackingChatCompletionsClient
+from automationbench_skills.data.tasks import BENCHMARK_DOMAINS
 from automationbench_skills.grading_state import restore_grading_state
 from automationbench_skills.model_protocol import (
     Client,
@@ -100,7 +101,15 @@ class TaskRow(BaseModel):
                 raise ValueError("Dataset benchmark commit does not match this PI recipe; re-upload the dataset")
             # Resolve standard rows from the trusted dependency. Frozen pilot rows
             # retain their own task contents, including pre-correction examples.
-            fixture = _fixture_for({"task_name": task_name})
+            task = _published_tasks().get(task_name)
+            if task is None:
+                raise ValueError(f"Unknown AutomationBench task_name: {task_name!r}")
+            fixture = CaseFixture.model_validate(
+                {
+                    "task": task,
+                    "scenario": {"source": "pi", "fallback_time": "2026-02-20T12:00:00+00:00"},
+                }
+            )
             fixture.validate_reference(task_name, self.expected, {**self.metadata, **fixture.hashes()})
             self.runtime_fixture = fixture
         else:
@@ -190,25 +199,18 @@ def _candidate_root() -> Path:
 def _published_tasks() -> dict[str, dict[str, Any]]:
     """Read the pinned dependency, independently of optimizer-editable loaders."""
     tasks = {}
-    for row in get_combined_dataset(["sales", "marketing", "operations", "support", "finance", "hr", "simple"]):
+    for row in get_combined_dataset(BENCHMARK_DOMAINS):
         info = json.loads(row["info"]) if isinstance(row["info"], str) else row["info"]
         tasks[info["task_name"]] = {**row, "info": info}
     return tasks
 
 
 def _fixture_for(case_input: JsonValue) -> CaseFixture:
+    """Execution and scoring use only the fixture frozen during setup."""
     payload = case_input if isinstance(case_input, Mapping) else {}
-    if payload.get("runtime_fixture") is not None:
-        return CaseFixture.model_validate(payload["runtime_fixture"])
-    task_name = str(payload.get("task_name") or "")
-    if task_name not in _published_tasks():
-        raise ValueError(f"Unknown AutomationBench task_name: {task_name!r}")
-    return CaseFixture.model_validate(
-        {
-            "task": _published_tasks()[task_name],
-            "scenario": {"source": "pi", "fallback_time": "2026-02-20T12:00:00+00:00"},
-        }
-    )
+    if payload.get("runtime_fixture") is None:
+        raise ValueError("Case is missing runtime_fixture; load the dataset through TaskSetup first")
+    return CaseFixture.model_validate(payload["runtime_fixture"])
 
 
 def default_model_spec() -> ModelSpec:

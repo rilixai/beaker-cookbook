@@ -10,20 +10,20 @@ from fractions import Fraction
 import pytest
 
 from automationbench_skills.data import demo
-from automationbench_skills.data.tasks import PUBLIC_DOMAINS, load_split, read_split_names, task_family
+from automationbench_skills.data.tasks import BENCHMARK_DOMAINS, load_split, read_split_names, task_family
 
 
 @pytest.mark.parametrize("split,per_domain", [("train", 20), ("test", 10)])
 def test_balanced_demo_preserves_domain_and_family_proportions(split, per_domain):
     selected = demo.select_demo(split)
     source = load_split(split)
-    assert Counter(s.domain for s in selected) == dict.fromkeys(PUBLIC_DOMAINS, per_domain)
+    assert Counter(s.domain for s in selected) == dict.fromkeys(BENCHMARK_DOMAINS, per_domain)
     selected_ids = {s.task_name for s in selected}
     assert len(selected_ids) == len(selected)
     assert selected_ids <= {s.task_name for s in source}
     assert not selected_ids & set(read_split_names("excluded_cases"))
     assert [s.task_name for s in selected] == [s.task_name for s in source if s.task_name in selected_ids]
-    for domain in PUBLIC_DOMAINS:
+    for domain in BENCHMARK_DOMAINS:
         pool = Counter(task_family(s.task_name) for s in source if s.domain == domain)
         actual = Counter(task_family(s.task_name) for s in selected if s.domain == domain)
         for family, count in pool.items():
@@ -55,7 +55,7 @@ def test_local_export_is_reproducible_disjoint_and_has_matching_manifest(tmp_pat
         rows = [json.loads(line) for line in content.splitlines()]
         ids[split] = {row["id"] for row in rows}
         assert rows == demo.demo_rows(split)
-        assert all(row["metadata"]["benchmark_commit"] == demo.BENCHMARK_COMMIT for row in rows)
+        assert all(row["metadata"]["benchmark_commit"] == demo.PI_COMMIT for row in rows)
     assert not ids["train"] & ids["test"]
     assert json.loads((first / "verification.json").read_text()) == report
     with pytest.raises(FileExistsError):

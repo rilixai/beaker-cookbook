@@ -11,10 +11,16 @@ from pathlib import Path
 from typing import Any
 
 from automationbench_skills.data.make_splits import _allocate_largest_remainder
-from automationbench_skills.data.tasks import PUBLIC_DOMAINS, Sample, load_split, read_split_names, task_family
+from automationbench_skills.data.tasks import (
+    BENCHMARK_DOMAINS,
+    PI_COMMIT,
+    Sample,
+    load_split,
+    read_split_names,
+    task_family,
+)
 
 
-BENCHMARK_COMMIT = "858718b19e5d66c74451432783d34ee64a550a15"
 DATASET_NAME = "automationbench-pi-demo210"
 SEED = 0
 PER_DOMAIN = {"train": 20, "test": 10}
@@ -27,7 +33,7 @@ def select_demo(split: str) -> list[Sample]:
     for sample in load_split(split):
         by_domain[sample.domain].append(sample)
     selected: list[Sample] = []
-    for domain in PUBLIC_DOMAINS:
+    for domain in BENCHMARK_DOMAINS:
         candidates = by_domain[domain]
         if len(candidates) < per_domain:
             raise ValueError(f"{split}/{domain} needs {per_domain} eligible tasks, but has {len(candidates)}")
@@ -61,7 +67,7 @@ def demo_rows(split: str) -> list[dict[str, Any]]:
                 "domain": sample.domain,
                 "task_family": task_family(sample.task_name),
                 "source_split": split,
-                "benchmark_commit": BENCHMARK_COMMIT,
+                "benchmark_commit": PI_COMMIT,
                 "selection_seed": SEED,
                 "selection_method": "domain-balanced-family-stratified",
             },
@@ -87,7 +93,7 @@ def write_demo(output_dir: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     report: dict[str, Any] = {
         "dataset_name": DATASET_NAME,
-        "benchmark_commit": BENCHMARK_COMMIT,
+        "benchmark_commit": PI_COMMIT,
         "seed": SEED,
         "selection": "Equal domain quotas; largest-remainder family quotas within each eligible source split.",
         "excluded_case_count": len(excluded),
@@ -108,7 +114,7 @@ def write_demo(output_dir: Path) -> dict[str, Any]:
             domain: dict(
                 Counter(row["metadata"]["task_family"] for row in values if row["metadata"]["domain"] == domain)
             )
-            for domain in PUBLIC_DOMAINS
+            for domain in BENCHMARK_DOMAINS
         }
     (output_dir / "verification.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     return report

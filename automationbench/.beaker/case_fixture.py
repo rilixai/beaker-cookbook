@@ -10,10 +10,9 @@ from automationbench.rubric.registry import AssertionRegistry
 from automationbench.schema.world import WorldState
 from pydantic import BaseModel, ConfigDict, Field
 
-from automationbench_skills.data.tasks import Sample
+from automationbench_skills.data.tasks import PI_COMMIT, Sample
 
 
-PI_COMMIT = "858718b19e5d66c74451432783d34ee64a550a15"
 SOURCE_COMMITS = {"original": "4a8e1061254004d9dac807054eed33fad7d1ff14", "pi": PI_COMMIT}
 
 

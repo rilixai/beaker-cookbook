@@ -15,7 +15,7 @@ import random
 from collections import defaultdict
 
 from automationbench_skills.data.tasks import (
-    PUBLIC_DOMAINS,
+    BENCHMARK_DOMAINS,
     Sample,
     load_samples,
     split_path,
@@ -56,7 +56,7 @@ def make_splits() -> tuple[list[str], list[str]]:
 
     train: list[str] = []
     test: list[str] = []
-    for domain in PUBLIC_DOMAINS:
+    for domain in BENCHMARK_DOMAINS:
         domain_samples = by_domain[domain]
         families: dict[str, list[str]] = defaultdict(list)
         for s in domain_samples:
