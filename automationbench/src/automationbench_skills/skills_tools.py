@@ -20,35 +20,25 @@ in its system prompt (``prompts/system.md``, see ``prompts.py``).
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from pathlib import Path
 
 
-class _ActiveSkillsDir:
-    """Holder for the skills directory the tools read from.
-
-    ``run_one`` points this at its ``skills_dir`` argument before each rollout,
-    which is what lets one long-lived environment serve many calls with
-    different (or edited) skills folders.
-    """
-
-    path: Path | None = None
-
-
-_ACTIVE = _ActiveSkillsDir()
+_ACTIVE: ContextVar[Path | None] = ContextVar("automationbench_skills_dir", default=None)
 
 
 def set_skills_dir(path: Path | str | None) -> None:
     """Point the skill tools at a skills directory (or None)."""
-    _ACTIVE.path = Path(path) if path is not None else None
+    _ACTIVE.set(Path(path) if path is not None else None)
 
 
 def get_skills_dir() -> Path | None:
-    return _ACTIVE.path
+    return _ACTIVE.get()
 
 
 def _skill_files() -> dict[str, Path]:
     """Map skill ID (folder path under skills/) -> its SKILL.md, read live."""
-    root = _ACTIVE.path
+    root = _ACTIVE.get()
     if root is None or not root.is_dir():
         return {}
     return {f.parent.relative_to(root).as_posix(): f for f in sorted(root.rglob("SKILL.md")) if f.parent != root}

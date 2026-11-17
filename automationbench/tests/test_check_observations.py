@@ -109,11 +109,17 @@ async def test_run_case_displays_changes_once_and_native_scoring_uses_full_conte
     end = WorldState(
         gmail={"messages": [{"to": ["target@example.com"], "label_ids": ["SENT"], "body_plain": "Total: $19,500"}]}
     ).model_dump(mode="json")
-    monkeypatch.setattr(integration, "_authored_initial_states", lambda: {"sample": initial})
-    monkeypatch.setattr(integration, "_sample_for", lambda _: SimpleNamespace(task_name="sample", domain="finance"))
+    monkeypatch.setattr(
+        integration,
+        "_fixture_for",
+        lambda _: SimpleNamespace(
+            initial_state=lambda: initial,
+            scenario=SimpleNamespace(trace_capture="complete"),
+            sample=lambda: SimpleNamespace(task_name="sample", domain="finance"),
+        ),
+    )
     monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
-    client = SimpleNamespace(close=AsyncMock())
-    monkeypatch.setattr(integration, "_client_for", lambda _: (client, None))
+    monkeypatch.setattr(integration, "_model_for", lambda _: (None, None))
     monkeypatch.setattr(
         integration, "run_rollout_raw", AsyncMock(return_value={"completion": ["done"], "_end_state": end})
     )
@@ -125,7 +131,6 @@ async def test_run_case_displays_changes_once_and_native_scoring_uses_full_conte
     result = await integration.run_case(case_input={}, runtime=SimpleNamespace(trace=SimpleNamespace(stage=stage)))
     assert result.output_kind == "record" and result.context["end_state"] == end
     assert result.output["gmail.added"][0]["record"]["body_plain"] == "Total: $19,500"
-    client.close.assert_awaited_once()
     case = Case(
         id="sample",
         input={"task_name": "sample"},
@@ -168,7 +173,16 @@ async def test_large_scoring_state_takes_priority_over_display_output(
     end = WorldState(
         gmail={"messages": [{"to": ["target@example.com"], "label_ids": ["SENT"], "body_plain": ""}]}
     ).model_dump(mode="json")
-    context = {"task_name": "sample", "domain": "finance", "error": None, "end_state": end}
+    context = {
+        "task_name": "sample",
+        "domain": "finance",
+        "error": None,
+        "end_state": end,
+        "runtime_benchmark_commit": integration.PI_COMMIT,
+        "tool_interface": "pi_api",
+        "trace_capture": "complete",
+        "grading_state": {"google_sheets_updated_row_keys": ["ss:ws:2"]},
+    }
     envelope = {"context": context, "output": None, "output_kind": "record"}
     padding_bytes = (
         integration._RESULT_MAX_BYTES - headroom - len(json.dumps(envelope, separators=(",", ":")).encode("utf-8"))
@@ -177,12 +191,23 @@ async def test_large_scoring_state_takes_priority_over_display_output(
     # UTF-8 with ensure_ascii=False would incorrectly retain the large diff.
     end["gmail"]["messages"][0]["body_plain"] = "界" * (padding_bytes // 6) + "x" * (padding_bytes % 6)
     observed = {"gmail.added": "change details " * 1_500}
-    monkeypatch.setattr(integration, "_authored_initial_states", lambda: {"sample": initial})
-    monkeypatch.setattr(integration, "_sample_for", lambda _: SimpleNamespace(task_name="sample", domain="finance"))
-    monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
-    monkeypatch.setattr(integration, "_client_for", lambda _: (SimpleNamespace(close=AsyncMock()), None))
     monkeypatch.setattr(
-        integration, "run_rollout_raw", AsyncMock(return_value={"completion": ["done"], "_end_state": end})
+        integration,
+        "_fixture_for",
+        lambda _: SimpleNamespace(
+            initial_state=lambda: initial,
+            scenario=SimpleNamespace(trace_capture="complete"),
+            sample=lambda: SimpleNamespace(task_name="sample", domain="finance"),
+        ),
+    )
+    monkeypatch.setattr(integration, "_candidate_root", lambda: tmp_path)
+    monkeypatch.setattr(integration, "_model_for", lambda _: (integration.ModelSpec(), None))
+    monkeypatch.setattr(
+        integration,
+        "run_rollout_raw",
+        AsyncMock(
+            return_value={"completion": ["done"], "_end_state": end, "_grading_state": context["grading_state"]}
+        ),
     )
     monkeypatch.setattr(ServiceDiffs, "to_output", lambda _: observed)
 
@@ -348,7 +373,14 @@ def test_negative_alias_and_large_unicode_diagnostics_are_bounded() -> None:
     }
     world = WorldState(
         gmail={
-            "messages": [{"to": ["a@example.com"], "label_ids": ["SENT"], "body_plain": "forbidden " + "界" * 10000}]
+            "messages": [
+                {
+                    "to": ["a@example.com"],
+                    "label_ids": ["SENT"],
+                    "subject": "Diagnostic test",
+                    "body_plain": "forbidden " + "界" * 10000,
+                }
+            ]
         }
     )
     with capture_assertion_returns(world, [assertion]) as events:
@@ -422,3 +454,35 @@ def test_failure_summary_total_size_is_bounded_with_many_unicode_observations() 
     )
     assert len(message.encode("utf-8")) <= 6_000 and "diagnostic truncated" in message
     assert "Partial diagnostic:" in message and "overall failure" in message
+
+
+@pytest.mark.parametrize("initial", [None, "unchanged", "correct"])
+@pytest.mark.parametrize("correct", [False, True])
+@pytest.mark.parametrize("flags", [{}, {"excluded": False}, {"excluded": True}, {"scored": False, "excluded": False}])
+def test_reported_exclusions_match_pi_rubric(initial, correct, flags):
+    from automationbench.rubric import partial_credit
+
+    from automationbench_skills.data import load_samples
+    from automationbench_skills.grading_state import assertion_outcomes
+
+    sample = next(s for s in load_samples() if s.task_name == "simple.email_sf_contact_phone_update")
+    world = WorldState(**sample.info["initial_state"])
+    initial_world = world.model_copy(deep=True) if initial else None
+    if initial == "correct":
+        initial_world.salesforce.contacts[0].phone = "+1-555-0101"
+    if correct:
+        world.salesforce.contacts[0].phone = "+1-555-0101"
+    assertions = [
+        {**sample.info["assertions"][0], **flags},
+        {"type": "gmail_message_not_sent_to", "to": "excluded@example.com", **flags},
+    ]
+    outcomes = assertion_outcomes(world, assertions, initial_world)
+    scored = [o for o in outcomes if not o["excluded"]]
+    reported_score = sum(o["passed"] for o in scored) / len(scored) if scored else 0.0
+    assert reported_score == partial_credit(
+        {
+            "info": {"assertions": assertions},
+            "world": world,
+            "initial_state": initial_world.model_dump(mode="json") if initial_world else {},
+        }
+    )

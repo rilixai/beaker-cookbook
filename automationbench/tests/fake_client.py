@@ -1,69 +1,71 @@
-"""Hermetic test helpers: a scripted verifiers Client that never touches the
-network. Each ScriptedClient instance replays a fixed sequence of assistant
-turns (optionally with tool calls); the rollout, tool execution, state reset,
-and rubric scoring all run for real in-process."""
+"""Scripted Chat Completions endpoint for native-runtime tests (no model charges)."""
 
 from __future__ import annotations
 
+import asyncio
 import json
-import time
-from typing import Any
 
-from verifiers.clients import Client
-from verifiers.legacy.types import Response, ResponseMessage, ToolCall, Usage
+from aiohttp import web
 
 
-class ScriptedClient(Client):
-    """Replays scripted assistant turns; appends a final plain 'done' turn if
-    the script runs out."""
+class ScriptedEndpoint:
+    def __init__(self, turns: list[dict]) -> None:
+        self.turns = turns
+        self.requests: list[dict] = []
+        self.authorizations: list[str | None] = []
 
-    def __init__(self, turns: list[dict[str, Any]] | None = None) -> None:
-        super().__init__(client_or_config=object())
-        self.turns = list(turns or [])
-        self.calls: list[Any] = []
+    async def __aenter__(self):
+        app = web.Application()
+        app.router.add_post("/v1/chat/completions", self.respond)
+        self.runner = web.AppRunner(app)
+        await self.runner.setup()
+        site = web.TCPSite(self.runner, "127.0.0.1", 0)
+        await site.start()
+        self.url = f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/v1"
+        return self
 
-    def setup_client(self, config: Any) -> Any:
-        return object()
+    async def __aexit__(self, *args):
+        await self.runner.cleanup()
 
-    async def to_native_tool(self, tool: Any) -> Any:
-        return tool
-
-    async def to_native_prompt(self, messages: Any) -> tuple[Any, dict]:
-        return messages, {}
-
-    async def raise_from_native_response(self, response: Any) -> None:
-        return None
-
-    async def from_native_response(self, response: Any) -> Response:
-        return response
-
-    async def close(self) -> None:
-        return None
-
-    async def get_native_response(
-        self,
-        prompt: Any,
-        model: str,
-        sampling_args: Any,
-        tools: Any = None,
-        **kwargs: Any,
-    ) -> Response:
-        self.calls.append({"prompt": prompt, "tools": tools, "sampling_args": sampling_args})
-        turn = self.turns.pop(0) if self.turns else {"content": "done"}
-        tool_calls = [
-            ToolCall(id=f"call_{i}", name=tc["name"], arguments=json.dumps(tc.get("arguments", {})))
-            for i, tc in enumerate(turn.get("tool_calls", []))
+    async def respond(self, request):
+        body = await request.json()
+        index = len(self.requests)
+        self.requests.append(body)
+        self.authorizations.append(request.headers.get("Authorization"))
+        turn = self.turns[index] if index < len(self.turns) else {"content": "Done"}
+        if "status" in turn:
+            return web.json_response({"error": {"message": "scripted provider error"}}, status=turn["status"])
+        await asyncio.sleep(turn.get("delay", 0))
+        message = {"role": "assistant", "content": turn.get("content")}
+        for key in ("reasoning", "reasoning_content", "reasoning_details"):
+            if key in turn:
+                message[key] = turn[key]
+        if calls := turn.get("tool_calls"):
+            message["tool_calls"] = [
+                {
+                    "index": n,
+                    "id": f"call-{index}-{n}",
+                    "type": "function",
+                    "function": {"name": call["name"], "arguments": json.dumps(call["arguments"])},
+                }
+                for n, call in enumerate(calls)
+            ]
+        common = {"id": f"reply-{index}", "object": "chat.completion.chunk", "created": 1, "model": body["model"]}
+        chunks = [
+            {**common, "choices": [{"index": 0, "delta": message, "finish_reason": None}]},
+            {
+                **common,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": turn.get("finish_reason", "tool_calls" if calls else "stop"),
+                    }
+                ],
+                "usage": turn.get("usage", {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
+            },
         ]
-        message = ResponseMessage(
-            content=turn.get("content"),
-            tool_calls=tool_calls or None,
-            finish_reason="tool_calls" if tool_calls else "stop",
-            is_truncated=False,
-        )
-        return Response(
-            id=f"scripted-{len(self.calls)}",
-            created=int(time.time()),
-            model=model,
-            usage=Usage(prompt_tokens=1, reasoning_tokens=0, completion_tokens=1, total_tokens=2),
-            message=message,
+        return web.Response(
+            text="".join("data: " + json.dumps(c) + "\n\n" for c in chunks) + "data: [DONE]\n\n",
+            content_type="text/event-stream",
         )

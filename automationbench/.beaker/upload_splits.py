@@ -17,12 +17,12 @@ from pathlib import Path
 
 import yaml
 
-from automationbench_skills.data.tasks import PUBLIC_DOMAINS, Sample, load_split
+from automationbench_skills.data.tasks import BENCHMARK_DOMAINS, PI_COMMIT, Sample, load_split
 
 
 TRAIN_PER_DOMAIN = 6
 TEST_PER_DOMAIN = 3
-DATASET_NAME = "automationbench-skills-quickstart"
+DATASET_NAME = "automationbench-pi-skills-quickstart"
 BEAKER_YAML = Path(__file__).resolve().parent / "beaker.yaml"
 
 
@@ -47,7 +47,7 @@ def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
     for sample in load_split(split):
         by_domain[sample.domain].append(sample)
     rows: list[dict[str, object]] = []
-    for domain in PUBLIC_DOMAINS:
+    for domain in BENCHMARK_DOMAINS:
         for sample in by_domain[domain][:per_domain]:
             rows.append(
                 {
@@ -60,7 +60,11 @@ def _take_per_domain(split: str, per_domain: int) -> list[dict[str, object]]:
                     # case; ``score_case`` evaluates them against the end state
                     # and emits one Check per assertion.
                     "expected": {"assertions": sample.info["assertions"]},
-                    "metadata": {"domain": domain, "source_split": split},
+                    "metadata": {
+                        "domain": domain,
+                        "source_split": split,
+                        "benchmark_commit": PI_COMMIT,
+                    },
                     "group_key": domain,
                 }
             )

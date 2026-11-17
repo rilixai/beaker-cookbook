@@ -1,47 +1,26 @@
-"""Beaker repository Integration for AutomationBench skills.
+"""Beaker integration for AutomationBench skills.
 
-The candidate is the live ``skills/`` tree and the agent's system prompt,
-``prompts/system.md``. Evaluation policy stays here: load a frozen-split task
-by name, run the harness ``run_one`` path, and score the benchmark's
-deterministic assertion metrics.
+Load each dataset row's frozen task, run the candidate, and score with PI's
+assertions from ``expected``. Evaluation policy stays in this integration.
 
-Contract: the dataset row's ``expected`` holds the task's assertion list
-(``{"assertions": [...]}``), ``run_case`` exposes bounded app changes as the
-observed output and reports the final world state separately in
-``CaseResult.context["end_state"]``. ``score_case``
-runs the benchmark's own ``partial_credit`` rubric against that state,
-emitting one ``Check`` per assertion so the optimizer sees which requirements
-failed.
+``run_case`` returns bounded app changes for display and the full world in
+``CaseResult.context["end_state"]``. Spreadsheet write history travels in
+``context["grading_state"]`` and is restored before ``score_case`` applies PI's
+``partial_credit`` rubric. Final cell values alone cannot recover write history.
 
-Assertions reference simulated records by opaque id (``"contact_id":
-"003xx000004MNO1"``); the scorer resolves those against the initial and end
-world state so each check reads as ``salesforce_campaign_member_exists ·
-contact_id=David Park · campaign_id=Q1 Product Launch Webinar`` rather than a
-dict of ids. These Checks verify conditions, rather than compare field values:
-their complete parameters are preserved in ``description``, with no
-``expected``/``predicted`` pair. Failed conditions carry bounded readable summaries
-of comparisons and evaluator observations in ``message``, captured during trusted scoring.
-The app diff is shown once, never repeated on individual Checks.
-
-Model calls are traced by subclassing the verifiers client (see
-``_TracedChatCompletionsClient`` and ``_TracedAnthropicClient``); the verifiers
-rollout is what talks to the model, so there is no framework integration to
-enable here.
+Each assertion produces a Check with its parameters and available grading
+observations. The app diff is displayed once per case.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import AsyncIterator, Mapping
 from functools import cache
 from pathlib import Path
 from typing import Any
 
-import verifiers as vf
-from anthropic import AsyncAnthropic
 from assertion_diagnostics import capture_assertion_returns, failure_trace
-from automationbench.clients import StreamingAnthropicClient
 from automationbench.domains import get_combined_dataset
 from automationbench.rubric import partial_credit
 from automationbench.rubric.registry import AssertionRegistry
@@ -62,31 +41,25 @@ from beaker import (
     repository,
 )
 from beaker.sdk.utils import to_json_safe
-from beaker.tracing import current_trace
-from openai import AsyncOpenAI
-from pydantic import BaseModel, Field, field_validator
-from verifiers.clients import Client, OpenAIChatCompletionsClient
-from verifiers.legacy.utils.error_utils import error_from_data, is_error_data
-from verifiers.types import ClientConfig
+from case_fixture import PI_COMMIT, CaseFixture
+from pydantic import BaseModel, Field, model_validator
 from world_diff import ServiceDiffs, service_for
 
-from automationbench_skills.clients import DEFAULT_MODEL_REQUEST_TIMEOUT, CostTrackingChatCompletionsClient
-from automationbench_skills.data.tasks import Sample, load_samples
+from automationbench_skills.data.tasks import BENCHMARK_DOMAINS
+from automationbench_skills.grading_state import assertion_outcomes, restore_grading_state
 from automationbench_skills.prompts import load_system_prompt
 from automationbench_skills.runner import (
     DEFAULT_MAX_STEPS,
-    TIMEOUT_GRACE_SECONDS,
     ModelSpec,
     run_rollout_raw,
 )
+from automationbench_skills.scenario_clock import scenario_time
 
 
 # Hill-climb mostly on assertion partial credit, with strict task completion
 # as a smaller term so fully-correct runs are preferred.
 FIELD_WEIGHTS = {"partial_credit": 0.8, "task_completed_correctly": 0.2}
 DEFAULT_TIMEOUT_SECONDS = 2400.0
-# The scored benchmark domains (``upload_splits.py`` draws from the same set).
-_PUBLIC_DOMAINS = ("sales", "marketing", "operations", "support", "finance", "hr")
 # Mirrors beaker_runtime.optimization.evaluation.repository.protocol's
 # MAX_EXECUTION_PAYLOAD_BYTES (not exposed by beaker-sdk 0.6.4).
 _RESULT_MAX_BYTES = 8 * 1024 * 1024
@@ -103,24 +76,35 @@ class TaskRow(BaseModel):
     expected: dict[str, JsonValue]
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
-    @field_validator("expected")
-    @classmethod
-    def _assertions_present(cls, expected: dict[str, JsonValue]) -> dict[str, JsonValue]:
-        assertions = expected.get("assertions")
-        if not isinstance(assertions, list) or not all(
-            isinstance(a, Mapping) and isinstance(a.get("type"), str) for a in assertions
-        ):
-            raise ValueError(
-                "expected.assertions must be a list of assertion specs with a 'type' "
-                "(re-run .beaker/upload_splits.py to build the dataset)"
-            )
-        return expected
+    runtime_fixture: CaseFixture | None = None
 
-    def task_name(self) -> str:
+    @model_validator(mode="after")
+    def validate_fixture(self) -> TaskRow:
         task_name = str(self.input.get("task_name") or self.id).strip()
-        if not task_name:
-            raise ValueError("input.task_name must be non-empty")
-        return task_name
+        if self.runtime_fixture is None:
+            if "task_sha256" in self.metadata or "scenario_sha256" in self.metadata:
+                raise ValueError("Frozen dataset row is missing runtime_fixture")
+            if self.metadata.get("benchmark_commit") != PI_COMMIT:
+                raise ValueError("Dataset benchmark commit does not match this PI recipe; re-upload the dataset")
+            # Resolve standard rows from the trusted dependency. Frozen pilot rows
+            # retain their own task contents, including pre-correction examples.
+            task = _published_tasks().get(task_name)
+            if task is None:
+                raise ValueError(f"Unknown AutomationBench task_name: {task_name!r}")
+            fixture = CaseFixture.model_validate(
+                {
+                    "task": task,
+                    "scenario": {
+                        "source": "pi",
+                        "fallback_time": scenario_time(task["prompt"], task["info"]["initial_state"]),
+                    },
+                }
+            )
+            fixture.validate_reference(task_name, self.expected, {**self.metadata, **fixture.hashes()})
+            self.runtime_fixture = fixture
+        else:
+            self.runtime_fixture.validate_reference(task_name, self.expected, self.metadata)
+        return self
 
 
 class TaskSetup(RunSetup[TaskRow]):
@@ -128,90 +112,13 @@ class TaskSetup(RunSetup[TaskRow]):
 
     async def load_cases(self, row: TaskRow, *, runtime: SetupRuntime) -> AsyncIterator[Case]:
         del runtime
+        assert row.runtime_fixture is not None  # Validated or resolved by TaskRow.
         yield Case(
             id=row.id,
-            input={**row.input, "task_name": row.task_name()},
+            input={**row.input, "runtime_fixture": row.runtime_fixture.model_dump(mode="json")},
             expected=row.expected,
-            metadata=row.metadata,
+            metadata={**row.metadata, "runtime_benchmark_commit": PI_COMMIT, "tool_interface": "pi_api"},
         )
-
-
-class _SpanPerRequest(OpenAIChatCompletionsClient):
-    """One Beaker ``model_call`` span per provider request.
-
-    Sits below ``CostTrackingChatCompletionsClient`` in the MRO so its retry
-    loop calls into here on every attempt: a retried request (empty response,
-    5xx, dropped connection) gets its own span with its own usage or error,
-    instead of only the final attempt being recorded.
-    """
-
-    async def get_native_response(
-        self, prompt: Any, model: str, sampling_args: Any, tools: Any = None, **kwargs: Any
-    ) -> Any:
-        with current_trace().model_call(
-            operation="chat.completions",
-            provider="openai",
-            model=str(model),
-            input_messages=prompt,
-        ) as call:
-            response = await super().get_native_response(prompt, model, sampling_args, tools, **kwargs)
-            call.output(to_json_safe(response))
-            return response
-
-
-class _TracedChatCompletionsClient(CostTrackingChatCompletionsClient, _SpanPerRequest):
-    """Same client the harness already accepts, with Beaker spans on each request.
-
-    verifiers drives the agent loop itself and takes the client object as a
-    parameter, so Beaker's LiteLLM/OpenAI/Anthropic integrations never see the
-    calls. Subclassing keeps the exact type the harness checks for; each span
-    carries the full message list for that turn (tool calls and simulated tool
-    results included, since they come back as messages) and the provider
-    response, which is where the run's token usage and model-call counts come
-    from. Only the candidate's calls are traced; the assertion rubric is
-    deterministic and makes none.
-    """
-
-
-class _TracedAnthropicClient(StreamingAnthropicClient):
-    """Trace each Messages request, including the streaming client's retries."""
-
-    async def get_native_response(
-        self, prompt: Any, model: str, sampling_args: Any, tools: Any = None, **kwargs: Any
-    ) -> Any:
-        system = kwargs.get("system")
-        input_messages = [{"role": "system", "content": system}, *prompt] if system else prompt
-        with current_trace().model_call(
-            operation="messages",
-            provider="anthropic",
-            model=str(model),
-            input_messages=input_messages,
-        ) as call:
-            response = await super().get_native_response(prompt, model, sampling_args, tools, **kwargs)
-            call.output(to_json_safe(response))
-            return response
-
-
-@cache
-def _samples_by_name() -> dict[str, Sample]:
-    return {sample.task_name: sample for sample in load_samples()}
-
-
-@cache
-def _authored_initial_states() -> dict[str, dict[str, Any]]:
-    """``task_name -> initial_state`` straight from the pinned benchmark package.
-
-    ``partial_credit`` excludes assertions already satisfied in the initial
-    world, so the scorer reads that world from the trusted dependency rather
-    than through the optimizer-editable ``src/`` loader ``run_case`` uses.
-    """
-    states: dict[str, dict[str, Any]] = {}
-    for row in get_combined_dataset(list(_PUBLIC_DOMAINS)):
-        info = row["info"]
-        if isinstance(info, str):
-            info = json.loads(info)
-        states[str(info["task_name"])] = dict(info.get("initial_state") or {})
-    return states
 
 
 def _candidate_root() -> Path:
@@ -222,13 +129,22 @@ def _candidate_root() -> Path:
     return Path.cwd()
 
 
-def _sample_for(case_input: JsonValue) -> Sample:
+@cache
+def _published_tasks() -> dict[str, dict[str, Any]]:
+    """Read the pinned dependency, independently of optimizer-editable loaders."""
+    tasks = {}
+    for row in get_combined_dataset(BENCHMARK_DOMAINS):
+        info = json.loads(row["info"]) if isinstance(row["info"], str) else row["info"]
+        tasks[info["task_name"]] = {**row, "info": info}
+    return tasks
+
+
+def _fixture_for(case_input: JsonValue) -> CaseFixture:
+    """Execution and scoring use only the fixture frozen during setup."""
     payload = case_input if isinstance(case_input, Mapping) else {}
-    task_name = str(payload.get("task_name") or "").strip()
-    sample = _samples_by_name().get(task_name)
-    if sample is None:
-        raise KeyError(f"unknown AutomationBench task_name {task_name!r}")
-    return sample
+    if payload.get("runtime_fixture") is None:
+        raise ValueError("Case is missing runtime_fixture; load the dataset through TaskSetup first")
+    return CaseFixture.model_validate(payload["runtime_fixture"])
 
 
 def default_model_spec() -> ModelSpec:
@@ -236,53 +152,21 @@ def default_model_spec() -> ModelSpec:
 
     Pinned here rather than taken from ``ModelSpec()`` so that changing the
     app's (and CLI's) default model never changes what Beaker optimizes. Chat
-    Completions and Anthropic Messages requests are both traced.
+    Completions requests use the native runtime and Beaker tracing.
     """
     return ModelSpec(name="gpt-5.6-luna", api="chat_completions", reasoning_effort="medium")
 
 
-def _client_for(runtime: RolloutRuntime[Any]) -> tuple[Client, ModelSpec]:
-    """The model the run selected, through Beaker's inference gateway; else the app's own defaults.
-
-    A run started with a model choice (model-swap runs) resolves to a gateway
-    endpoint, a run-scoped token and a canonical model name; the gateway applies
-    the run's reasoning effort, so none is sent. With no selection the app's
-    default model and ``OPENAI_API_KEY`` are used as-is, which inside a hosted
-    rollout is Beaker's provider proxy. No key is ever asked of the user.
-    """
+def _model_for(runtime: RolloutRuntime[Any]) -> tuple[ModelSpec, str | None]:
     if runtime.model:
         target = inference_target(runtime)
-        model = ModelSpec(name=target.model, base_url=target.base_url, api="chat_completions", reasoning_effort=None)
-        api_key: str | None = target.api_key
-    else:
-        model = default_model_spec()
-        api_key = os.environ.get(model.effective_api_key_var())
-    sdk = ClientConfig(api_key_var=model.effective_api_key_var())
-    if not runtime.model and model.resolved_api() == "anthropic":
-        client = AsyncAnthropic(
-            api_key=api_key, base_url=model.effective_base_url(), max_retries=sdk.max_retries, timeout=sdk.timeout
-        )
-        return _TracedAnthropicClient(client), model
-    client = AsyncOpenAI(
-        api_key=api_key, base_url=model.effective_base_url(), max_retries=0, timeout=DEFAULT_MODEL_REQUEST_TIMEOUT
-    )
-    return _TracedChatCompletionsClient(client), model
-
-
-def _rollout_error(raw: Any) -> BaseException | None:
-    # ``run_rollout`` returns the serialized ``ErrorData`` mapping, not the
-    # exception; rebuild the most specific ``vf.Error`` from its error chain.
-    if raw is None:
-        return None
-    if isinstance(raw, BaseException):
-        return raw
-    if is_error_data(raw):
-        return error_from_data(raw)
-    return vf.Error(str(raw))
+        return ModelSpec(name=target.model, base_url=target.base_url, reasoning_effort=None), target.api_key
+    return default_model_spec(), None
 
 
 async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> CaseResult:
-    sample = _sample_for(case_input)
+    fixture = _fixture_for(case_input)
+    sample = fixture.sample()
     root = _candidate_root()
     skills_dir = root / "skills"
     prompts_dir = root / "prompts"
@@ -296,66 +180,57 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             "system_prompt_chars": len(system_prompt or ""),
         },
     ) as stage:
-        client, model = _client_for(runtime)
+        model, api_key = _model_for(runtime)
         try:
-            # Same execution path as the app's own ``run_one_async``; only the
-            # client (traced, run-scoped) and the scoring below are Beaker's.
-            # The env stops its own loop at ``DEFAULT_TIMEOUT_SECONDS`` and
-            # scores the world as the agent left it; the helper's watchdog only
-            # catches a rollout stuck outside that loop, which leaves nothing
-            # to grade.
+            # The native runner is shared with the CLI. The gateway credential
+            # stays in the host client and is not serialized into the task.
             output = await run_rollout_raw(
                 sample,
                 model=model,
-                client=client,
+                api_key=api_key,
                 skills_dir=skills_dir,
                 prompts_dir=prompts_dir,
+                toolset="api",
                 max_steps=DEFAULT_MAX_STEPS,
                 timeout=DEFAULT_TIMEOUT_SECONDS,
             )
         except TimeoutError as exc:
-            timeout = f"timeout after {DEFAULT_TIMEOUT_SECONDS + TIMEOUT_GRACE_SECONDS}s"
+            timeout = "Native runtime timed out"
             stage.output({"error": timeout})
             raise RetryableCaseError(timeout) from exc
-        finally:
-            await client.close()
 
         completion = output.get("completion") or []
-        result_error = _rollout_error(output.get("error"))
+        result_error = output.get("error")
         end_state = output.get("_end_state")
-        # verifiers swallows rollout exceptions into ``state["error"]`` and
-        # still grades the world as the agent left it. A model, provider, or
-        # infrastructure failure, even one partway through the rollout, is not
-        # the candidate's fault, so the case is re-run rather than scored on
-        # what the agent did before it; an agent-side failure (bad tool call,
-        # overlong prompt) is the candidate's fault and keeps its earned score.
-        if isinstance(result_error, vf.ModelError | vf.InfraError):
-            message = f"{type(result_error).__name__}: {result_error}"
+        # Native provider/runtime failures ask Beaker to retry the case.
+        if result_error is not None:
+            message = f"{result_error.type}: {result_error.message}"
             stage.output({"error": message})
-            raise RetryableCaseError(message) from result_error
-        # The client retries provider failures for longer than the env's time
-        # budget, so a run whose every request failed ends by the env's own
-        # timeout with no completed turn (``completion`` is empty) and an
-        # untouched world: the agent never acted.
+            raise RetryableCaseError(message)
+        # An untouched world after a stalled first turn is not a completed evaluation.
         if output.get("stop_condition") == "timeout_reached" and not completion:
             message = "timed out before the first completed model turn"
             stage.output({"error": message})
             raise RetryableCaseError(message)
 
-        error = None if result_error is None else f"{type(result_error).__name__}: {result_error}"
+        error = None if result_error is None else f"{result_error.type}: {result_error.message}"
         # The scorer needs the error and the end state; the model/tool turns are
-        # already in the trace via the traced Chat Completions or Anthropic client.
+        # already in the trace via the native runtime adapter.
         stage.output({"error": error, "messages": len(completion)})
         observed = None
         if isinstance(end_state, Mapping):
-            initial = _authored_initial_states()[sample.task_name]
+            initial = fixture.initial_state()
             initial_world = WorldState(**initial) if initial else None
             observed = ServiceDiffs(initial, initial_world, end_state).to_output()
         context: dict[str, JsonValue] = {
             "task_name": sample.task_name,
             "domain": sample.domain,
+            "runtime_benchmark_commit": PI_COMMIT,
+            "tool_interface": "pi_api",
+            "trace_capture": fixture.scenario.trace_capture,
             "error": error,
             "end_state": to_json_safe(end_state),
+            "grading_state": to_json_safe(output.get("_grading_state")),
         }
         display = _budget_output(to_json_safe(observed), context)
         return CaseResult(output=display, output_kind="record" if display is not None else "none", context=context)
@@ -462,7 +337,7 @@ def _check(
             if part
         )
     if excluded:
-        message = (
+        message = outcome.get("exclusion_reason") or (
             "excluded from scoring by the task author"
             if params.get("scored") is False or params.get("excluded") is True
             else "already satisfied in the initial state; excluded from scoring"
@@ -499,19 +374,14 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
     context = result.context
     error = None if context.get("error") is None else str(context["error"])
     end_state = context.get("end_state")
-    task_name = str((case.input if isinstance(case.input, Mapping) else {}).get("task_name") or case.id).strip()
-    if task_name not in _authored_initial_states():
-        raise KeyError(f"unknown AutomationBench task_name {task_name!r}")
-    initial_state = _authored_initial_states()[task_name]
+    initial_state = _fixture_for(case.input).initial_state()
     entities = _entity_index(initial_state, end_state if isinstance(end_state, Mapping) else {})
     initial_world = WorldState(**initial_state) if initial_state else None
-    held_initially = [
-        initial_world is not None and bool(AssertionRegistry.check(initial_world, a)) for a in assertions
-    ]
     world: WorldState | None = None
     diagnostics: Mapping[int, Any] = {}
     if isinstance(end_state, Mapping):
         world = WorldState(**end_state)
+        restore_grading_state(world, context.get("grading_state"))
         state: dict[str, Any] = {
             "info": {"assertions": assertions},
             "world": world,
@@ -519,7 +389,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
         }
         with capture_assertion_returns(world, assertions) as diagnostics:
             partial = float(partial_credit(state))
-        outcomes: list[Mapping[str, Any]] = list(state.get("_assertion_results") or [])
+        outcomes = assertion_outcomes(world, assertions, initial_world)
     elif not context:
         # Beaker sheds ``context`` when a case result is over its wire limit;
         # an absent context is not a failed case.
@@ -531,6 +401,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
             {
                 "type": a["type"],
                 "passed": False,
+                "held_initially": initial_world is not None and bool(AssertionRegistry.check(initial_world, a)),
                 "excluded": False,
                 "params": {k: v for k, v in a.items() if k != "type"},
             }
@@ -548,13 +419,13 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
                 outcome,
                 error=error,
                 entities=entities,
-                held_initially=held,
+                held_initially=outcome["held_initially"],
                 world=world,
                 diagnostic=failure_trace(assertion, diagnostics.get(id(assertion), ()))
                 if world is not None and not outcome.get("passed")
                 else None,
             )
-            for outcome, held, assertion in zip(outcomes, held_initially, assertions, strict=True)
+            for outcome, assertion in zip(outcomes, assertions, strict=True)
         ),
     )
 
