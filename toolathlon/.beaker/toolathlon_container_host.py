@@ -192,6 +192,10 @@ def main() -> None:
     task_root = CASE / "artifacts/finalpool" / task
     trajectory = json.loads((task_root / "traj_log.json").read_text())
     evaluation = json.loads((task_root / "eval_res.json").read_text())
+    # Upstream grades only a SUCCESS agent status and leaves pass null otherwise
+    # (e.g. max_turns_reached); a finished non-success agent is a failed task.
+    if evaluation.get("pass") is None and trajectory.get("status") != "success":
+        evaluation = {**evaluation, "pass": False}
     if type(evaluation.get("pass")) is not bool or evaluation.get("failure") in (
         "evaluation_error",
         "log_file_not_found",
