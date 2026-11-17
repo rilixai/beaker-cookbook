@@ -12,12 +12,11 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
-from openai import AsyncOpenAI
+from typesafe_sdk import AsyncTypeSafeClient, Choice
 
-from clinc150_router.agent import ChatModel, route, system_prompt
+from clinc150_router.agent import question, route
 from clinc150_router.contracts import (
     DEFAULT_MODEL,
-    DEFAULT_REASONING_EFFORT,
     OUT_OF_SCOPE,
     REQUEST_TIMEOUT_SECONDS,
     Prediction,
@@ -85,11 +84,11 @@ def summarize(outcomes: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-async def _evaluate_one(row: Row, *, chat: ChatModel, prompt: str) -> dict[str, Any]:
+async def _evaluate_one(row: Row, *, client: AsyncTypeSafeClient, routing_question: Choice) -> dict[str, Any]:
     outcome: dict[str, Any] = {"id": row.id, "expected": row.expected.intent}
     started = time.perf_counter()
     try:
-        prediction = await route(row.input.text, chat=chat, prompt=prompt, trace=NoTrace())
+        prediction = await route(row.input.text, client=client, routing_question=routing_question, trace=NoTrace())
         outcome["prediction"] = prediction.model_dump(mode="json")
     except Exception as exc:
         # Keep errors in the denominator. Do not print provider response
@@ -99,27 +98,24 @@ async def _evaluate_one(row: Row, *, chat: ChatModel, prompt: str) -> dict[str, 
     return outcome
 
 
-async def evaluate(args: argparse.Namespace, chat: ChatModel | None = None) -> dict[str, Any]:
+async def evaluate(args: argparse.Namespace, client: AsyncTypeSafeClient | None = None) -> dict[str, Any]:
     rows = load_rows(args.data / SPLIT_FILES[args.split])
     if args.limit is not None:
         rows = rows[: args.limit]
-    prompt = system_prompt(args.prompts)
+    routing_question = question(args.prompts)
     slots = asyncio.Semaphore(args.concurrency)
 
-    async def bounded(row: Row, model: ChatModel) -> dict[str, Any]:
+    async def bounded(row: Row, active_client: AsyncTypeSafeClient) -> dict[str, Any]:
         async with slots:
-            return await _evaluate_one(row, chat=model, prompt=prompt)
+            return await _evaluate_one(row, client=active_client, routing_question=routing_question)
 
-    client_context = AsyncOpenAI(timeout=REQUEST_TIMEOUT_SECONDS) if chat is None else nullcontext(chat.client)
-    async with client_context as client:
-        chat = chat or ChatModel(
-            client=client, provider="openai", model=DEFAULT_MODEL, reasoning_effort=DEFAULT_REASONING_EFFORT
-        )
-        outcomes = await asyncio.gather(*(bounded(row, chat) for row in rows))
+    client_context = AsyncTypeSafeClient(timeout=REQUEST_TIMEOUT_SECONDS) if client is None else nullcontext(client)
+    async with client_context as active_client:
+        outcomes = await asyncio.gather(*(bounded(row, active_client) for row in rows))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("".join(json.dumps(outcome) + "\n" for outcome in outcomes))
     metrics = summarize(outcomes)
-    summary = {"model": chat.model, "reasoning_effort": chat.reasoning_effort, "split": args.split, **metrics}
+    summary = {"model": DEFAULT_MODEL, "split": args.split, **metrics}
     args.output.with_suffix(".summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     return metrics
 
@@ -137,7 +133,7 @@ def main() -> None:
     prep = commands.add_parser("prepare", help="Download and verify the frozen public dataset")
     prep.add_argument("--output", type=Path, required=True)
     prep.add_argument("--cache", type=Path, default=Path.home() / ".cache/clinc150-router" / "source-v1")
-    run = commands.add_parser("evaluate", help="Call the chat model; uses OPENAI_API_KEY and incurs API charges")
+    run = commands.add_parser("evaluate", help="Call the decision model; uses TYPESAFE_API_KEY and incurs API charges")
     run.add_argument("--data", type=Path, required=True)
     run.add_argument("--split", choices=("train", "validation", "test"), default="validation")
     run.add_argument("--prompts", type=Path, default=Path("prompts"))
