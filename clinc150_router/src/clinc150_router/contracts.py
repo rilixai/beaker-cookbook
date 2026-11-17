@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 LABELS: tuple[str, ...] = tuple(json.loads(Path(__file__).with_name("labels.json").read_text()))
 OUT_OF_SCOPE = "oos"
-DEFAULT_MODEL = "gpt-5.6-luna"
+DEFAULT_MODEL = "gpt-6-luna"
 DEFAULT_REASONING_EFFORT: Final = "low"
 REQUEST_TIMEOUT_SECONDS = 60.0
 
