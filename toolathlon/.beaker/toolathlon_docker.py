@@ -65,8 +65,8 @@ def prepare_docker(cache: Path) -> str:
     with (cache / "docker-setup.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
-            docker("info", timeout=10)
-        except RuntimeError:
+            docker("info", timeout=30)
+        except (RuntimeError, subprocess.TimeoutExpired):
             if os.geteuid() != 0:
                 raise RuntimeError(
                     "Docker is unavailable. Start Docker or use a Beaker VM sandbox with dockerd."
@@ -78,9 +78,9 @@ def prepare_docker(cache: Path) -> str:
             event(f"Outer dockerd started pid={process.pid}; waiting for readiness")
             for _ in range(90):
                 try:
-                    docker("info", timeout=5)
+                    docker("info", timeout=30)
                     break
-                except RuntimeError:
+                except (RuntimeError, subprocess.TimeoutExpired):
                     if process.poll() is not None:
                         raise RuntimeError(
                             "dockerd failed; the containerized runner needs a VM sandbox: "
@@ -88,7 +88,7 @@ def prepare_docker(cache: Path) -> str:
                         ) from None
                     time.sleep(1)
             else:
-                raise RuntimeError("Docker daemon did not become ready in 90 seconds")
+                raise RuntimeError("Docker daemon did not become ready after 90 readiness checks")
         base = os.environ.get("TOOLATHLON_DOCKER_IMAGE", DEFAULT_IMAGE)
         if not re.fullmatch(r"[A-Za-z0-9_./:@+-]+", base):
             raise ValueError("Invalid TOOLATHLON_DOCKER_IMAGE")
@@ -361,15 +361,15 @@ def run_containerized_agent(
             return json.loads((output / "result.json").read_text())
         finally:
             try:
-                docker("stop", "--time", "8", name, timeout=10)
+                docker("stop", "--time", "8", name, timeout=60)
             except (RuntimeError, subprocess.TimeoutExpired):
                 pass
             try:
-                docker("inspect", "--format", "{{json .State}}", name, timeout=1)
+                docker("inspect", "--format", "{{json .State}}", name, timeout=10)
             except (RuntimeError, subprocess.TimeoutExpired):
                 pass
             try:
-                docker("rm", "--force", "--volumes", name, timeout=10)
+                docker("rm", "--force", "--volumes", name, timeout=120)
             except (RuntimeError, subprocess.TimeoutExpired):
                 pass
             signal.signal(signal.SIGTERM, previous)

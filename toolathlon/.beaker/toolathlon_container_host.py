@@ -17,6 +17,8 @@ from toolathlon_diagnostics import phase, snapshot
 
 ROOT = Path("/workspace")
 CASE = Path("/case")
+# A busy sandbox can take minutes to start a nested daemon.
+DOCKER_READY_SECONDS = 300
 
 
 def run(*args: str, timeout: int = 1800) -> None:
@@ -31,10 +33,14 @@ def wait_docker() -> None:
         # The official task uses host networking; provider aliases must reach
         # the outer bridge, rather than accidentally hitting this daemon.
         daemon = subprocess.Popen(["dockerd", "--bip", "172.30.0.1/16"], stdout=log, stderr=log)
-    for _ in range(90):
-        if subprocess.run(["docker", "info"], capture_output=True, timeout=5).returncode == 0:
-            run("docker", "version", timeout=10)
-            return
+    deadline = time.monotonic() + DOCKER_READY_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            if subprocess.run(["docker", "info"], capture_output=True, timeout=30).returncode == 0:
+                run("docker", "version", timeout=60)
+                return
+        except subprocess.TimeoutExpired:
+            pass
         if daemon.poll() is not None:
             break
         time.sleep(1)
