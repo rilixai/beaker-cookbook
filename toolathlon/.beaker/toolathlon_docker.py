@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -117,11 +118,52 @@ def prepare_docker(cache: Path) -> str:
         return tag
 
 
+def bridge_ipv4() -> str:
+    """Find a local bridge address even when a fresh daemon omits IPAM.Gateway."""
+    details = json.loads(docker("network", "inspect", "bridge"))[0]
+
+    def usable(value: str | None) -> bool:
+        try:
+            address = ipaddress.IPv4Address(value)
+            if address.is_unspecified or address.is_loopback or address.is_multicast:
+                return False
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind((str(address), 0))
+            return True
+        except (ValueError, OSError):
+            return False
+
+    for config in details.get("IPAM", {}).get("Config") or []:
+        gateway = config.get("Gateway")
+        if usable(gateway):
+            event(f"Docker bridge gateway={gateway} source=IPAM")
+            return gateway
+
+    # Docker can omit Gateway on its first boot although the bridge already has
+    # an address. Read that interface instead of guessing a subnet or using '*'.
+    interface = details.get("Options", {}).get("com.docker.network.bridge.name") or "docker0"
+    event(f"Docker bridge Gateway missing or unusable; reading IPv4 from {interface}")
+    result = subprocess.run(
+        [require_command("ip"), "-j", "-4", "address", "show", "dev", interface],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode:
+        raise RuntimeError(f"Cannot read Docker bridge interface {interface!r}: {result.stderr[-1000:]}")
+    for device in json.loads(result.stdout):
+        for address in device.get("addr_info", []):
+            gateway = address.get("local")
+            if address.get("family") == "inet" and usable(gateway):
+                event(f"Docker bridge gateway={gateway} source=interface:{interface}")
+                return gateway
+    raise RuntimeError(f"Docker bridge {interface!r} has no usable local IPv4 address; cannot start case relays")
+
+
 @contextmanager
 def network(output: Path) -> Iterator[tuple[list[str], dict[int, int]]]:
     """Relay this case's loopback services through free, unprivileged bridge ports."""
-    gateway = docker("network", "inspect", "bridge", "--format", "{{(index .IPAM.Config 0).Gateway}}")
-    event(f"Docker bridge gateway={gateway}")
+    gateway = bridge_ipv4()
     hosts, ports = [f"host.docker.internal:{gateway}"], set()
     for raw in Path("/etc/hosts").read_text().splitlines():
         fields = raw.split("#", 1)[0].split()

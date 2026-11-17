@@ -120,6 +120,12 @@ process groups are removed on completion or failure, and startup errors include
 socat's diagnostic output. The tracing entrypoint wraps the original prepared-agent
 phase only. No private proxy key or local `.env` is mounted into the Docker host.
 
+Relay setup validates the bridge IPv4 with a local bind. If Docker omits its
+`IPAM.Gateway` on first boot, it reads the actual IPv4 from the bridge interface
+(using Docker's configured interface name, or `docker0`). It never guesses a fixed
+IP or starts a relay with an empty address. The selected address and its source
+are recorded in the diagnostic logs.
+
 Scoring returns the official verdict and bounded diagnostic text without
 transferring the complete workspace through the case context. Missing
 results, failed bootstrap and evaluator infrastructure errors do not become
