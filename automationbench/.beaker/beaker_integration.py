@@ -127,7 +127,9 @@ class TaskSetup(RunSetup[TaskRow]):
     row_model = TaskRow
 
     async def load_cases(self, row: TaskRow, *, runtime: SetupRuntime) -> AsyncIterator[Case]:
-        del runtime
+        if not getattr(runtime, "model", None):
+            # Stop at setup, not in every case, if the agent's endpoint settings are incomplete.
+            endpoint_model_spec()
         yield Case(
             id=row.id,
             input={**row.input, "task_name": row.task_name()},
@@ -241,19 +243,63 @@ def default_model_spec() -> ModelSpec:
     return ModelSpec(name="gpt-5.6-luna", api="chat_completions", reasoning_effort="medium")
 
 
+# A run without a model choice can use a model on another OpenAI-compatible
+# endpoint, such as the You.com Inference Router. Set these on the agent:
+# AUTOMATIONBENCH_MODEL, AUTOMATIONBENCH_BASE_URL, AUTOMATIONBENCH_API_KEY_VAR
+# (the name of the variable that holds the key) and, optionally,
+# AUTOMATIONBENCH_REASONING_EFFORT.
+MODEL_ENV = "AUTOMATIONBENCH_MODEL"
+BASE_URL_ENV = "AUTOMATIONBENCH_BASE_URL"
+API_KEY_VAR_ENV = "AUTOMATIONBENCH_API_KEY_VAR"
+REASONING_EFFORT_ENV = "AUTOMATIONBENCH_REASONING_EFFORT"
+# An agent sends model calls back to back, so an endpoint's rate limit is hit in
+# bursts; retrying a turn is cheaper than re-running the whole case.
+ENDPOINT_MAX_MODEL_ATTEMPTS = 8
+
+
+def endpoint_model_spec() -> ModelSpec | None:
+    """The agent's endpoint model, or None when ``AUTOMATIONBENCH_MODEL`` is unset."""
+    name = os.environ.get(MODEL_ENV)
+    if not name:
+        return None
+    base_url = os.environ.get(BASE_URL_ENV)
+    key_var = os.environ.get(API_KEY_VAR_ENV)
+    if not base_url or not key_var:
+        raise ValueError(f"{MODEL_ENV} needs {BASE_URL_ENV} and {API_KEY_VAR_ENV} on the agent.")
+    if not os.environ.get(key_var):
+        raise ValueError(f"Set {key_var} on the agent to run {name}.")
+    return ModelSpec(
+        name=name,
+        base_url=base_url,
+        api_key_var=key_var,
+        api="chat_completions",
+        reasoning_effort=os.environ.get(REASONING_EFFORT_ENV) or "default",
+    )
+
+
 def _client_for(runtime: RolloutRuntime[Any]) -> tuple[Client, ModelSpec]:
     """The model the run selected, through Beaker's inference gateway; else the app's own defaults.
 
     A run started with a model choice (model-swap runs) resolves to a gateway
     endpoint, a run-scoped token and a canonical model name; the gateway applies
-    the run's reasoning effort, so none is sent. With no selection the app's
-    default model and ``OPENAI_API_KEY`` are used as-is, which inside a hosted
-    rollout is Beaker's provider proxy. No key is ever asked of the user.
+    the run's reasoning effort, so none is sent. With no selection, an agent with
+    ``AUTOMATIONBENCH_MODEL`` set calls that model on its endpoint with the
+    agent's own key; otherwise the app's default model and ``OPENAI_API_KEY``
+    are used as-is, which inside a hosted rollout is Beaker's provider proxy.
     """
     if runtime.model:
         target = inference_target(runtime)
         model = ModelSpec(name=target.model, base_url=target.base_url, api="chat_completions", reasoning_effort=None)
         api_key: str | None = target.api_key
+    elif (endpoint := endpoint_model_spec()) is not None:
+        # Calls go straight to the endpoint: Beaker records their tokens but not their cost.
+        openai = AsyncOpenAI(
+            api_key=os.environ[endpoint.api_key_var],
+            base_url=endpoint.base_url,
+            max_retries=0,
+            timeout=DEFAULT_MODEL_REQUEST_TIMEOUT,
+        )
+        return _TracedChatCompletionsClient(openai, max_attempts=ENDPOINT_MAX_MODEL_ATTEMPTS), endpoint
     else:
         model = default_model_spec()
         api_key = os.environ.get(model.effective_api_key_var())
