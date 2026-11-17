@@ -13,7 +13,7 @@ enum of the 151 IDs. An answer outside that set is recorded as an error and
 scored as wrong; it is never mapped to `oos`.
 
 Runs started with a model choice call that model through Beaker's inference
-gateway. Otherwise Beaker and the local CLI use `gpt-5.6-luna` with `low`
+gateway. Otherwise Beaker and the local CLI use `gpt-6-luna` with `low`
 reasoning effort, pinned in `src/clinc150_router/contracts.py`.
 
 Beaker gives each correct `oos` prediction 30 times the weight of a correct
@@ -80,7 +80,7 @@ Run offline tests with `BEAKER_AGENT_KEY= uv run python -m pytest -q`.
 
 ## Seed baseline
 
-Validation split (3,100 messages), `gpt-5.6-luna`, `low` effort:
+Validation split (3,100 messages), `gpt-6-luna`, `low` effort:
 
 | Metric | Value |
 |---|---|
