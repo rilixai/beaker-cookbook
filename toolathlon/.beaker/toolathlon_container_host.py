@@ -164,7 +164,9 @@ def main() -> None:
     config["global_task_config"].update(dump_path="/workspace/dumps", direct_to_dumps=True)
     for role in ("agent", "user"):
         config[role]["model"] = {"short_name": request["model"], "provider": "unified"}
-    (ROOT / "beaker_eval_config.json").write_text(json.dumps(config))
+    # The official script copies only a fixed file list (including scripts/)
+    # into the task container, which then reads this config.
+    (ROOT / "scripts/beaker_eval_config.json").write_text(json.dumps(config))
     if request.get("model_params"):
         (ROOT / "beaker_model_params.json").write_text(json.dumps(request["model_params"]))
         os.environ["TOOLATHLON_MODEL_PARAMS_FILE"] = str(ROOT / "beaker_model_params.json")
@@ -181,7 +183,7 @@ def main() -> None:
                 request["model"],
                 "unified",
                 str(request["max_steps"]),
-                "beaker_eval_config.json",
+                "scripts/beaker_eval_config.json",
                 request["image"],
             ],
             cwd=ROOT,
