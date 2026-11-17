@@ -48,7 +48,8 @@ this directory with `python -m pip install . ./vendor/tau2`.
 
 ## Models
 
-- **Agent:** without a model choice, `gpt-5.6-luna` at reasoning `medium`, through
+- **Agent:** without a model choice, `gpt-6-luna` at reasoning `none`, which
+  GPT-6 Luna requires for tool calling through Chat Completions. It uses
   `OPENAI_API_KEY` (Beaker's provider proxy in hosted rollouts). A model-comparison run
   sends the selected model through Beaker's inference gateway. `llm.py` calls Chat
   Completions directly with the OpenAI SDK, not LiteLLM. tau2's LiteLLM path sends every

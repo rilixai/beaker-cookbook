@@ -40,8 +40,9 @@ from tau2_bench.user_sim import USER_LLM, USER_LLM_ARGS, USER_NAME, TracedUserSi
 
 AGENT_NAME = "beaker_tau2_agent"
 # Pinned in fixed code so that editing the agent never changes what a default run evaluates.
-DEFAULT_AGENT_MODEL = "gpt-5.6-luna"
-DEFAULT_AGENT_REASONING = "medium"
+DEFAULT_AGENT_MODEL = "gpt-6-luna"
+# GPT-6 Luna requires "none" for tool calling through Chat Completions.
+DEFAULT_AGENT_REASONING = "none"
 # Deterministic communicate scoring (the CLI's ``--communicate-scorer substring``).
 COMMUNICATE_SCORING = CommunicateScoring(scorer=CommunicateScorer.SUBSTRING)
 

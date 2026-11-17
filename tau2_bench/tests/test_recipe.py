@@ -201,8 +201,9 @@ async def test_agent_follows_runtime_model_and_simulator_stays_pinned(
     stubbed["agent"].clear()
     stubbed["user"].clear()
     await run(integration, None)
-    assert {call["model"] for call in stubbed["agent"]} == {benchmark.DEFAULT_AGENT_MODEL}
-    assert stubbed["agent"][0]["reasoning_effort"] == benchmark.DEFAULT_AGENT_REASONING
+    assert {call["model"] for call in stubbed["agent"]} == {"gpt-6-luna"}
+    assert stubbed["agent"][0]["reasoning_effort"] == "none"
+    assert stubbed["agent"][0]["tools"]
     assert {call["model"] for call in stubbed["user"]} == {USER_LLM}
 
 
