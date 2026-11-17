@@ -19,6 +19,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from toolathlon_diagnostics import DIRECTORY_ENV, TASK_ENV, command_output, event, phase
+
 from toolathlon_baseline.containerized import DEFAULT_IMAGE
 from toolathlon_baseline.prepare import require_command
 
@@ -31,13 +33,23 @@ FORWARDED = (
     "TOOLATHLON_OTLP_ENDPOINT",
     "TOOLATHLON_OTLP_TOKEN",
     "TOOLATHLON_CONFIG_JSON",
+    DIRECTORY_ENV,
+    TASK_ENV,
 )
 
 
 def docker(*args: str, timeout: int = 900) -> str:
-    result = subprocess.run([require_command("docker"), *args], text=True, capture_output=True, timeout=timeout)
-    if result.returncode:
-        raise RuntimeError(f"Docker {args[0]} failed: {result.stderr[-3000:]}")
+    with phase("docker " + " ".join(args[:2])):
+        try:
+            result = subprocess.run(
+                [require_command("docker"), *args], text=True, capture_output=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired as exc:
+            command_output(args, -1, str(exc.stdout or ""), str(exc.stderr or "") + "\nCOMMAND TIMED OUT")
+            raise
+        command_output(args, result.returncode, result.stdout, result.stderr)
+        if result.returncode:
+            raise RuntimeError(f"Docker {args[0]} failed: {result.stderr[-3000:]}")
     return result.stdout.strip()
 
 
@@ -62,6 +74,7 @@ def prepare_docker(cache: Path) -> str:
                 process = subprocess.Popen(
                     [require_command("dockerd")], stdout=log, stderr=log, start_new_session=True
                 )
+            event(f"Outer dockerd started pid={process.pid}; waiting for readiness")
             for _ in range(90):
                 try:
                     docker("info", timeout=5)
@@ -108,6 +121,7 @@ def prepare_docker(cache: Path) -> str:
 def network(output: Path) -> Iterator[tuple[list[str], dict[int, int]]]:
     """Relay this case's loopback services through free, unprivileged bridge ports."""
     gateway = docker("network", "inspect", "bridge", "--format", "{{(index .IPAM.Config 0).Gateway}}")
+    event(f"Docker bridge gateway={gateway}")
     hosts, ports = [f"host.docker.internal:{gateway}"], set()
     for raw in Path("/etc/hosts").read_text().splitlines():
         fields = raw.split("#", 1)[0].split()
@@ -135,6 +149,8 @@ def network(output: Path) -> Iterator[tuple[list[str], dict[int, int]]]:
                 process = subprocess.Popen(
                     [
                         require_command("socat"),
+                        "-d",
+                        "-d",
                         f"TCP4-LISTEN:{bridge_port},bind={gateway},reuseaddr,fork",
                         f"TCP4:127.0.0.1:{port}",
                     ],
@@ -142,6 +158,7 @@ def network(output: Path) -> Iterator[tuple[list[str], dict[int, int]]]:
                     stderr=log,
                     start_new_session=True,
                 )
+            event(f"Relay pid={process.pid} listen={gateway}:{bridge_port} target=127.0.0.1:{port}")
             processes.append(process)
             for _ in range(30):
                 if process.poll() is not None:
@@ -220,6 +237,7 @@ def run_containerized_agent(
 
             source_archive.add(source, arcname=".", filter=select)
         env = os.environ.copy()
+        env[DIRECTORY_ENV] = "/case/diagnostics"
         env["TOOLATHLON_DOCKER_HOSTS"] = json.dumps(hosts)
         env["TOOLATHLON_TELEMETRY_STATUS"] = "/case/telemetry_status.json"
         (output / "telemetry_status.json").write_text(
@@ -233,6 +251,7 @@ def run_containerized_agent(
             "toolathlon_native_trace.py",
             "toolathlon_container.patch",
             "toolathlon_harness.py",
+            "toolathlon_diagnostics.py",
         ):
             shutil.copyfile(HERE / filename, bootstrap / filename)
         args = [
@@ -285,7 +304,9 @@ def run_containerized_agent(
         previous = signal.signal(signal.SIGTERM, cancel)
         try:
             with (output / "run.log").open("w") as log:
-                result = subprocess.run(["docker", *args], env=env, stdout=log, stderr=log, timeout=timeout + 1800)
+                event(f"Starting private host name={name} task={task} image={image}")
+                with phase("private host execution"):
+                    result = subprocess.run(["docker", *args], env=env, stdout=log, stderr=log, timeout=timeout + 1800)
             if result.returncode or not (output / "result.json").is_file():
                 raise RuntimeError(
                     f"Containerized task {task} could not complete: "
@@ -295,6 +316,10 @@ def run_containerized_agent(
         finally:
             try:
                 docker("stop", "--time", "8", name, timeout=10)
+            except (RuntimeError, subprocess.TimeoutExpired):
+                pass
+            try:
+                docker("inspect", "--format", "{{json .State}}", name, timeout=1)
             except (RuntimeError, subprocess.TimeoutExpired):
                 pass
             try:

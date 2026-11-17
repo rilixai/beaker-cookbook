@@ -63,6 +63,31 @@ Failures before a model turn are retryable; exhausted turn budgets are scored as
 failures even if upstream leaves its request counter at zero. Cancellation and
 timeout stop the private benchmark host and its task containers.
 
+## Diagnosing a failed case
+
+Each case attaches diagnostic artifacts named `toolathlon.logs.*` to its Beaker
+trace, including failures before the first model turn. Open or download the case
+trace and its artifacts; `toolathlon.logs.manifest` lists the available files,
+their parts and any truncation. These logs are independent of the agent's OTLP
+export, so a failed agent bootstrap does not need to emit framework spans.
+
+The collection includes supervisor stdout/stderr, the Python failure traceback,
+timed bootstrap steps, Docker command output, relay stderr, the outer daemon log,
+the private host's `run.log` and official task logs. Before removing the private
+host, bounded probes collect its container states and the last 2,000 lines of
+service logs. On case failure, probes also record VM interfaces, listeners,
+Docker bridge information, effective UID/capabilities and disk space. A short
+error excerpt is printed to worker logs as well.
+
+Logs are attached before temporary directories are deleted, on success, failure,
+timeout and graceful cancellation. Retention is capped at 8 MiB per file and
+32 MiB per case, preserving the beginning and end when truncated; probes have
+short time limits. SIGKILL or loss of the entire VM can prevent final collection.
+Known environment/configuration secrets and common credential formats are masked
+before publication. The collector does not archive environment dumps, credential
+files or arbitrary workspace files. Run preparation before a case starts remains
+visible in worker logs rather than per-case artifacts.
+
 ## Docker execution for every task
 
 Every Beaker task uses `toolathlon_docker.py`, including `find-alita-paper`,

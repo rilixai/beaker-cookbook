@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from toolathlon_diagnostics import phase
 from toolathlon_docker import run_containerized_agent
 
 from toolathlon_baseline.prepare import native_path, prepared_source
@@ -27,7 +28,8 @@ def run_agent(
     if not os.environ.get("TOOLATHLON_OPENAI_BASE_URL"):
         raise ValueError("Set TOOLATHLON_OPENAI_BASE_URL first")
     cache, output = native_path(cache), native_path(output)
-    source = prepared_source(cache)
+    with phase("verify pinned Toolathlon source"):
+        source = prepared_source(cache)
     return run_containerized_agent(
         cache=cache,
         source=source,

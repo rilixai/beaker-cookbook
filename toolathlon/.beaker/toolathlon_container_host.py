@@ -7,10 +7,12 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 import yaml
+from toolathlon_diagnostics import phase, snapshot
 
 
 ROOT = Path("/workspace")
@@ -19,7 +21,8 @@ CASE = Path("/case")
 
 def run(*args: str, timeout: int = 1800) -> None:
     print("+", *args, flush=True)
-    subprocess.run(args, cwd=ROOT, check=True, timeout=timeout)
+    with phase("host " + " ".join(args)):
+        subprocess.run(args, cwd=ROOT, check=True, timeout=timeout)
 
 
 def wait_docker() -> None:
@@ -70,7 +73,13 @@ def main() -> None:
     # Docker's default /etc/hosts is private to each nested container.
     for port, bridge_port in request["relay_ports"].items():
         subprocess.Popen(
-            ["socat", f"TCP-LISTEN:{port},bind=127.0.0.1,reuseaddr,fork", f"TCP:host.docker.internal:{bridge_port}"]
+            [
+                "socat",
+                "-d",
+                "-d",
+                f"TCP-LISTEN:{port},bind=127.0.0.1,reuseaddr,fork",
+                f"TCP:host.docker.internal:{bridge_port}",
+            ]
         )
     wait_docker()
     # The inner daemon has a private image store and cannot access other cases.
@@ -148,22 +157,23 @@ def main() -> None:
         os.environ["TOOLATHLON_MODEL_PARAMS_FILE"] = str(ROOT / "beaker_model_params.json")
     # No second scheduler: Beaker owns case admission. The official script keeps
     # the same live task container through preprocess, agent and remote grading.
-    result = subprocess.run(
-        [
-            "bash",
-            "scripts/run_single_containerized.sh",
-            f"finalpool/{task}",
-            "normal",
-            "/case/artifacts",
-            request["model"],
-            "unified",
-            str(request["max_steps"]),
-            "beaker_eval_config.json",
-            request["image"],
-        ],
-        cwd=ROOT,
-        timeout=request["timeout"],
-    )
+    with phase("official preprocess / agent / evaluation"):
+        result = subprocess.run(
+            [
+                "bash",
+                "scripts/run_single_containerized.sh",
+                f"finalpool/{task}",
+                "normal",
+                "/case/artifacts",
+                request["model"],
+                "unified",
+                str(request["max_steps"]),
+                "beaker_eval_config.json",
+                request["image"],
+            ],
+            cwd=ROOT,
+            timeout=request["timeout"],
+        )
     task_root = CASE / "artifacts/finalpool" / task
     trajectory = json.loads((task_root / "traj_log.json").read_text())
     evaluation = json.loads((task_root / "eval_res.json").read_text())
@@ -195,4 +205,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        with phase("private host bootstrap"):
+            main()
+    finally:
+        try:
+            # This daemon contains this case only; never collect other cases' logs.
+            snapshot(CASE / "diagnostics", private=True, budget=2 if sys.exc_info()[0] is SystemExit else 6)
+        except Exception as error:
+            print(f"Could not collect private Docker diagnostics: {type(error).__name__}", flush=True)

@@ -29,6 +29,7 @@ from beaker import (
     repository,
 )
 from pydantic import BaseModel, Field
+from toolathlon_diagnostics import DIRECTORY_ENV, TASK_ENV, capture, tail
 from toolathlon_docker import prepare_docker
 from toolathlon_harness import patch_paths
 from toolathlon_native_trace import NativeTrace
@@ -150,10 +151,10 @@ def _resolve_model_target(runtime: RolloutRuntime[Any]) -> tuple[str, str, str, 
     return base_url, api_key, model, False
 
 
-async def _communicate(process: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
+async def _communicate(process: asyncio.subprocess.Process) -> None:
     """Bound the supervisor and reap its process group even on cancellation."""
     try:
-        return await asyncio.wait_for(process.communicate(), timeout=DEFAULT_TIMEOUT_SECONDS + 1830)
+        await asyncio.wait_for(process.wait(), timeout=DEFAULT_TIMEOUT_SECONDS + 1830)
     finally:
         alive = False
         try:
@@ -192,6 +193,10 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
     task = payload.task
     cache, source = prepare_toolathlon()
     base_url, api_key, model_name, is_gateway = _resolve_model_target(runtime)
+    env = os.environ.copy()
+    env["TOOLATHLON_OPENAI_BASE_URL"] = base_url
+    env["TOOLATHLON_OPENAI_API_KEY"] = api_key
+    env[TASK_ENV] = task
 
     with (
         NativeTrace(runtime.trace) as telemetry,
@@ -202,133 +207,139 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
     ):
         with tempfile.TemporaryDirectory(prefix=f"beaker-toolathlon-case-{task}-") as temp_dir:
             root = Path(temp_dir)
-            output_dir = root / "run"
-            telemetry.status_path = output_dir / "telemetry_status.json"
-            request_path = root / "request.json"
-            response_path = root / "response.json"
+            async with capture(runtime.trace, root, cache, env) as diagnostics:
+                env[DIRECTORY_ENV] = str(diagnostics)
+                output_dir = root / "run"
+                telemetry.status_path = output_dir / "telemetry_status.json"
+                request_path = root / "request.json"
+                response_path = root / "response.json"
 
-            request_payload: dict[str, Any] = {
-                "cache": str(cache),
-                "output": str(output_dir),
-                "task": task,
-                "model": model_name,
-                "max_steps": DEFAULT_MAX_STEPS,
-                "timeout": DEFAULT_TIMEOUT_SECONDS,
-                "system_prompt": str(Path(__file__).resolve().parents[1] / "prompts/agent_system_prompt.md"),
-            }
-            custom_params_file = os.environ.get("TOOLATHLON_MODEL_PARAMS_FILE")
-            if custom_params_file and not is_gateway and Path(custom_params_file).is_file():
-                request_payload["model_params"] = custom_params_file
-            else:
-                params_file = root / "gateway_model_params.json"
-                params_file.write_text(json.dumps({"tool_choice": "auto"}), encoding="utf-8")
-                request_payload["model_params"] = str(params_file)
-            request_path.write_text(json.dumps(request_payload), encoding="utf-8")
-
-            env = os.environ.copy()
-            env["TOOLATHLON_OPENAI_BASE_URL"] = base_url
-            env["TOOLATHLON_OPENAI_API_KEY"] = api_key
-            env.update(telemetry.env())
-            project_root = Path(__file__).resolve().parents[1]
-            src_dir = os.pathsep.join((str(project_root / ".beaker"), str(project_root / "src")))
-            existing_pythonpath = env.get("PYTHONPATH", "")
-            env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing_pythonpath}".rstrip(os.pathsep)
-
-            process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-c",
-                _SUBPROCESS_SCRIPT,
-                str(request_path),
-                str(response_path),
-                cwd=str(Path(__file__).resolve().parents[1]),
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                start_new_session=True,
-            )
-            try:
-                stdout_bytes, stderr_bytes = await _communicate(process)
-            except TimeoutError as exc:
-                raise RetryableCaseError(f"Toolathlon supervisor timed out for {task!r}") from exc
-            finally:
-                telemetry.read_status()
-            if process.returncode != 0 or not response_path.is_file():
-                detail = (stderr_bytes or stdout_bytes).decode("utf-8", errors="replace")[-4000:]
-                raise RetryableCaseError(f"Toolathlon runner subprocess failed (exit {process.returncode}): {detail}")
-
-            summary = json.loads(response_path.read_text(encoding="utf-8"))
-            traj_path = output_dir / "artifacts/traj_log.json"
-            trajectory: dict[str, Any] = (
-                json.loads(traj_path.read_text(encoding="utf-8")) if traj_path.is_file() else {}
-            )
-
-            status = summary.get("status")
-            agent_status = summary.get("agent_status") or trajectory.get("status")
-            key_stats = summary.get("key_stats") or trajectory.get("key_stats") or {}
-            llm_requests = int(key_stats.get("agent_llm_requests") or 0) if isinstance(key_stats, Mapping) else 0
-
-            if status == "timeout" or agent_status == "timeout":
-                stage.output({"status": "timeout", "llm_requests": llm_requests})
-                raise RetryableCaseError(f"Toolathlon task {task!r} timed out after {DEFAULT_TIMEOUT_SECONDS}s")
-
-            if agent_status != "success" and not _has_model_turn(agent_status, key_stats, trajectory):
-                log_path = output_dir / "run.log"
-                log_tail = log_path.read_text(encoding="utf-8", errors="replace")[-2000:] if log_path.is_file() else ""
-                stage.output({"status": "error_before_first_turn", "log_tail": log_tail})
-                raise RetryableCaseError(f"Toolathlon task {task!r} exited before completing a model turn: {log_tail}")
-
-            evaluation = summary.get("evaluation")
-            if (
-                summary.get("runner") != "containerized"
-                or not isinstance(evaluation, Mapping)
-                or type(evaluation.get("pass")) is not bool
-            ):
-                raise RetryableCaseError(
-                    f"Toolathlon {task!r} did not return a valid official containerized evaluation"
-                )
-            workspace_files = summary.get("workspace_files", [])
-            if not isinstance(workspace_files, list) or any(not isinstance(name, str) for name in workspace_files):
-                raise RetryableCaseError(f"Toolathlon {task!r} returned an invalid workspace file list")
-
-            messages = trajectory.get("messages") if isinstance(trajectory.get("messages"), list) else []
-            final_message = next(
-                (
-                    msg.get("content")
-                    for msg in reversed(messages)
-                    if isinstance(msg, Mapping) and msg.get("role") == "assistant" and msg.get("content")
-                ),
-                None,
-            )
-
-            observed_output: dict[str, JsonValue] = {
-                "task": task,
-                "runner": "containerized",
-                "upstream_revision": UPSTREAM_REVISION,
-                "agent_framework": "openai-agents==0.20.0",
-                "trace_source": "native_otlp",
-                "model": model_name,
-                "agent_status": agent_status,
-                "key_stats": key_stats if isinstance(key_stats, Mapping) else {},
-                "workspace_files": workspace_files,
-                "image": summary.get("image"),
-                "image_id": summary.get("image_id"),
-                "final_assistant_message": final_message,
-            }
-            stage.output(
-                {
-                    "agent_status": agent_status,
-                    "llm_requests": llm_requests,
-                    "workspace_file_count": len(workspace_files),
+                request_payload: dict[str, Any] = {
+                    "cache": str(cache),
+                    "output": str(output_dir),
+                    "task": task,
+                    "model": model_name,
+                    "max_steps": DEFAULT_MAX_STEPS,
+                    "timeout": DEFAULT_TIMEOUT_SECONDS,
+                    "system_prompt": str(Path(__file__).resolve().parents[1] / "prompts/agent_system_prompt.md"),
                 }
-            )
-            context: dict[str, JsonValue] = {
-                "task": task,
-                "agent_status": agent_status,
-                "runner": "containerized",
-                "official_evaluation": evaluation,
-                "groundtruth_hashes": groundtruth_hashes(source, task),
-            }
-            return CaseResult(output=observed_output, output_kind="record", context=context)
+                custom_params_file = os.environ.get("TOOLATHLON_MODEL_PARAMS_FILE")
+                if custom_params_file and not is_gateway and Path(custom_params_file).is_file():
+                    request_payload["model_params"] = custom_params_file
+                else:
+                    params_file = root / "gateway_model_params.json"
+                    params_file.write_text(json.dumps({"tool_choice": "auto"}), encoding="utf-8")
+                    request_payload["model_params"] = str(params_file)
+                request_path.write_text(json.dumps(request_payload), encoding="utf-8")
+
+                env.update(telemetry.env())
+                project_root = Path(__file__).resolve().parents[1]
+                src_dir = os.pathsep.join((str(project_root / ".beaker"), str(project_root / "src")))
+                existing_pythonpath = env.get("PYTHONPATH", "")
+                env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing_pythonpath}".rstrip(os.pathsep)
+
+                stdout_path = diagnostics / "supervisor.stdout.log"
+                stderr_path = diagnostics / "supervisor.stderr.log"
+                with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+                    process = await asyncio.create_subprocess_exec(
+                        sys.executable,
+                        "-c",
+                        _SUBPROCESS_SCRIPT,
+                        str(request_path),
+                        str(response_path),
+                        cwd=str(Path(__file__).resolve().parents[1]),
+                        env=env,
+                        stdout=stdout,
+                        stderr=stderr,
+                        start_new_session=True,
+                    )
+                    try:
+                        await _communicate(process)
+                    except TimeoutError as exc:
+                        raise RetryableCaseError(f"Toolathlon supervisor timed out for {task!r}") from exc
+                    finally:
+                        telemetry.read_status()
+                if process.returncode != 0 or not response_path.is_file():
+                    detail = tail(stderr_path, env) or tail(stdout_path, env)
+                    raise RetryableCaseError(
+                        f"Toolathlon runner subprocess failed (exit {process.returncode}): {detail}"
+                    )
+
+                summary = json.loads(response_path.read_text(encoding="utf-8"))
+                traj_path = output_dir / "artifacts/traj_log.json"
+                trajectory: dict[str, Any] = (
+                    json.loads(traj_path.read_text(encoding="utf-8")) if traj_path.is_file() else {}
+                )
+
+                status = summary.get("status")
+                agent_status = summary.get("agent_status") or trajectory.get("status")
+                key_stats = summary.get("key_stats") or trajectory.get("key_stats") or {}
+                llm_requests = int(key_stats.get("agent_llm_requests") or 0) if isinstance(key_stats, Mapping) else 0
+
+                if status == "timeout" or agent_status == "timeout":
+                    stage.output({"status": "timeout", "llm_requests": llm_requests})
+                    raise RetryableCaseError(f"Toolathlon task {task!r} timed out after {DEFAULT_TIMEOUT_SECONDS}s")
+
+                if agent_status != "success" and not _has_model_turn(agent_status, key_stats, trajectory):
+                    log_path = output_dir / "run.log"
+                    log_tail = tail(log_path, env, 2000)
+                    stage.output({"status": "error_before_first_turn", "log_tail": log_tail})
+                    raise RetryableCaseError(
+                        f"Toolathlon task {task!r} exited before completing a model turn: {log_tail}"
+                    )
+
+                evaluation = summary.get("evaluation")
+                if (
+                    summary.get("runner") != "containerized"
+                    or not isinstance(evaluation, Mapping)
+                    or type(evaluation.get("pass")) is not bool
+                ):
+                    raise RetryableCaseError(
+                        f"Toolathlon {task!r} did not return a valid official containerized evaluation"
+                    )
+                workspace_files = summary.get("workspace_files", [])
+                if not isinstance(workspace_files, list) or any(not isinstance(name, str) for name in workspace_files):
+                    raise RetryableCaseError(f"Toolathlon {task!r} returned an invalid workspace file list")
+
+                messages = trajectory.get("messages") if isinstance(trajectory.get("messages"), list) else []
+                final_message = next(
+                    (
+                        msg.get("content")
+                        for msg in reversed(messages)
+                        if isinstance(msg, Mapping) and msg.get("role") == "assistant" and msg.get("content")
+                    ),
+                    None,
+                )
+
+                observed_output: dict[str, JsonValue] = {
+                    "task": task,
+                    "runner": "containerized",
+                    "upstream_revision": UPSTREAM_REVISION,
+                    "agent_framework": "openai-agents==0.20.0",
+                    "trace_source": "native_otlp",
+                    "model": model_name,
+                    "agent_status": agent_status,
+                    "key_stats": key_stats if isinstance(key_stats, Mapping) else {},
+                    "workspace_files": workspace_files,
+                    "image": summary.get("image"),
+                    "image_id": summary.get("image_id"),
+                    "final_assistant_message": final_message,
+                }
+                stage.output(
+                    {
+                        "agent_status": agent_status,
+                        "llm_requests": llm_requests,
+                        "workspace_file_count": len(workspace_files),
+                    }
+                )
+                context: dict[str, JsonValue] = {
+                    "task": task,
+                    "agent_status": agent_status,
+                    "runner": "containerized",
+                    "official_evaluation": evaluation,
+                    "groundtruth_hashes": groundtruth_hashes(source, task),
+                }
+                return CaseResult(output=observed_output, output_kind="record", context=context)
 
 
 async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) -> CaseScore:
