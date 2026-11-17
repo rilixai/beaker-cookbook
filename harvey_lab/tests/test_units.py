@@ -701,6 +701,138 @@ def test_docx_preserves_table_styles_and_inline_revisions(tmp_path: Path) -> Non
     assert "[bold]addition[/bold] plain[strikethrough] deletion[/strikethrough]" in result
 
 
+def test_docx_headers_and_footers_reach_the_judge(tmp_path: Path) -> None:
+    from docx import Document
+    from docx.enum.section import WD_SECTION_START
+    from docx.shared import Inches
+
+    document = Document()
+    document.add_paragraph("Memo body")
+    section = document.sections[0]
+    section.header.paragraphs[0].text = "Case 24-123, Example Court"
+    section.header.add_table(rows=1, cols=1, width=Inches(4)).cell(0, 0).text = "Matter ABC"
+    section.footer.paragraphs[0].text = "Confidential"
+    section.different_first_page_header_footer = True
+    section.first_page_header.paragraphs[0].text = "First page caption"
+    section.first_page_footer.paragraphs[0].text = "First page footer"
+    document.settings.odd_and_even_pages_header_footer = True
+    section.even_page_header.paragraphs[0].text = "Even page caption"
+    section.even_page_footer.paragraphs[0].text = "Even page footer"
+    document.add_section(WD_SECTION_START.NEW_PAGE)
+    workspace = TaskWorkspace(tmp_path)
+    path = workspace.deliverable_path("memo.docx")
+    document.save(path)
+
+    deliverables = workspace.collect_deliverables(["memo.docx"])
+    expected = (
+        "Memo body",
+        "Case 24-123, Example Court",
+        "Matter ABC",
+        "Confidential",
+        "First page caption",
+        "First page footer",
+        "Even page caption",
+        "Even page footer",
+    )
+
+    def judge(_task: str, criteria: list[dict], output: str) -> dict[str, bool]:
+        assert all(value in output for value in expected)
+        return {c["id"]: True for c in criteria}
+
+    result = score_rubric(
+        criteria=[{"id": "caption", "match_criteria": "Include case details.", "deliverables": ["memo.docx"]}],
+        deliverables=deliverables,
+        task_description="Write the memo.",
+        judge=judge,
+    )
+    assert result["passed"] == 1
+    assert deliverables["memo.docx"].count("Matter ABC") == 1
+
+
+def test_docx_ignores_disabled_header_variants(tmp_path: Path) -> None:
+    from docx import Document
+
+    document = Document()
+    document.add_paragraph("Body")
+    document.sections[0].first_page_header.paragraphs[0].text = "Hidden first page"
+    document.sections[0].even_page_footer.paragraphs[0].text = "Hidden even footer"
+    path = tmp_path / "memo.docx"
+    document.save(path)
+    assert extract_text(path) == "Body"
+
+
+def test_docx_preserves_italics_and_explicit_style_overrides(tmp_path: Path) -> None:
+    from docx import Document
+    from docx.enum.style import WD_STYLE_TYPE
+
+    document = Document()
+    style = document.styles.add_style("Buyer comment", WD_STYLE_TYPE.CHARACTER)
+    style.font.bold = True
+    style.font.italic = True
+    paragraph = document.add_paragraph()
+    paragraph.add_run("Comment", style=style)
+    paragraph.add_run("Bold only", style=style).italic = False
+    document.add_table(rows=1, cols=1).cell(0, 0).paragraphs[0].add_run("Table comment").italic = True
+    document.sections[0].header.paragraphs[0].add_run("Header comment").italic = True
+    path = tmp_path / "comments.docx"
+    document.save(path)
+
+    text = extract_text(path)
+    assert "[italic][bold]Comment[/bold][/italic][bold]Bold only[/bold]" in text
+    assert "[italic]Table comment[/italic]" in text
+    assert "[italic]Header comment[/italic]" in text
+
+
+def test_docx_reads_linked_first_page_header_when_later_section_enables_it(tmp_path: Path) -> None:
+    from docx import Document
+    from docx.enum.section import WD_SECTION_START
+
+    document = Document()
+    document.sections[0].first_page_header.paragraphs[0].text = "Inherited case caption"
+    section = document.add_section(WD_SECTION_START.NEW_PAGE)
+    section.different_first_page_header_footer = True
+    path = tmp_path / "memo.docx"
+    document.save(path)
+
+    assert "# Section 2 first page header\nInherited case caption" in extract_text(path)
+
+
+@pytest.mark.parametrize("cached_value", [None, "30000", "0"])
+def test_xlsx_preserves_formulas_and_cached_values(tmp_path: Path, cached_value: str | None) -> None:
+    from zipfile import ZipFile
+
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Fees"
+    sheet.append(["Principal", "Rate", "Fee", "Literal result"])
+    sheet.append([1000000, 0.03, "=A2*B2", 30000])
+    workbook.create_sheet("Notes").append(["Supporting sheet"])
+    path = tmp_path / "fees.xlsx"
+    workbook.save(path)
+    workbook.close()
+    if cached_value is not None:
+        # openpyxl does not calculate formulas. Simulate an Excel-saved cache.
+        with ZipFile(path) as archive:
+            entries = {name: archive.read(name) for name in archive.namelist()}
+        entries["xl/worksheets/sheet1.xml"] = entries["xl/worksheets/sheet1.xml"].replace(
+            b"<f>A2*B2</f><v></v>", f"<f>A2*B2</f><v>{cached_value}</v>".encode()
+        )
+        with ZipFile(path, "w") as archive:
+            for name, content in entries.items():
+                archive.writestr(name, content)
+    original = path.read_bytes()
+
+    text = extract_text(path)
+    result = (
+        "cached value unavailable; formula not evaluated" if cached_value is None else f"cached value: {cached_value}"
+    )
+    assert f"1000000\t0.03\tC2: =A2*B2 [{result}]\t30000" in text
+    assert "# Sheet: Notes\nSupporting sheet" in text
+    assert path.read_bytes() == original
+
+
 def test_parse_batch_verdicts_maps_ids() -> None:
     reply = '{"verdicts": [{"id": "C1", "verdict": "pass"}, {"id": "C2", "verdict": "fail"}]}'
     assert _parse_batch_verdicts(reply, ["C1", "C2"]) == {"C1": True, "C2": False}

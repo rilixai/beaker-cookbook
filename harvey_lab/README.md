@@ -54,9 +54,11 @@ Each task ships a rubric of ~60 atomic PASS/FAIL criteria, each with a written
 `match_criteria` standard and the deliverable(s) it applies to. A second LLM
 acts as a **judge** (`evaluation/scoring.py`, default
 `openrouter/z-ai/glm-5.3-flash` at `--judge-reasoning-effort high`): it reads only the deliverable(s) a
-criterion names — the extracted text, with DOCX bold, strikethrough, and
-tracked insertions/deletions retained as explicit text markers — and
-returns PASS/FAIL. Criteria sharing a deliverable scope are graded in
+criterion names — the extracted text, including Word headers and footers,
+with bold, italics, strikethrough, and tracked insertions/deletions retained
+as explicit text markers — and returns PASS/FAIL. Excel formulas retain
+their cell addresses and any cached results. Missing cached results are
+labeled; the extractor does not calculate formulas. Criteria sharing a deliverable scope are graded in
 **batches** of `--judge-batch-size` (default 8) rather than one call per
 criterion, an order of magnitude cheaper at LAB's scale
 ([why](https://www.langchain.com/blog/designing-efficient-verifiers-for-legal-agents)).

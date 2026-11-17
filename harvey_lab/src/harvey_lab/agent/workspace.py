@@ -158,13 +158,47 @@ def _read_docx(path: Path) -> str:
         doc = Document(str(path))
     except Exception as exc:  # pragma: no cover - defensive
         return f"Could not parse {path.name!r} as .docx ({type(exc).__name__}: {exc})."
-    parts = [text for p in doc.paragraphs if (text := _docx_paragraph_text(p)).strip()]
-    for table in doc.tables:
+    parts = _docx_container_text(doc)
+    seen_parts: set[str] = set()
+    for index, section in enumerate(doc.sections, start=1):
+        for name in (
+            "header",
+            "first_page_header",
+            "even_page_header",
+            "footer",
+            "first_page_footer",
+            "even_page_footer",
+        ):
+            if name.startswith("first_page_") and not section.different_first_page_header_footer:
+                continue
+            if name.startswith("even_page_") and not doc.settings.odd_and_even_pages_header_footer:
+                continue
+            # Resolve linked content without creating missing parts. A later
+            # section can enable a first-page header defined by an earlier one.
+            for previous in reversed(doc.sections[:index]):
+                container = getattr(previous, name)
+                if not container.is_linked_to_previous:
+                    break
+            else:
+                continue
+            part_name = str(container.part.partname)
+            if part_name in seen_parts:
+                continue
+            seen_parts.add(part_name)
+            text = _docx_container_text(container)
+            if text:
+                parts.extend([f"# Section {index} {name.replace('_', ' ')}", *text])
+    return "\n".join(parts)
+
+
+def _docx_container_text(container: Any) -> list[str]:
+    parts = [text for p in container.paragraphs if (text := _docx_paragraph_text(p)).strip()]
+    for table in container.tables:
         for row in table.rows:
             cells = ["\n".join(_docx_paragraph_text(p) for p in c.paragraphs).strip() for c in row.cells]
             if any(cells):
                 parts.append("\t".join(cells))
-    return "\n".join(parts)
+    return parts
 
 
 def _docx_paragraph_text(paragraph: Any) -> str:
@@ -203,6 +237,8 @@ def _docx_paragraph_text(paragraph: Any) -> str:
             text = "".join(parts)
             if text and font_flag(run, "bold"):
                 text = f"[bold]{text}[/bold]"
+            if text and font_flag(run, "italic"):
+                text = f"[italic]{text}[/italic]"
             if text and (font_flag(run, "strike") or font_flag(run, "double_strike")):
                 text = f"[strikethrough]{text}[/strikethrough]"
             return text
@@ -221,18 +257,40 @@ def _read_xlsx(path: Path) -> str:
         from openpyxl import load_workbook
     except ImportError as exc:  # pragma: no cover - import guard
         raise ImportError("Text extraction requires the optional `openpyxl` dependency for .xlsx.") from exc
-    workbook = load_workbook(filename=str(path), read_only=True, data_only=True)
+    workbook = load_workbook(filename=str(path), read_only=True, data_only=False)
     try:
-        names = list(workbook.sheetnames)
-        chunks: list[str] = ["# Sheets: " + " | ".join(names)]
-        for name in names:
-            chunks.append(f"# Sheet: {name}")
-            for row_index, row in enumerate(workbook[name].iter_rows(values_only=True)):
-                if row_index >= 200:
+        cached = load_workbook(filename=str(path), read_only=True, data_only=True)
+        try:
+            names = list(workbook.sheetnames)
+            chunks: list[str] = ["# Sheets: " + " | ".join(names)]
+            for name in names:
+                chunks.append(f"# Sheet: {name}")
+                sheet = workbook[name]
+                max_row = min(sheet.max_row or 200, 200)
+                max_col = min(sheet.max_column or 40, 40)
+                rows = sheet.iter_rows(max_row=max_row, max_col=max_col)
+                values = cached[name].iter_rows(max_row=max_row, max_col=max_col, values_only=True)
+                for row, cached_row in zip(rows, values, strict=True):
+                    cells = []
+                    for cell, value in zip(row, cached_row, strict=True):
+                        if cell.data_type == "f":
+                            formula = cell.value
+                            # Array formulas store their expression on .text.
+                            formula = getattr(formula, "text", formula)
+                            result = (
+                                "cached value unavailable; formula not evaluated"
+                                if value is None
+                                else f"cached value: {value}"
+                            )
+                            cells.append(f"{cell.coordinate}: {formula} [{result}]")
+                        else:
+                            cells.append("" if value is None else str(value))
+                    chunks.append("\t".join(cells).rstrip("\t"))
+                if sheet.max_row and sheet.max_row > 200:
                     chunks.append("... (truncated rows)")
-                    break
-                chunks.append("\t".join("" if c is None else str(c) for c in row[:40]))
-        return "\n".join(chunks)
+            return "\n".join(chunks).rstrip("\n")
+        finally:
+            cached.close()
     finally:
         workbook.close()
 
