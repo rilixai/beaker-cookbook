@@ -27,6 +27,18 @@ from toolathlon_baseline.prepare import require_command
 
 
 HERE = Path(__file__).parent
+# Images the task applications start; cases fall back to pulling any missing one.
+SERVICE_IMAGES = (
+    "lbjay/canvas-docker",
+    "analogic/poste.io:2.5.24",
+    "mysql:8.0",
+    "wordpress:6.8.2-php8.2-apache",
+)
+# Content blobs and committed snapshots never change after creation.
+IMMUTABLE_ROOT_DIRS = (
+    "containerd/daemon/io.containerd.content.v1.content/blobs",
+    "containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots",
+)
 TRUST = ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "NODE_EXTRA_CA_CERTS")
 FORWARDED = (
     "TOOLATHLON_OPENAI_BASE_URL",
@@ -119,7 +131,54 @@ def prepare_docker(cache: Path) -> str:
             directory.mkdir(exist_ok=True)
             (directory / "Dockerfile").write_text(recipe)
             docker("build", "--tag", tag, str(directory), timeout=1200)
+        seed_docker_root(cache, tag, archive)
         return tag
+
+
+def seed_path(cache: Path, tag: str) -> Path:
+    return cache / ("docker-seed-" + tag.rsplit(":", 1)[1])
+
+
+def seed_docker_root(cache: Path, tag: str, archive: Path) -> None:
+    """Load images once per VM into a daemon root that every case clones."""
+    seed = seed_path(cache, tag)
+    marker = seed / ".beaker-seed-complete"
+    if marker.is_file():
+        return
+    shutil.rmtree(seed, ignore_errors=True)
+    seed.mkdir()
+    pulls = "".join(f"docker pull {image} || true; " for image in SERVICE_IMAGES)
+    script = (
+        "dockerd --bip 172.30.0.1/16 >/dev/null 2>&1 & pid=$!; "
+        "for _ in $(seq 300); do docker info >/dev/null 2>&1 && break; sleep 1; done; "
+        f"docker load --input /toolathlon-base.tar || exit 1; {pulls}"
+        "kill -TERM $pid; wait $pid || true"
+    )
+    docker(
+        "run", "--rm", "--privileged", "--cgroupns", "host",
+        "-v", f"{seed}:/var/lib/docker", "-v", f"{archive}:/toolathlon-base.tar:ro",
+        "--entrypoint", "bash", tag, "-c", script,
+        timeout=1800,
+    )  # fmt: skip
+    marker.write_text("")
+
+
+def clone_docker_root(seed: Path, target: Path) -> None:
+    """Hardlink immutable image data; copy daemon databases so cases share no mutable state."""
+    with phase("clone docker root"):
+        target.mkdir(parents=True)
+        subprocess.run(["cp", "-a", "--link", f"{seed}/.", str(target)], check=True, timeout=600)
+        (target / ".beaker-seed-complete").unlink()
+        for directory, dirnames, filenames in os.walk(target):
+            if Path(directory).relative_to(target).as_posix() in IMMUTABLE_ROOT_DIRS:
+                dirnames[:] = []
+                continue
+            for filename in filenames:
+                path = Path(directory, filename)
+                if path.is_file() and not path.is_symlink():
+                    copy = path.with_name(filename + ".beaker-copy")
+                    shutil.copy2(path, copy)
+                    copy.replace(path)
 
 
 def bridge_ipv4() -> str:
@@ -317,6 +376,14 @@ def run_containerized_agent(
             f"{bootstrap}:/beaker:ro",
         ]
         name = args[2]
+        docker_root = cache / "docker-roots" / name
+        try:
+            clone_docker_root(seed_path(cache, image), docker_root)
+            args += ["-v", f"{docker_root}:/var/lib/docker"]
+        except (OSError, subprocess.SubprocessError) as exc:
+            # The private host then loads the base image itself.
+            event(f"Docker root clone failed; loading the base image in the case: {exc}")
+            shutil.rmtree(docker_root, ignore_errors=True)
         mounted: set[str] = set()
         for key in TRUST:
             if env.get(key) and Path(env[key]).is_file():
@@ -372,4 +439,5 @@ def run_containerized_agent(
                 docker("rm", "--force", "--volumes", name, timeout=120)
             except (RuntimeError, subprocess.TimeoutExpired):
                 pass
+            shutil.rmtree(docker_root, ignore_errors=True)
             signal.signal(signal.SIGTERM, previous)

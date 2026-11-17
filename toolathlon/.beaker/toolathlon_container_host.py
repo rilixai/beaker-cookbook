@@ -90,7 +90,9 @@ def main() -> None:
         )
     wait_docker()
     # The inner daemon has a private image store and cannot access other cases.
-    run("docker", "load", "--input", "/toolathlon-base.tar", timeout=900)
+    # It normally starts from a cloned root that already holds the base image.
+    if subprocess.run(["docker", "image", "inspect", request["image"]], capture_output=True, timeout=60).returncode:
+        run("docker", "load", "--input", "/toolathlon-base.tar", timeout=900)
     run("tar", "-xf", "/case/source.tar", "-C", str(ROOT), timeout=120)
     for name in ("global_configs", "token_key_session"):
         target = ROOT / "configs" / f"{name}.py"
