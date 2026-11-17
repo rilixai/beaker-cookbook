@@ -150,10 +150,16 @@ def main() -> None:
         if service in needed or (service == "k8s" and task.startswith("k8s-")):
             run(*command)
     # Fail before running an agent if a required external-account config is absent.
-    if needed & {"google_sheet", "google_calendar", "google_forms"}:
-        for name in ("gcp-oauth.keys.json", "google_credentials.json"):
-            if not (ROOT / "configs" / name).is_file():
-                raise RuntimeError(f"Task {task} requires configs/{name}; supply TOOLATHLON_CONFIG_DIR")
+    # The official script copies both files for every task, so tasks without
+    # Google services get empty placeholders.
+    needs_google = bool(needed & {"google_sheet", "google_calendar", "google_forms"})
+    for name in ("gcp-oauth.keys.json", "google_credentials.json"):
+        path = ROOT / "configs" / name
+        if path.is_file():
+            continue
+        if needs_google:
+            raise RuntimeError(f"Task {task} requires configs/{name}; supply TOOLATHLON_CONFIG_DIR")
+        path.write_text("{}")
     config = json.loads((ROOT / "scripts/formal_run_v0.json").read_text())
     config["global_task_config"].update(dump_path="/workspace/dumps", direct_to_dumps=True)
     for role in ("agent", "user"):
