@@ -109,6 +109,12 @@ services are started, using the upstream setup scripts. The shared VM caches the
 public task image; private daemons load it without repeated registry downloads.
 Case cancellation removes the host and its anonymous image-store volume.
 
+The derived host image links `/usr/local/bin/docker` to the client installed at
+`/usr/bin/docker` alongside `dockerd`. This prevents the older upstream client
+from shadowing the package-installed client. Image tags include the build recipe
+hash, so this correction rebuilds the host layer. Bootstrap records client/server
+versions after a successful daemon readiness check.
+
 The original `scripts/run_single_containerized.sh` keeps its phased workflow:
 preprocess, hide reference/evaluator files, run the original agent, restore trusted
 artifacts, and run the official grader while the same applications remain alive.

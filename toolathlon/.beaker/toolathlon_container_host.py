@@ -33,6 +33,7 @@ def wait_docker() -> None:
         daemon = subprocess.Popen(["dockerd", "--bip", "172.30.0.1/16"], stdout=log, stderr=log)
     for _ in range(90):
         if subprocess.run(["docker", "info"], capture_output=True, timeout=5).returncode == 0:
+            run("docker", "version", timeout=10)
             return
         if daemon.poll() is not None:
             break

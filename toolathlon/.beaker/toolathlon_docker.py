@@ -103,9 +103,13 @@ def prepare_docker(cache: Path) -> str:
             docker("image", "save", "--output", str(temporary), base, timeout=900)
             temporary.replace(archive)
         # Only this small host layer is new; the task still uses the original image.
+        # Upstream's /usr/local/bin/docker must use the client installed with dockerd.
         recipe = (
             f"FROM {base}\nUSER root\nRUN apt-get update && apt-get install -y "
-            "docker.io socat iproute2 psmisc netcat-openbsd && rm -rf /var/lib/apt/lists/*\nVOLUME /var/lib/docker\n"
+            "docker.io socat iproute2 psmisc netcat-openbsd "
+            "&& ln -sf /usr/bin/docker /usr/local/bin/docker "
+            "&& docker --version && dockerd --version "
+            "&& rm -rf /var/lib/apt/lists/*\nVOLUME /var/lib/docker\n"
         )
         tag = "toolathlon-beaker-host:" + hashlib.sha256((image_id + recipe).encode()).hexdigest()[:16]
         try:
