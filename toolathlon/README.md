@@ -4,7 +4,8 @@ Run [Toolathlon](https://github.com/hkust-nlp/Toolathlon)'s **original agent**, 
 in place to **OpenAI Agents 0.20.0**. The standalone CLI supports all 108 official
 tasks through the upstream container runner. Three tasks also run natively without
 Docker or application accounts in the standalone CLI. [Beaker onboarding](.beaker/README.md)
-uses isolated Docker environments for every task, including the quickstart, with
+uses fresh task containers with a shared Docker daemon and applications, including
+the quickstart, with
 native OTLP tracing. The Docker path still needs an end-to-end VM validation.
 
 ## Native quickstart

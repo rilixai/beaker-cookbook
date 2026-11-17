@@ -61,7 +61,7 @@ only where the framework emits spans.
 
 Failures before a model turn are retryable; exhausted turn budgets are scored as
 failures even if upstream leaves its request counter at zero. Cancellation and
-timeout stop the private benchmark host and its task containers.
+timeout stop only the current execution’s task containers. Shared applications remain available to other cases.
 
 ## Diagnosing a failed case
 
@@ -72,12 +72,12 @@ their parts and any truncation. These logs are independent of the agent's OTLP
 export, so a failed agent bootstrap does not need to emit framework spans.
 
 The collection includes supervisor stdout/stderr, the Python failure traceback,
-timed bootstrap steps, Docker command output, relay stderr, the outer daemon log,
-the private host's `run.log` and official task logs. Before removing the private
-host, bounded probes collect its container states and the last 2,000 lines of
-service logs. On case failure, probes also record VM interfaces, listeners,
-Docker bridge information, effective UID/capabilities and disk space. A short
-error excerpt is printed to worker logs as well.
+timed bootstrap/resource-lock steps, Docker command output, the shared daemon
+log, the case runner’s `run.log`, official task logs and startup logs for the
+applications that case uses. Failure probes record VM interfaces, listeners,
+Docker bridge information, effective UID/capabilities and disk space. The
+collector never dumps all other cases’ container logs. A short error excerpt
+is printed to worker logs as well.
 
 Logs are attached before temporary directories are deleted, on success, failure,
 timeout and graceful cancellation. Retention is capped at 8 MiB per file and
@@ -90,47 +90,47 @@ visible in worker logs rather than per-case artifacts.
 
 ## Docker execution for every task
 
-Every Beaker task uses `toolathlon_docker.py`, including `find-alita-paper`,
-`excel-market-research` and `interview-report`. There is no native execution or
-scoring fallback. Docker availability and the task image are checked during case
-loading, before baseline model calls. The standalone CLI's native quickstart
-remains available separately.
+Every Beaker task uses the official phased container runner, including
+`find-alita-paper`, `excel-market-research` and `interview-report`. Each execution
+gets a fresh task container and working copy. Case metadata is normalized to
+`runner: containerized`, so existing datasets labeled `native` remain usable.
+The standalone CLI's native quickstart remains available separately.
 
-Case metadata is normalized to `runner: containerized`, including existing dataset
-rows labeled `native`. Execution does not depend on that old label, so an existing
-quickstart dataset does not need to be uploaded again.
+The actual rollout VM owns one Docker daemon, its image cache and its shared
+applications. Docker preparation runs lazily in that VM rather than during the
+coordinator's dataset loading. There are no per-case Docker hosts, nested daemons,
+image archives, daemon-root clones or image imports. A dependency image based on
+the official task image installs the pinned migrated agent and the separate Excel
+environment once. It is keyed by the resolved base-image ID and dependency files.
+Kind, kubectl and Helm host tools are copied from the official image once.
 
-The Beaker image installs Docker and socat and needs a VM sandbox. Bootstrap adds
-the system `sbin` directories to Beaker’s minimal evaluator `PATH` so `dockerd`,
-`docker-proxy` and `iptables` can be found. Each case gets
-a private Docker-in-Docker host with its own network, image-store volume and
-application state. Only its required Canvas, email, WooCommerce or Kubernetes
-services are started, using the upstream setup scripts. The shared VM caches the
-public task image; private daemons load it without repeated registry downloads.
-Case cancellation removes the host and its anonymous image-store volume.
+Canvas, email, WooCommerce and Kubernetes are started on first use under a
+process-wide setup lock. Later cases reuse the running applications and generated
+configuration. A stopped shared service produces an infrastructure error rather
+than being restarted underneath active cases. Services live for the rollout VM's
+lifetime; destroy the VM to reset the full environment for a new formal campaign.
+The original per-task preprocessing still prepares the task's application state.
 
-The derived host image links `/usr/local/bin/docker` to the client installed at
-`/usr/bin/docker` alongside `dockerd`. This prevents the older upstream client
-from shadowing the package-installed client. Image tags include the build recipe
-hash, so this correction rebuilds the host layer. Bootstrap records client/server
-versions after a successful daemon readiness check.
+Resource locks span preprocessing, agent execution, grading and cleanup. They
+serialize repeated executions of the same task and upstream's conflict groups.
+Kubernetes tasks additionally share one lock because their Kind preparation may
+delete clusters or rewrite kubeconfigs. Independent tasks can overlap, with Beaker
+still owning case admission (default concurrency 6). Lease records let the next
+owner clean an orphaned task container if its supervisor was forcibly killed.
 
-The original `scripts/run_single_containerized.sh` keeps its phased workflow:
-preprocess, hide reference/evaluator files, run the original agent, restore trusted
-artifacts, and run the official grader while the same applications remain alive.
-A small reviewed shell patch forwards provider host mappings, public CA files and
-the case's OTLP token. Per-case relays use free unprivileged ports on the outer
-Docker bridge; listeners inside the private host preserve the original provider
-and OTLP ports. Provider hostnames resolve to that private host's loopback. Relay
-process groups are removed on completion or failure, and startup errors include
-socat's diagnostic output. The tracing entrypoint wraps the original prepared-agent
-phase only. No private proxy key or local `.env` is mounted into the Docker host.
+The runner retains upstream's host networking and Docker socket mount. Task
+containers reach the Beaker VM's existing provider proxy and per-case OTLP
+receiver directly; provider hostname mappings, CA files and capture tokens are
+forwarded by the reviewed shell patch. No socat relay or bridge gateway discovery
+is needed. Run credentials remain in the parent process.
 
-Relay setup validates the bridge IPv4 with a local bind. If Docker omits its
-`IPAM.Gateway` on first boot, it reads the actual IPv4 from the bridge interface
-(using Docker's configured interface name, or `docker0`). It never guesses a fixed
-IP or starts a relay with an empty address. The selected address and its source
-are recorded in the diagnostic logs.
+The original `scripts/run_single_containerized.sh` keeps the same live task
+container through preprocessing, reference hiding, the prepared original agent,
+trusted restoration and official grading. Candidate harness patches are applied
+inside that task container only, then restored before grading. Shared trusted
+source, application setup and dependency environments are not candidate-editable.
+Cancellation removes only containers matching the case's unique prefix and output
+mounts, while keeping the shared daemon, applications and other cases alive.
 
 Scoring returns the official verdict and bounded diagnostic text without
 transferring the complete workspace through the case context. Missing
@@ -144,6 +144,6 @@ relative to upstream `configs/` to their text contents; alternatively a managed
 runtime can mount an existing `TOOLATHLON_CONFIG_DIR`. Keep credentials out of Git.
 `TOOLATHLON_DOCKER_IMAGE` can select a compatible pinned task-image digest.
 
-Containerized execution retains upstream's privileged Docker/socket requirements.
+Containerized execution retains upstream's Docker/socket trust model and shared application state.
 Use dedicated benchmark accounts and VM resources. Real Docker execution must be
 validated before a broad baseline.

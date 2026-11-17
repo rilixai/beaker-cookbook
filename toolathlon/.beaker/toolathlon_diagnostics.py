@@ -103,7 +103,7 @@ def command_output(args: tuple[str, ...], returncode: int, stdout: str, stderr: 
         pass
 
 
-def snapshot(directory: Path, *, private: bool = False, budget: float = 6) -> None:
+def snapshot(directory: Path, *, budget: float = 6) -> None:
     """Bounded, read-only probes. Never inspect container environments or config files."""
     directory.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + budget
@@ -131,30 +131,14 @@ def snapshot(directory: Path, *, private: bool = False, budget: float = 6) -> No
         except OSError as exc:
             info.append(f"{filename}: {exc}")
     (directory / "identity.log").write_text("\n".join(info))
-    if private:
-        probe(["docker", "ps", "-a", "--format", "{{.ID}} {{.Names}} {{.Status}}"], "containers.log")
-        listing = (directory / "containers.log").read_text() if (directory / "containers.log").exists() else ""
-        for line in listing.splitlines():
-            identifier = line.split()[0] if line.split() else ""
-            if re.fullmatch(r"[a-f0-9]{12,64}", identifier):
-                # Application logs can grow indefinitely; retain the last 2000 lines.
-                probe(
-                    ["docker", "logs", "--timestamps", "--tail", "2000", identifier],
-                    f"container-{identifier}-tail.log",
-                )
-                probe(
-                    ["docker", "inspect", "--format", "{{json .State}}", identifier],
-                    f"container-{identifier}-state.log",
-                )
-    else:
-        for args, filename in (
-            (["ip", "-j", "address", "show"], "interfaces.log"),
-            (["ss", "-ltnp"], "listeners.log"),
-            (["docker", "network", "inspect", "bridge"], "bridge.log"),
-            (["docker", "info"], "docker-info.log"),
-            (["df", "-h"], "disk.log"),
-        ):
-            probe(args, filename)
+    for args, filename in (
+        (["ip", "-j", "address", "show"], "interfaces.log"),
+        (["ss", "-ltnp"], "listeners.log"),
+        (["docker", "network", "inspect", "bridge"], "bridge.log"),
+        (["docker", "info"], "docker-info.log"),
+        (["df", "-h"], "disk.log"),
+    ):
+        probe(args, filename)
 
 
 def tail(path: Path, environment: Mapping[str, str], limit: int = 4000) -> str:

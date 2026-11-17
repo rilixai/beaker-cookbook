@@ -30,7 +30,6 @@ from beaker import (
 )
 from pydantic import BaseModel, Field
 from toolathlon_diagnostics import DIRECTORY_ENV, TASK_ENV, capture, tail
-from toolathlon_docker import prepare_docker
 from toolathlon_harness import patch_paths
 from toolathlon_native_trace import NativeTrace
 from toolathlon_setup import (
@@ -123,7 +122,6 @@ class Setup(RunSetup[Row]):
                 f"Task {row.id} requires external-account configuration; "
                 "set TOOLATHLON_CONFIG_JSON or TOOLATHLON_CONFIG_DIR before launching"
             )
-        await asyncio.to_thread(prepare_docker, self.cache)
         yield Case(
             id=row.id,
             input=row.input.model_dump(),

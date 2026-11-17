@@ -1,54 +1,28 @@
-"""Docker backend for Beaker: each case owns a private benchmark host and daemon."""
+"""Use the VM's Docker daemon, image cache and shared Toolathlon applications."""
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
-import ipaddress
 import json
 import os
 import re
 import shutil
 import signal
-import socket
 import subprocess
-import tarfile
 import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import urlsplit
 
-from toolathlon_diagnostics import DIRECTORY_ENV, TASK_ENV, command_output, event, phase
+from toolathlon_diagnostics import command_output, phase
+from toolathlon_environment import case_checkout, locks, needed_services, prepare_services, shared_checkout, task_locks
 
 from toolathlon_baseline.containerized import DEFAULT_IMAGE
-from toolathlon_baseline.prepare import require_command
+from toolathlon_baseline.prepare import require_command, runtime_env
 
 
 HERE = Path(__file__).parent
-# Images the task applications start; cases fall back to pulling any missing one.
-SERVICE_IMAGES = (
-    "lbjay/canvas-docker",
-    "analogic/poste.io:2.5.24",
-    "mysql:8.0",
-    "wordpress:6.8.2-php8.2-apache",
-)
-# Content blobs and committed snapshots never change after creation.
-IMMUTABLE_ROOT_DIRS = (
-    "containerd/daemon/io.containerd.content.v1.content/blobs",
-    "containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots",
-)
-TRUST = ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "NODE_EXTRA_CA_CERTS")
-FORWARDED = (
-    "TOOLATHLON_OPENAI_BASE_URL",
-    "TOOLATHLON_OPENAI_API_KEY",
-    "TOOLATHLON_OTLP_ENDPOINT",
-    "TOOLATHLON_OTLP_TOKEN",
-    "TOOLATHLON_CONFIG_JSON",
-    DIRECTORY_ENV,
-    TASK_ENV,
-)
 
 
 def docker(*args: str, timeout: int = 900) -> str:
@@ -66,41 +40,33 @@ def docker(*args: str, timeout: int = 900) -> str:
     return result.stdout.strip()
 
 
-def prepare_docker(cache: Path) -> str:
-    """Prepare immutable tools once per VM; never share live service state."""
-    # Beaker gives evaluator children a minimal PATH without sbin. Debian's
-    # docker.io installs dockerd/docker-proxy there; dockerd also needs iptables.
+def prepare_docker(cache: Path, source: Path) -> str:
+    """Start one daemon and build one dependency image per evaluation VM."""
     os.environ["PATH"] = os.pathsep.join(
         dict.fromkeys((*os.environ.get("PATH", os.defpath).split(os.pathsep), "/usr/local/sbin", "/usr/sbin", "/sbin"))
     )
     cache.mkdir(parents=True, exist_ok=True)
-    with (cache / "docker-setup.lock").open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with locks(cache / "shared-locks", ["prepare-docker"]):
         try:
             docker("info", timeout=30)
         except (RuntimeError, subprocess.TimeoutExpired):
             if os.geteuid() != 0:
-                raise RuntimeError(
-                    "Docker is unavailable. Start Docker or use a Beaker VM sandbox with dockerd."
-                ) from None
+                raise RuntimeError("Docker is unavailable. Use a Beaker VM sandbox with dockerd.") from None
             with (cache / "dockerd.log").open("a") as log:
                 process = subprocess.Popen(
                     [require_command("dockerd")], stdout=log, stderr=log, start_new_session=True
                 )
-            event(f"Outer dockerd started pid={process.pid}; waiting for readiness")
-            for _ in range(90):
+            deadline = time.monotonic() + 300
+            while time.monotonic() < deadline:
                 try:
                     docker("info", timeout=30)
                     break
                 except (RuntimeError, subprocess.TimeoutExpired):
                     if process.poll() is not None:
-                        raise RuntimeError(
-                            "dockerd failed; the containerized runner needs a VM sandbox: "
-                            + (cache / "dockerd.log").read_text()[-2000:]
-                        ) from None
+                        raise RuntimeError("dockerd failed: " + (cache / "dockerd.log").read_text()[-2000:]) from None
                     time.sleep(1)
             else:
-                raise RuntimeError("Docker daemon did not become ready after 90 readiness checks")
+                raise RuntimeError("Docker daemon did not become ready in 300 seconds")
         base = os.environ.get("TOOLATHLON_DOCKER_IMAGE", DEFAULT_IMAGE)
         if not re.fullmatch(r"[A-Za-z0-9_./:@+-]+", base):
             raise ValueError("Invalid TOOLATHLON_DOCKER_IMAGE")
@@ -109,191 +75,157 @@ def prepare_docker(cache: Path) -> str:
         except RuntimeError:
             docker("pull", base)
             image_id = docker("image", "inspect", "--format", "{{.Id}}", base)
-        archive = cache / ("docker-base-" + image_id.removeprefix("sha256:")[:16] + ".tar")
-        if not archive.exists():
-            temporary = archive.with_suffix(".incomplete")
-            docker("image", "save", "--output", str(temporary), base, timeout=900)
-            temporary.replace(archive)
-        # Only this small host layer is new; the task still uses the original image.
-        # Upstream's /usr/local/bin/docker must use the client installed with dockerd.
         recipe = (
-            f"FROM {base}\nUSER root\nRUN apt-get update && apt-get install -y "
-            "docker.io socat iproute2 psmisc netcat-openbsd "
-            "&& ln -sf /usr/bin/docker /usr/local/bin/docker "
-            "&& docker --version && dockerd --version "
-            "&& rm -rf /var/lib/apt/lists/*\nVOLUME /var/lib/docker\n"
+            f"FROM {base}\nUSER root\nWORKDIR /workspace\nCOPY pyproject.toml uv.lock ./\n"
+            "RUN UV_PROJECT_ENVIRONMENT=/workspace/.venv uv sync --locked "
+            "&& UV_PROJECT_ENVIRONMENT=/workspace/.venv-excel uv sync --locked --only-group excel\n"
         )
-        tag = "toolathlon-beaker-host:" + hashlib.sha256((image_id + recipe).encode()).hexdigest()[:16]
+        digest = hashlib.sha256((image_id + recipe).encode())
+        for name in ("pyproject.toml", "uv.lock"):
+            digest.update((source / name).read_bytes())
+        tag = "toolathlon-beaker-task:" + digest.hexdigest()[:16]
         try:
             docker("image", "inspect", tag)
         except RuntimeError:
-            directory = cache / "docker-host-build"
+            directory = cache / "docker-task-build"
             directory.mkdir(exist_ok=True)
+            for name in ("pyproject.toml", "uv.lock"):
+                shutil.copyfile(source / name, directory / name)
             (directory / "Dockerfile").write_text(recipe)
             docker("build", "--tag", tag, str(directory), timeout=1200)
-        seed_docker_root(cache, tag, archive)
+        # Reuse upstream's static Linux tools for the host-side Kind setup.
+        tools = cache / "bin"
+        tools.mkdir(exist_ok=True)
+        if any(not (tools / name).is_file() for name in ("kind", "kubectl", "helm")):
+            container = docker("create", base, "true")
+            try:
+                for name in ("kind", "kubectl", "helm"):
+                    docker("cp", f"{container}:/usr/local/bin/{name}", str(tools / name), timeout=60)
+                    (tools / name).chmod(0o755)
+            finally:
+                docker("rm", container, timeout=30)
+        os.environ["PATH"] = str(tools) + os.pathsep + os.environ["PATH"]
         return tag
 
 
-def seed_path(cache: Path, tag: str) -> Path:
-    return cache / ("docker-seed-" + tag.rsplit(":", 1)[1])
-
-
-def seed_docker_root(cache: Path, tag: str, archive: Path) -> None:
-    """Load images once per VM into a daemon root that every case clones."""
-    seed = seed_path(cache, tag)
-    marker = seed / ".beaker-seed-complete"
-    if marker.is_file():
-        return
-    shutil.rmtree(seed, ignore_errors=True)
-    seed.mkdir()
-    pulls = "".join(f"docker pull {image} || true; " for image in SERVICE_IMAGES)
-    script = (
-        "dockerd --bip 172.30.0.1/16 >/dev/null 2>&1 & pid=$!; "
-        "for _ in $(seq 300); do docker info >/dev/null 2>&1 && break; sleep 1; done; "
-        f"docker load --input /toolathlon-base.tar || exit 1; {pulls}"
-        "kill -TERM $pid; wait $pid || true"
-    )
-    docker(
-        "run", "--rm", "--privileged", "--cgroupns", "host",
-        "-v", f"{seed}:/var/lib/docker", "-v", f"{archive}:/toolathlon-base.tar:ro",
-        "--entrypoint", "bash", tag, "-c", script,
-        timeout=1800,
-    )  # fmt: skip
-    marker.write_text("")
-
-
-def clone_docker_root(seed: Path, target: Path) -> None:
-    """Hardlink immutable image data; copy daemon databases so cases share no mutable state."""
-    with phase("clone docker root"):
-        target.mkdir(parents=True)
-        subprocess.run(["cp", "-a", "--link", f"{seed}/.", str(target)], check=True, timeout=600)
-        (target / ".beaker-seed-complete").unlink()
-        for directory, dirnames, filenames in os.walk(target):
-            if Path(directory).relative_to(target).as_posix() in IMMUTABLE_ROOT_DIRS:
-                dirnames[:] = []
-                continue
-            for filename in filenames:
-                path = Path(directory, filename)
-                if path.is_file() and not path.is_symlink():
-                    copy = path.with_name(filename + ".beaker-copy")
-                    shutil.copy2(path, copy)
-                    copy.replace(path)
-
-
-def bridge_ipv4() -> str:
-    """Find a local bridge address even when a fresh daemon omits IPAM.Gateway."""
-    details = json.loads(docker("network", "inspect", "bridge"))[0]
-
-    def usable(value: str | None) -> bool:
-        try:
-            address = ipaddress.IPv4Address(value)
-            if address.is_unspecified or address.is_loopback or address.is_multicast:
-                return False
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-                probe.bind((str(address), 0))
-            return True
-        except (ValueError, OSError):
-            return False
-
-    for config in details.get("IPAM", {}).get("Config") or []:
-        gateway = config.get("Gateway")
-        if usable(gateway):
-            event(f"Docker bridge gateway={gateway} source=IPAM")
-            return gateway
-
-    # Docker can omit Gateway on its first boot although the bridge already has
-    # an address. Read that interface instead of guessing a subnet or using '*'.
-    interface = details.get("Options", {}).get("com.docker.network.bridge.name") or "docker0"
-    event(f"Docker bridge Gateway missing or unusable; reading IPv4 from {interface}")
-    result = subprocess.run(
-        [require_command("ip"), "-j", "-4", "address", "show", "dev", interface],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    if result.returncode:
-        raise RuntimeError(f"Cannot read Docker bridge interface {interface!r}: {result.stderr[-1000:]}")
-    for device in json.loads(result.stdout):
-        for address in device.get("addr_info", []):
-            gateway = address.get("local")
-            if address.get("family") == "inet" and usable(gateway):
-                event(f"Docker bridge gateway={gateway} source=interface:{interface}")
-                return gateway
-    raise RuntimeError(f"Docker bridge {interface!r} has no usable local IPv4 address; cannot start case relays")
-
-
-@contextmanager
-def network(output: Path) -> Iterator[tuple[list[str], dict[int, int]]]:
-    """Relay this case's loopback services through free, unprivileged bridge ports."""
-    gateway = bridge_ipv4()
-    hosts, ports = [f"host.docker.internal:{gateway}"], set()
+def provider_hosts() -> list[str]:
+    """Task containers share the VM network and reach its existing local proxies."""
+    hosts: set[str] = set()
     for raw in Path("/etc/hosts").read_text().splitlines():
         fields = raw.split("#", 1)[0].split()
         if len(fields) > 1 and fields[0] == "127.0.0.1":
-            for name in fields[1:]:
-                if "." in name and name != "localhost.localdomain":
-                    # The official task uses its private host's network namespace.
-                    # Its loopback listener maps the unchanged provider port to
-                    # this case's free port on the outer Docker bridge.
-                    hosts.append(f"{name}:127.0.0.1")
-                    ports.add(443)
-    for name in ("TOOLATHLON_OPENAI_BASE_URL", "TOOLATHLON_OTLP_ENDPOINT"):
-        url = urlsplit(os.environ.get(name, ""))
-        if url.hostname in ("127.0.0.1", "localhost", "::1"):
-            ports.add(url.port or (443 if url.scheme == "https" else 80))
-    processes = []
-    mappings = {}
-    try:
-        for port in sorted(ports):
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
-                reservation.bind((gateway, 0))
-                bridge_port = reservation.getsockname()[1]
-            log_path = output / f"relay-{port}.log"
-            with log_path.open("w") as log:
-                process = subprocess.Popen(
-                    [
-                        require_command("socat"),
-                        "-d",
-                        "-d",
-                        f"TCP4-LISTEN:{bridge_port},bind={gateway},reuseaddr,fork",
-                        f"TCP4:127.0.0.1:{port}",
-                    ],
-                    stdout=log,
-                    stderr=log,
-                    start_new_session=True,
-                )
-            event(f"Relay pid={process.pid} listen={gateway}:{bridge_port} target=127.0.0.1:{port}")
-            processes.append(process)
-            for _ in range(30):
-                if process.poll() is not None:
-                    detail = log_path.read_text(errors="replace")[-2000:]
-                    raise RuntimeError(
-                        f"Cannot expose case proxy port {port} through {gateway}:{bridge_port} "
-                        f"(socat exit {process.returncode}): {detail}"
-                    )
-                try:
-                    with socket.create_connection((gateway, bridge_port), timeout=1):
-                        break
-                except OSError:
-                    time.sleep(0.1)
-            else:
-                detail = log_path.read_text(errors="replace")[-2000:]
-                raise RuntimeError(f"Docker bridge proxy {port} did not start on {gateway}:{bridge_port}: {detail}")
-            mappings[port] = bridge_port
-        yield hosts, mappings
-    finally:
-        # Each case owns its relays, including socat's connection-handler children.
-        for process in processes:
+            hosts.update(f"{name}:127.0.0.1" for name in fields[1:] if "." in name and name != "localhost.localdomain")
+    return sorted(hosts)
+
+
+def cleanup_case(prefix: str, output: Path) -> None:
+    """Stop only this execution's containers; never touch services or other cases."""
+    if not re.fullmatch(r"beaker-[a-f0-9]{32}-", prefix):
+        raise ValueError("Invalid case container prefix")
+    identifiers = docker("ps", "-aq", "--filter", f"name={prefix}", timeout=30).split()
+    for identifier in identifiers:
+        try:
+            mounts = json.loads(docker("inspect", "--format", "{{json .Mounts}}", identifier, timeout=10))
+        except RuntimeError as exc:
+            if "No such" in str(exc):
+                continue  # The official EXIT trap can remove it first.
+            raise
+        if not any(
+            mount.get("Source") and Path(mount["Source"]).resolve().is_relative_to(output.resolve())
+            for mount in mounts
+        ):
+            continue
+        code = """import os, signal
+for p in os.listdir('/proc'):
+    if p.isdigit() and int(p) != os.getpid():
+        try:
+            args = open('/proc/'+p+'/cmdline','rb').read().split(b'\\0')
+            if b'toolathlon_container_agent.py' in args:
+                os.kill(int(p), signal.SIGTERM)
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            pass
+"""
+        try:
+            docker("exec", identifier, "/workspace/.venv/bin/python", "-c", code, timeout=5)
+        except (RuntimeError, subprocess.TimeoutExpired):
+            pass
+        # A cancelled agent needs time to export its final native spans.
+        deadline = time.monotonic() + 6
+        status = output / "telemetry_status.json"
+        while status.is_file() and time.monotonic() < deadline:
             try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
+                if json.loads(status.read_text()).get("omissions") != ["Agent phase has not flushed telemetry"]:
+                    break
+            except ValueError:
                 pass
+            time.sleep(0.2)
+        try:
+            docker("stop", "--time", "8", identifier, timeout=15)
+            docker("rm", "--force", "--volumes", identifier, timeout=30)
+        except RuntimeError as exc:
+            if "No such" not in str(exc):
+                raise
+
+
+@contextmanager
+def case_lease(cache: Path, source: Path, task: str, prefix: str, output: Path) -> Iterator[None]:
+    resources = task_locks(source, task)
+    with locks(cache / "shared-locks", resources):
+        leases = cache / "case-leases"
+        leases.mkdir(exist_ok=True)
+        # A supervisor killed before its finally block leaves a lease. Holding
+        # the same resource locks proves its former supervisor released them;
+        # remove any surviving containers before preprocessing the resource again.
+        for path in leases.glob("*.json"):
             try:
-                process.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=1)
+                previous = json.loads(path.read_text())
+            except FileNotFoundError:
+                continue  # An unrelated active case can finish while we scan.
+            if set(previous["resources"]).intersection(resources):
+                cleanup_case(previous["prefix"], Path(previous["output"]))
+                path.unlink()
+        path = leases / f"{prefix}.json"
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"resources": resources, "prefix": prefix, "output": str(output)}))
+        temporary.replace(path)
+        try:
+            yield
+        finally:
+            cleanup_case(prefix, output)
+            path.unlink()
+
+
+def collect_result(output: Path, task: str, image: str, image_id: str, exit_code: int) -> dict[str, object]:
+    task_root = output / "artifacts/finalpool" / task
+    trajectory = json.loads((task_root / "traj_log.json").read_text())
+    evaluation = json.loads((task_root / "eval_res.json").read_text())
+    if evaluation.get("pass") is None and trajectory.get("status") != "success":
+        evaluation = {**evaluation, "pass": False}
+    if type(evaluation.get("pass")) is not bool or evaluation.get("failure") in (
+        "evaluation_error",
+        "log_file_not_found",
+        "preprocess_error",
+    ):
+        raise RuntimeError(f"Task {task} has no valid official evaluation: {evaluation}")
+    summary = {
+        "runner": "containerized",
+        "image": image,
+        "image_id": image_id,
+        "task": task,
+        "status": "completed",
+        "exit_code": exit_code,
+        "agent_status": trajectory.get("status"),
+        "key_stats": trajectory.get("key_stats"),
+        "evaluation": {"pass": evaluation["pass"], "details": json.dumps(evaluation, ensure_ascii=False)[:8000]},
+        "workspace_files": sorted(
+            p.relative_to(task_root / "workspace").as_posix()
+            for p in (task_root / "workspace").rglob("*")
+            if p.is_file() and not p.is_symlink()
+        ),
+    }
+    (output / "artifacts/traj_log.json").write_text(json.dumps(trajectory))
+    (output / "result.json").write_text(json.dumps(summary))
+    return summary
 
 
 def run_containerized_agent(
@@ -307,137 +239,89 @@ def run_containerized_agent(
     timeout: int,
     system_prompt: Path | None,
     model_params: Path | None,
-) -> dict:
+) -> dict[str, object]:
     if (
         not re.fullmatch(r"[A-Za-z0-9_-]+", task)
         or not (source / "tasks/finalpool" / task / "task_config.json").is_file()
     ):
         raise ValueError(f"Unknown Toolathlon task: {task}")
-    image = prepare_docker(cache)
     output.mkdir(parents=True, exist_ok=False)
-    shutil.copyfile(HERE.parent / "harness/agent.patch.md", output / "agent_harness.patch")
-    with network(output) as (hosts, ports):
-        base = os.environ.get("TOOLATHLON_DOCKER_IMAGE", DEFAULT_IMAGE)
-        image_id = docker("image", "inspect", "--format", "{{.Id}}", base)
-        archive = cache / ("docker-base-" + image_id.removeprefix("sha256:")[:16] + ".tar")
-        request = {
-            "task": task,
-            "model": model,
-            "max_steps": max_steps,
-            "timeout": timeout,
-            "image": base,
-            "image_id": image_id,
-            "relay_ports": ports,
-            "system_prompt": system_prompt.read_text() if system_prompt else None,
-            "model_params": json.loads(model_params.read_text()) if model_params else None,
-        }
-        (output / "request.json").write_text(json.dumps(request))
-        with tarfile.open(output / "source.tar", "w") as source_archive:
+    prefix = "beaker-" + uuid.uuid4().hex + "-"
+    needed = needed_services(source, task)
+    shared = None
 
-            def select(member: tarfile.TarInfo) -> tarfile.TarInfo | None:
-                parts = Path(member.name).parts
-                if any(p in {"node_modules", "__pycache__", ".venv", ".venv-excel", ".cache", ".env"} for p in parts):
-                    return None
-                return member
+    def cancel(*_args: object) -> None:
+        raise KeyboardInterrupt()
 
-            source_archive.add(source, arcname=".", filter=select)
-        env = os.environ.copy()
-        env[DIRECTORY_ENV] = "/case/diagnostics"
-        env["TOOLATHLON_DOCKER_HOSTS"] = json.dumps(hosts)
-        env["TOOLATHLON_TELEMETRY_STATUS"] = "/case/telemetry_status.json"
-        (output / "telemetry_status.json").write_text(
-            json.dumps({"omissions": ["Agent phase has not flushed telemetry"]})
-        )
-        bootstrap = output / "bootstrap"
-        bootstrap.mkdir()
-        for filename in (
-            "toolathlon_container_host.py",
-            "toolathlon_container_agent.py",
-            "toolathlon_native_trace.py",
-            "toolathlon_container.patch",
-            "toolathlon_harness.py",
-            "toolathlon_diagnostics.py",
-        ):
-            shutil.copyfile(HERE / filename, bootstrap / filename)
-        args = [
-            "run",
-            "--name",
-            "toolathlon-beaker-" + uuid.uuid4().hex,
-            "--privileged",
-            "--cgroupns",
-            "host",
-            "-v",
-            f"{archive}:/toolathlon-base.tar:ro",
-            "--add-host",
-            hosts[0],
-            "-v",
-            f"{output}:/case",
-            "-v",
-            f"{bootstrap}:/beaker:ro",
-        ]
-        name = args[2]
-        docker_root = cache / "docker-roots" / name
-        try:
-            clone_docker_root(seed_path(cache, image), docker_root)
-            args += ["-v", f"{docker_root}:/var/lib/docker"]
-        except (OSError, subprocess.SubprocessError) as exc:
-            # The private host then loads the base image itself.
-            event(f"Docker root clone failed; loading the base image in the case: {exc}")
-            shutil.rmtree(docker_root, ignore_errors=True)
-        mounted: set[str] = set()
-        for key in TRUST:
-            if env.get(key) and Path(env[key]).is_file():
-                original = Path(env[key]).resolve()
-                destination = "/beaker-ca/" + hashlib.sha256(str(original).encode()).hexdigest()[:16] + ".pem"
-                if destination not in mounted:
-                    args += ["-v", f"{original}:{destination}:ro"]
-                    mounted.add(destination)
-                args += ["-e", key]
-                env[key] = destination
-        if env.get("SSL_CERT_DIR"):
-            empty = output / "empty-ca"
-            empty.mkdir()
-            env["SSL_CERT_DIR"] = "/case/empty-ca"
-            args += ["-e", "SSL_CERT_DIR"]
-        config_dir = env.get("TOOLATHLON_CONFIG_DIR")
-        if config_dir:
-            directory = Path(config_dir).resolve(strict=True)
-            if not directory.is_dir():
-                raise ValueError("TOOLATHLON_CONFIG_DIR must be a directory")
-            args += ["-v", f"{directory}:/beaker-config:ro"]
-        for key in (*FORWARDED, "TOOLATHLON_DOCKER_HOSTS", "TOOLATHLON_TELEMETRY_STATUS"):
-            if key in env:
-                args += ["-e", key]
-        args += [image, "/workspace/.venv/bin/python", "/beaker/toolathlon_container_host.py"]
-
-        # SIGTERM must tear down the private Docker host, not just its CLI client.
-        def cancel(*_args: object) -> None:
-            raise KeyboardInterrupt()
-
-        previous = signal.signal(signal.SIGTERM, cancel)
-        try:
-            with (output / "run.log").open("w") as log:
-                event(f"Starting private host name={name} task={task} image={image}")
-                with phase("private host execution"):
-                    result = subprocess.run(["docker", *args], env=env, stdout=log, stderr=log, timeout=timeout + 1800)
-            if result.returncode or not (output / "result.json").is_file():
-                raise RuntimeError(
-                    f"Containerized task {task} could not complete: "
-                    + (output / "run.log").read_text(errors="replace")[-4000:]
+    previous = signal.signal(signal.SIGTERM, cancel)
+    try:
+        image = prepare_docker(cache, source)
+        image_id = docker("image", "inspect", "--format", "{{.Id}}", image)
+        server_api = docker("version", "--format", "{{.Server.APIVersion}}")
+        api_version = "1.44" if tuple(map(int, server_api.split("."))) >= (1, 44) else server_api
+        shared = shared_checkout(cache, source)
+        env = runtime_env(source)
+        env["PYTHONUNBUFFERED"] = "1"
+        with case_lease(cache, source, task, prefix, output):
+            prepare_services(shared, cache, needed, env)
+            with locks(cache / "shared-locks", ["prepare-services"]):
+                checkout = case_checkout(shared, source, output, task, prefix)
+            config = json.loads((checkout / "scripts/formal_run_v0.json").read_text())
+            config["global_task_config"].update(dump_path="/workspace/dumps", direct_to_dumps=True)
+            for role in ("agent", "user"):
+                config[role]["model"] = {"short_name": model, "provider": "unified"}
+            (checkout / "scripts/beaker_eval_config.json").write_text(json.dumps(config))
+            if system_prompt:
+                shutil.copyfile(system_prompt, checkout / "tasks/finalpool" / task / "docs/agent_system_prompt.md")
+            patch = output / "agent_harness.patch"
+            shutil.copyfile(HERE.parent / "harness/agent.patch.md", patch)
+            status = output / "telemetry_status.json"
+            status.write_text(json.dumps({"omissions": ["Agent phase has not flushed telemetry"]}))
+            env.update(
+                {
+                    "TOOLATHLON_CONTAINERIZED_MODE": "phased",
+                    "TOOLATHLON_PARENT_CAPTURES_RUN_LOG": "1",
+                    "TOOLATHLON_AGENT_PATCH": str(patch),
+                    "TOOLATHLON_HARNESS_HELPER": str(HERE / "toolathlon_harness.py"),
+                    "TOOLATHLON_DOCKER_HOSTS": json.dumps(provider_hosts()),
+                    "TOOLATHLON_DOCKER_API_VERSION": api_version,
+                    "TOOLATHLON_TELEMETRY_STATUS": str(status),
+                }
+            )
+            if model_params:
+                target = checkout / "beaker_model_params.json"
+                shutil.copyfile(model_params, target)
+                env["TOOLATHLON_MODEL_PARAMS_FILE"] = str(target)
+            else:
+                env.pop("TOOLATHLON_MODEL_PARAMS_FILE", None)
+            with (output / "run.log").open("w") as log, phase("official preprocess / agent / evaluation"):
+                result = subprocess.run(
+                    [
+                        "bash",
+                        "scripts/run_single_containerized.sh",
+                        f"finalpool/{task}",
+                        "normal",
+                        str(output / "artifacts"),
+                        model,
+                        "unified",
+                        str(max_steps),
+                        "scripts/beaker_eval_config.json",
+                        image,
+                    ],
+                    cwd=checkout,
+                    env=env,
+                    stdout=log,
+                    stderr=log,
+                    timeout=timeout,
                 )
-            return json.loads((output / "result.json").read_text())
-        finally:
-            try:
-                docker("stop", "--time", "8", name, timeout=60)
-            except (RuntimeError, subprocess.TimeoutExpired):
-                pass
-            try:
-                docker("inspect", "--format", "{{json .State}}", name, timeout=10)
-            except (RuntimeError, subprocess.TimeoutExpired):
-                pass
-            try:
-                docker("rm", "--force", "--volumes", name, timeout=120)
-            except (RuntimeError, subprocess.TimeoutExpired):
-                pass
-            shutil.rmtree(docker_root, ignore_errors=True)
-            signal.signal(signal.SIGTERM, previous)
+            return collect_result(output, task, image, image_id, result.returncode)
+    finally:
+        if shared:
+            for service in needed:
+                path = shared / f"service-{service}.log"
+                if path.is_file():
+                    try:
+                        shutil.copyfile(path, output / f"shared-{service}.log")
+                    except OSError:
+                        pass
+        signal.signal(signal.SIGTERM, previous)

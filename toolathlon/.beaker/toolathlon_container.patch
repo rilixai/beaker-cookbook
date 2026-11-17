@@ -21,7 +21,7 @@
 +    fi
 +done
 +while IFS= read -r route; do
-+    START_CONTAINER_ARGS+=("--add-host" "$route")
++    [ -z "$route" ] || START_CONTAINER_ARGS+=("--add-host" "$route")
 +done < <(uv run python -c 'import json, os; print("\n".join(json.loads(os.environ["TOOLATHLON_DOCKER_HOSTS"])))')
 +declare -A beaker_mounted=()
 +for env_name in SSL_CERT_FILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE NODE_EXTRA_CA_CERTS SSL_CERT_DIR; do
@@ -35,17 +35,34 @@
 +if [ -n "${TOOLATHLON_TELEMETRY_STATUS:-}" ]; then
 +    START_CONTAINER_ARGS+=("-v" "$TOOLATHLON_TELEMETRY_STATUS:$TOOLATHLON_TELEMETRY_STATUS")
 +fi
--
-+
+
  # Add socket mount based on container runtime
  if [ "$CONTAINER_RUNTIME" = "podman" ]; then
-@@ -656,16 +680,24 @@
+@@ -507,7 +531,8 @@
+
+ # Test Kind functionality
+ echo "Testing Kind connection..."
+-if $CONTAINER_RUNTIME exec --env DOCKER_API_VERSION=1.44 "$CONTAINER_NAME" $CONTAINER_RUNTIME version >/dev/null 2>&1; then
++BEAKER_DOCKER_API_VERSION=${TOOLATHLON_DOCKER_API_VERSION:-1.44}
++if $CONTAINER_RUNTIME exec --env "DOCKER_API_VERSION=$BEAKER_DOCKER_API_VERSION" "$CONTAINER_NAME" $CONTAINER_RUNTIME version >/dev/null 2>&1; then
+     echo "✓ $CONTAINER_RUNTIME API accessible"
+ else
+     echo "✗ Cannot access $CONTAINER_RUNTIME API"
+@@ -519,7 +544,7 @@
+ echo "Step 3: Executing task in $containerized_mode mode..."
+
+ # Build environment variables array for exec commands.
+-EXEC_ENV_ARGS=("--env" "DOCKER_API_VERSION=1.44")
++EXEC_ENV_ARGS=("--env" "DOCKER_API_VERSION=$BEAKER_DOCKER_API_VERSION")
+ if [ ! -z "$CONTAINER_MODEL_PARAMS_FILE" ]; then
+     EXEC_ENV_ARGS+=("--env" "TOOLATHLON_MODEL_PARAMS_FILE=${CONTAINER_MODEL_PARAMS_FILE}")
+     echo "Setting container env: TOOLATHLON_MODEL_PARAMS_FILE=${CONTAINER_MODEL_PARAMS_FILE}"
+@@ -656,16 +681,24 @@
          exit 1
      fi
--
-+
+
 +    # Candidate code is installed only after trusted preparation and stashing.
-+    uv run python /beaker/toolathlon_harness.py stage \
++    uv run python "$TOOLATHLON_HARNESS_HELPER" stage \
 +        "$CONTAINER_RUNTIME" "$CONTAINER_NAME" "$TRUSTED_STASH_DIR/harness" \
 +        --patch "$TOOLATHLON_AGENT_PATCH"
 +
@@ -61,7 +78,7 @@
      set -e
      discard_container_bundle
 +    # Restore original code/config and remove added modules before grading.
-+    uv run python /beaker/toolathlon_harness.py restore \
++    uv run python "$TOOLATHLON_HARNESS_HELPER" restore \
 +        "$CONTAINER_RUNTIME" "$CONTAINER_NAME" "$TRUSTED_STASH_DIR/harness"
      if [ "$AGENT_EXIT_CODE" -eq 0 ]; then
          echo "✓ Agent completed successfully"
