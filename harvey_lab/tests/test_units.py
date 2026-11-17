@@ -629,6 +629,78 @@ def test_extract_text_falls_back_and_survives_bad_binaries(tmp_path: Path) -> No
 # ─── batched verdict parsing + scoring ────────────────────────────────
 
 
+def test_docx_redline_formatting_reaches_the_judge(tmp_path: Path) -> None:
+    from docx import Document
+
+    styled = tmp_path / "styled.docx"
+    plain = tmp_path / "plain.docx"
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run("old term").font.strike = True
+    paragraph.add_run("new term").bold = True
+    document.save(styled)
+    document = Document()
+    document.add_paragraph("old termnew term")
+    document.save(plain)
+
+    seen: list[str] = []
+
+    def judge(_task: str, criteria: list[dict], output: str) -> dict[str, bool]:
+        seen.append(output)
+        return {c["id"]: "[strikethrough]old term[/strikethrough][bold]new term[/bold]" in output for c in criteria}
+
+    for path, passed in [(styled, 1), (plain, 0)]:
+        result = score_rubric(
+            criteria=[
+                {"id": "C-058", "match_criteria": "Mark additions and deletions.", "deliverables": ["memo.docx"]}
+            ],
+            deliverables={"memo.docx": extract_text(path)},
+            task_description="Redline the agreement.",
+            judge=judge,
+        )
+        assert result["passed"] == passed
+    assert seen[0] != seen[1]
+
+
+def test_docx_preserves_table_styles_and_inline_revisions(tmp_path: Path) -> None:
+    from docx import Document
+    from docx.enum.style import WD_STYLE_TYPE
+    from docx.oxml import OxmlElement
+
+    document = Document()
+    style = document.styles.add_style("Redline additions", WD_STYLE_TYPE.CHARACTER)
+    style.font.bold = True
+    cell = document.add_table(rows=1, cols=1).cell(0, 0)
+    cell.paragraphs[0].add_run("addition", style=style)
+    # Explicit run formatting overrides the inherited bold style.
+    run = cell.paragraphs[0].add_run(" plain", style=style)
+    run.bold = False
+    run = cell.paragraphs[0].add_run(" deletion")
+    run.font.double_strike = True
+    paragraph = document.add_paragraph("Changes: ")
+    for revision, text_tag, value in [("ins", "t", "inserted"), ("del", "delText", "removed")]:
+        element = OxmlElement(f"w:{revision}")
+        run_element = OxmlElement("w:r")
+        text = OxmlElement(f"w:{text_tag}")
+        text.text = value
+        run_element.append(text)
+        element.append(run_element)
+        paragraph._p.append(element)
+    hyperlink = OxmlElement("w:hyperlink")
+    run_element = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = " link"
+    run_element.append(text)
+    hyperlink.append(run_element)
+    paragraph._p.append(hyperlink)
+    path = tmp_path / "redline.docx"
+    document.save(path)
+
+    result = extract_text(path)
+    assert "Changes: [inserted]inserted[/inserted][deleted]removed[/deleted] link" in result
+    assert "[bold]addition[/bold] plain[strikethrough] deletion[/strikethrough]" in result
+
+
 def test_parse_batch_verdicts_maps_ids() -> None:
     reply = '{"verdicts": [{"id": "C1", "verdict": "pass"}, {"id": "C2", "verdict": "fail"}]}'
     assert _parse_batch_verdicts(reply, ["C1", "C2"]) == {"C1": True, "C2": False}
@@ -996,6 +1068,58 @@ def test_forward_collects_response_md_when_task_names_no_deliverable(tmp_path: P
     assert output.deliverables == {"response.md": "the answer"}
     assert output.raw_deliverables == {"response.md": b"the answer"}
     assert output.missing_deliverables == []
+
+
+def test_forward_collects_submitted_documents_without_deliverable_metadata(tmp_path: Path) -> None:
+    root = tmp_path / "tasks"
+    _write_task(
+        root,
+        "contracts/freeform",
+        criteria=[{"id": "C1", "title": "t", "match_criteria": "Contains the answer.", "deliverables": []}],
+        deliverables={},
+    )
+    task_path = root / "contracts/freeform/task.json"
+    task = json.loads(task_path.read_text())
+    task["instructions"] = "Submit redline.docx and risk-memo.docx."
+    task_path.write_text(json.dumps(task))
+    client = _CapturingClient(
+        [
+            (
+                "code_exec",
+                {
+                    "cmd": "python - <<'PY'\nfrom docx import Document\nfrom pathlib import Path\nfor name in ['redline.docx', 'risk-memo.docx']:\n d=Document(); d.add_paragraph('the answer'); d.save(name)\nPath('scratch.md').write_text('unsubmitted')\nPY"
+                },
+            ),
+            ("finish", {"summary": "done", "paths": ["redline.docx", "risk-memo.docx"]}),
+        ]
+    )
+    output = _run_with_client(root, client, task_id="contracts/freeform")
+    assert output.finished
+    assert output.deliverables == {"redline.docx": "the answer", "risk-memo.docx": "the answer"}
+    assert set(output.raw_deliverables) == {"redline.docx", "risk-memo.docx"}
+    assert output.missing_deliverables == []
+    prompt = str(client.messages[-1].content)
+    assert "Submit redline.docx and risk-memo.docx." in prompt
+    assert "If the instructions request no files" in prompt
+    assert "- `response.md`" not in prompt
+    assert "risk-memo.docx" in _scope_deliverables([], output.deliverables)
+
+
+@pytest.mark.parametrize(
+    "finish", [("finish", {"summary": "done", "paths": []}), ("abandon_task_finish", {"reason": "missing inputs"})]
+)
+def test_empty_deliverable_metadata_does_not_grade_unsubmitted_work(tmp_path: Path, finish: tuple[str, dict]) -> None:
+    root = tmp_path / "tasks"
+    _write_task(root, "contracts/freeform", criteria=[], deliverables={})
+    client = _CapturingClient(
+        [
+            ("code_exec", {"cmd": "printf 'unsubmitted' > response.md"}),
+            finish,
+        ]
+    )
+    output = _run_with_client(root, client, task_id="contracts/freeform")
+    assert output.deliverables == {}
+    assert output.raw_deliverables == {}
 
 
 def test_finish_rejects_relative_paths_and_stat_errors() -> None:

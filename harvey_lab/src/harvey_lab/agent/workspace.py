@@ -158,13 +158,62 @@ def _read_docx(path: Path) -> str:
         doc = Document(str(path))
     except Exception as exc:  # pragma: no cover - defensive
         return f"Could not parse {path.name!r} as .docx ({type(exc).__name__}: {exc})."
-    parts: list[str] = [p.text for p in doc.paragraphs if p.text.strip()]
+    parts = [text for p in doc.paragraphs if (text := _docx_paragraph_text(p)).strip()]
     for table in doc.tables:
         for row in table.rows:
-            cells = [c.text.strip() for c in row.cells]
+            cells = ["\n".join(_docx_paragraph_text(p) for p in c.paragraphs).strip() for c in row.cells]
             if any(cells):
                 parts.append("\t".join(cells))
     return "\n".join(parts)
+
+
+def _docx_paragraph_text(paragraph: Any) -> str:
+    """Keep rubric-visible formatting and revisions in the judge's text input.
+
+    Paragraph.text drops run styling and text inside tracked insertions/deletions.
+    Walk inline XML so hyperlinks and revisions retain both text and markers.
+    These markers describe document formatting; they are not grading verdicts.
+    """
+    from docx.oxml.ns import qn
+    from docx.text.run import Run
+
+    def font_flag(run: Any, name: str) -> bool:
+        value = getattr(run.font, name)
+        if value is not None:
+            return bool(value)
+        for style in (run.style, paragraph.style):
+            while style is not None:
+                value = getattr(style.font, name)
+                if value is not None:
+                    return bool(value)
+                style = style.base_style
+        return False
+
+    def inline(element: Any) -> str:
+        if element.tag == qn("w:r"):
+            run = Run(element, paragraph)
+            parts = []
+            for child in element:
+                if child.tag in {qn("w:t"), qn("w:delText")}:
+                    parts.append(child.text or "")
+                elif child.tag == qn("w:tab"):
+                    parts.append("\t")
+                elif child.tag in {qn("w:br"), qn("w:cr")}:
+                    parts.append("\n")
+            text = "".join(parts)
+            if text and font_flag(run, "bold"):
+                text = f"[bold]{text}[/bold]"
+            if text and (font_flag(run, "strike") or font_flag(run, "double_strike")):
+                text = f"[strikethrough]{text}[/strikethrough]"
+            return text
+        text = "".join(inline(child) for child in element)
+        if text and element.tag in {qn("w:ins"), qn("w:moveTo")}:
+            return f"[inserted]{text}[/inserted]"
+        if text and element.tag in {qn("w:del"), qn("w:moveFrom")}:
+            return f"[deleted]{text}[/deleted]"
+        return text
+
+    return inline(paragraph._p)
 
 
 def _read_xlsx(path: Path) -> str:

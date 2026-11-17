@@ -30,7 +30,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, cast
 
 from pydantic import BaseModel, Field
@@ -130,18 +130,6 @@ def _default_exec_provider_factory(config: HarveyLabConfig) -> Any:
     from stirrup.tools.code_backends.local import LocalCodeExecToolProvider
 
     return LocalCodeExecToolProvider(shell_timeout=config.shell_timeout_s)
-
-
-def _effective_deliverable_names(record: HarveyLabRecord) -> tuple[str, ...]:
-    """Filenames the agent must produce, with a default when the task names none.
-
-    A handful of LAB tasks declare no deliverable; AA still expects a single
-    freeform ``response.md``. The task prompt, the deliverables collected for
-    grading, and the ``missing_deliverables`` list all derive from this one
-    helper, so a submitted ``response.md`` is graded rather than silently
-    dropped (and correctly reported missing when absent).
-    """
-    return record.deliverable_names or ("response.md",)
 
 
 def _render_template(template: str, variables: dict[str, str]) -> str:
@@ -303,7 +291,7 @@ class HarveyLabAgent:
         The working directory only exists once the execution environment is up,
         so the prompt is rendered inside the session rather than at construction.
         """
-        names = _effective_deliverable_names(record)
+        names = record.deliverable_names
         return _render_template(
             self._task_template,
             {
@@ -314,7 +302,12 @@ class HarveyLabAgent:
                 "abandon_tool": ABANDON_TOOL_NAME,
                 "title": record.title or record.task_id,
                 "instructions": record.instructions,
-                "deliverables": "\n".join(f"- `{name}`" for name in names),
+                "deliverables": (
+                    "\n".join(f"- `{name}`" for name in names)
+                    if names
+                    else "Produce the files requested in the task instructions, using their exact filenames. "
+                    "If the instructions request no files, submit your answer as `response.md`."
+                ),
             },
         )
 
@@ -362,7 +355,18 @@ class HarveyLabAgent:
                 finish_params, history, _metadata = await session.run(user_prompt)
             abandoned = isinstance(finish_params, AbandonParams)
             submitted_paths = list(getattr(finish_params, "paths", []) or [])
-            names = _effective_deliverable_names(record)
+            names = record.deliverable_names
+            if not names and isinstance(finish_params, FinishParams):
+                # Missing task metadata does not mean the instructions request
+                # response.md. Use only files Stirrup actually saved from finish;
+                # never sweep the output directory for logs or unsubmitted work.
+                saved = session.last_output_files_result
+                names = (
+                    tuple(Path(item.output_path).relative_to(workspace.output_dir).as_posix() for item in saved.saved)
+                    if saved
+                    else ()
+                )
+            names = names or ("response.md",)
             deliverables = workspace.collect_deliverables(names)
             raw_deliverables = {name: workspace.deliverable_path(name).read_bytes() for name in deliverables}
             return HarveyLabAgentOutput(

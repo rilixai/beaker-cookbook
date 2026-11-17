@@ -54,7 +54,8 @@ Each task ships a rubric of ~60 atomic PASS/FAIL criteria, each with a written
 `match_criteria` standard and the deliverable(s) it applies to. A second LLM
 acts as a **judge** (`evaluation/scoring.py`, default
 `openrouter/z-ai/glm-5.3-flash` at `--judge-reasoning-effort high`): it reads only the deliverable(s) a
-criterion names — the text extracted from it, as LAB-AA grades text only — and
+criterion names — the extracted text, with DOCX bold, strikethrough, and
+tracked insertions/deletions retained as explicit text markers — and
 returns PASS/FAIL. Criteria sharing a deliverable scope are graded in
 **batches** of `--judge-batch-size` (default 8) rather than one call per
 criterion, an order of magnitude cheaper at LAB's scale
@@ -67,7 +68,11 @@ Two numbers come out per task, and `evaluation/run_eval.py` averages both:
   metric, and a denser view of the same grading since one missed criterion
   zeroes `all_pass`).
 
-Filenames must match **exactly** — a near-miss name counts as not produced. A
+When task metadata declares filenames, they must match **exactly** — a near-miss
+name counts as not produced. Some upstream tasks omit that metadata but request
+files in their instructions. For those tasks, the agent follows the instructions
+and the grader receives only files successfully submitted through `finish`.
+`response.md` is the fallback only when the instructions request no files. A
 criterion skips the judge and fails outright only when *none* of its
 deliverables exist. An errored task counts as `0`; a task with no scoreable
 criteria is *unscoreable* and excluded from the averages.
