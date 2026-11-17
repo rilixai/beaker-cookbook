@@ -141,6 +141,9 @@ def main() -> None:
     if request.get("system_prompt"):
         (ROOT / "tasks/finalpool" / task / "docs/agent_system_prompt.md").write_text(request["system_prompt"])
     needed = set(json.loads((ROOT / "tasks/finalpool" / task / "task_config.json").read_text())["needed_mcp_servers"])
+    # Docker Hub no longer serves upstream's pinned poste.io 2.5.5 tag.
+    poste = ROOT / "deployment/poste/scripts/setup.sh"
+    poste.write_text(poste.read_text().replace("analogic/poste.io:2.5.5", "analogic/poste.io:2.5.24"))
     for service, command in (
         ("canvas", ["bash", "deployment/canvas/scripts/setup.sh", "start"]),
         ("emails", ["bash", "deployment/poste/scripts/setup.sh", "start", "false"]),
