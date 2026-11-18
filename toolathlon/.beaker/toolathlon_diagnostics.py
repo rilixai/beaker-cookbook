@@ -150,6 +150,9 @@ def tail(path: Path, environment: Mapping[str, str], limit: int = 4000) -> str:
 
 
 def publish(trace: Any, root: Path, cache: Path, environment: Mapping[str, str]) -> None:
+    # Beaker shortens TMPDIR through a symlink. Resolve these trusted roots
+    # before rejecting links inside a case's diagnostic/output directories.
+    root, cache = root.resolve(), cache.resolve()
     paths = [*sorted((root / "diagnostics").glob("*.log"))]
     paths += sorted((root / "run").glob("*.log"))
     paths += sorted((root / "run/diagnostics").glob("*.log"))
@@ -175,7 +178,7 @@ def publish(trace: Any, root: Path, cache: Path, environment: Mapping[str, str])
                 content = stream.read(keep)
         remaining -= keep
         safe = redact(content.decode("utf-8", errors="replace"), environment)
-        parts = []
+        parts: list[str] = []
         for start in range(0, len(safe), PART_CHARACTERS):
             part = len(parts) + 1
             label = f"toolathlon.logs.{name.replace('/', '.')}.part{part}"

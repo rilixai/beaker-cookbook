@@ -79,6 +79,10 @@ Docker bridge information, effective UID/capabilities and disk space. The
 collector never dumps all other cases’ container logs. A short error excerpt
 is printed to worker logs as well.
 
+Collection resolves Beaker's trusted temporary-directory alias before examining
+the case files. Links inside the case directories remain excluded, so a linked
+log cannot cause unrelated files to be published.
+
 Logs are attached before temporary directories are deleted, on success, failure,
 timeout and graceful cancellation. Retention is capped at 8 MiB per file and
 32 MiB per case, preserving the beginning and end when truncated; probes have
@@ -110,6 +114,8 @@ configuration. A stopped shared service produces an infrastructure error rather
 than being restarted underneath active cases. Services live for the rollout VM's
 lifetime; destroy the VM to reset the full environment for a new formal campaign.
 The original per-task preprocessing still prepares the task's application state.
+Mail startup enables the upstream Poste/Dovecot configuration (`start true`) used
+by the benchmark's local IMAP clients, including the official graders.
 
 Resource locks span preprocessing, agent execution, grading and cleanup. They
 serialize repeated executions of the same task and upstream's conflict groups.

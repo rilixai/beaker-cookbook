@@ -20,7 +20,8 @@ from toolathlon_diagnostics import event, phase
 HERE = Path(__file__).parent
 SERVICES = {
     "canvas": (["bash", "deployment/canvas/scripts/setup.sh", "start"], ("canvas-docker",)),
-    "emails": (["bash", "deployment/poste/scripts/setup.sh", "start", "false"], ("poste",)),
+    # Keep upstream's mail authentication setup for its local tools and graders.
+    "emails": (["bash", "deployment/poste/scripts/setup.sh", "start", "true"], ("poste",)),
     "woocommerce": (["bash", "deployment/woocommerce/scripts/setup.sh", "start", "81", "20"], ("woo-db", "woo-wp")),
     "k8s": (["bash", "deployment/k8s/scripts/setup.sh"], ("cluster1-control-plane",)),
 }
