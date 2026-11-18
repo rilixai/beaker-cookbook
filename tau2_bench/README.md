@@ -57,8 +57,8 @@ this directory with `python -m pip install . ./vendor/tau2`.
   Completions directly with the OpenAI SDK, not LiteLLM. tau2's LiteLLM path sends every
   `gpt-5*` model through the Responses API, and the gateway is OpenAI-compatible Chat
   Completions.
-- **User simulator (fixed):** `openai/gpt-5.5` at reasoning `low`, upstream's 2.0
-  benchmark default. It never follows the run's model choice, so a comparison changes
+- **User simulator (fixed):** `anthropic/claude-haiku-5-5` at reasoning `low`, chosen
+  to reduce simulator cost. It never follows the run's model choice, so a comparison changes
   the agent, not the test. Its calls are traced in `tau2.user_sim` stages.
 - **Retail NL-assertion judge (fixed across candidates):** GPT-6 Luna
   (`gpt-6-luna`) at reasoning `low`. It runs in `score_case` through the
