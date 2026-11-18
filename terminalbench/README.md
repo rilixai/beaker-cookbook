@@ -93,6 +93,8 @@ Harbor only after agent execution. Oracle solutions are not staged.
 
 ## Fixed small dataset
 
+This 8/4 partition is a custom development split, not an official benchmark split.
+
 The source is the exact commit used by Harbor's `terminal-bench@2.0` registry:
 `69671fbaac6d67a7ef0dfec016cc38a64ef7a77c`. The downloaded archive is checked against
 a pinned SHA-256 digest before extraction. Setup stages only the chosen task's
@@ -119,6 +121,36 @@ The subset was selected without agent scores. From the pinned task metadata:
 
 Beaker uses train tasks to improve the agent and keeps test tasks held out.
 Four test tasks give a coarse score, so use a larger held-out set for firm claims.
+
+## Full benchmark dataset
+
+The [official TerminalBench 2.0 release](https://github.com/harbor-framework/terminal-bench-2)
+contains 89 evaluation tasks and does not define a training partition. To preserve
+that evaluation set, upload all 89 tasks as `test`, with an empty `train` file:
+
+```bash
+uv run python .beaker/upload_dataset.py --base-url "$BEAKER_API_BASE_URL" \
+  --agent terminalbench-2-0 --full
+
+# Smoke defaults to train; explicitly select test for this evaluation dataset.
+uv run beaker --base-url "$BEAKER_API_BASE_URL" run smoke --strict \
+  --integration-id terminalbench --split test \
+  --dataset 'terminalbench-2.0-full@<revision>'
+```
+
+This creates `terminalbench-2.0-full` and leaves `terminalbench-small` unchanged.
+Beaker requires both split names and files, so the upload declares
+`train=0, test=89` and supplies an empty `train.jsonl`; it does not add or duplicate
+any training rows.
+Both use the same pinned upstream commit. The integration accepts all 89 tasks
+and preserves each task's original resources and timeouts. Full-benchmark tasks
+can require more resources and time than the small subset.
+
+This test-only dataset does not supply training examples for Beaker optimization.
+Use separate development data if the full benchmark must remain held out; training
+on the custom 8-task subset overlaps this evaluation set. The recipe's cheap seed
+settings are unchanged, so matching the task set alone does not reproduce an
+official leaderboard configuration or result.
 
 ## Scoring and failures
 

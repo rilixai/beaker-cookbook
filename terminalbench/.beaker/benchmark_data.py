@@ -1,4 +1,4 @@
-"""Pinned real tasks and the fixed 8/4 quick-start split."""
+"""Pinned benchmark tasks, with full evaluation and custom 8/4 development datasets."""
 
 from __future__ import annotations
 
@@ -46,8 +46,8 @@ class Row(BaseModel):
 
     @model_validator(mode="after")
     def validate_task(self) -> Row:
-        if self.id != self.input.task_id or self.id not in TASKS:
-            raise ValueError("Row must identify one task from the fixed TerminalBench subset")
+        if self.id != self.input.task_id or self.id not in full_task_ids():
+            raise ValueError("Row must identify one task from the pinned TerminalBench 2.0 release")
         if self.expected != {"reward": 1}:
             raise ValueError("TerminalBench expected reward must be 1")
         return self
@@ -81,6 +81,19 @@ def task_root() -> Path:
     return root
 
 
+def full_task_ids() -> tuple[str, ...]:
+    names = tuple(
+        sorted(
+            path.name
+            for path in task_root().iterdir()
+            if (path / "task.toml").is_file() and (path / "instruction.md").is_file()
+        )
+    )
+    if len(names) != 89:
+        raise ValueError(f"Expected 89 tasks in the pinned benchmark, found {len(names)}")
+    return names
+
+
 def rows(root: Path, names: tuple[str, ...]) -> list[dict[str, Any]]:
     return [
         Row(
@@ -92,17 +105,19 @@ def rows(root: Path, names: tuple[str, ...]) -> list[dict[str, Any]]:
     ]
 
 
-def write_dataset(destination: Path) -> None:
+def write_dataset(destination: Path, *, full: bool = False) -> dict[str, int]:
     root = task_root()
     destination.mkdir(parents=True, exist_ok=True)
-    for split, names in (("train", TRAIN), ("test", TEST)):
+    splits = {"train": (), "test": full_task_ids()} if full else {"train": TRAIN, "test": TEST}
+    for split, names in splits.items():
         text = "".join(json.dumps(row) + "\n" for row in rows(root, names))
         (destination / f"{split}.jsonl").write_text(text)
+    return {split: len(names) for split, names in splits.items()}
 
 
 def stage_task(task_id: str, destination: Path) -> Path:
-    if task_id not in TASKS:
-        raise ValueError(f"Task outside the fixed subset: {task_id}")
+    if task_id not in full_task_ids():
+        raise ValueError(f"Task outside the pinned benchmark: {task_id}")
     source = task_root() / task_id
     destination.mkdir(parents=True, exist_ok=True)
     archive = destination / "task.tar.gz"
