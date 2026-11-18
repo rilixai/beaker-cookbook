@@ -158,7 +158,8 @@ def _read_docx(path: Path) -> str:
         doc = Document(str(path))
     except Exception as exc:  # pragma: no cover - defensive
         return f"Could not parse {path.name!r} as .docx ({type(exc).__name__}: {exc})."
-    parts = _docx_container_text(doc)
+    note_refs: dict[tuple[str, str], None] = {}
+    parts = _docx_container_text(doc, note_refs)
     seen_parts: set[str] = set()
     for index, section in enumerate(doc.sections, start=1):
         for name in (
@@ -185,23 +186,62 @@ def _read_docx(path: Path) -> str:
             if part_name in seen_parts:
                 continue
             seen_parts.add(part_name)
-            text = _docx_container_text(container)
+            text = _docx_container_text(container, note_refs)
             if text:
                 parts.extend([f"# Section {index} {name.replace('_', ' ')}", *text])
+    parts.extend(_docx_notes_text(doc, note_refs))
     return "\n".join(parts)
 
 
-def _docx_container_text(container: Any) -> list[str]:
-    parts = [text for p in container.paragraphs if (text := _docx_paragraph_text(p)).strip()]
-    for table in container.tables:
+def _docx_container_text(container: Any, note_refs: dict[tuple[str, str], None]) -> list[str]:
+    return _docx_blocks_text(container.paragraphs, container.tables, note_refs)
+
+
+def _docx_blocks_text(
+    paragraphs: Sequence[Any], tables: Sequence[Any], note_refs: dict[tuple[str, str], None] | None = None
+) -> list[str]:
+    parts = [text for p in paragraphs if (text := _docx_paragraph_text(p, note_refs)).strip()]
+    for table in tables:
         for row in table.rows:
-            cells = ["\n".join(_docx_paragraph_text(p) for p in c.paragraphs).strip() for c in row.cells]
+            cells = ["\n".join(_docx_paragraph_text(p, note_refs) for p in c.paragraphs).strip() for c in row.cells]
             if any(cells):
                 parts.append("\t".join(cells))
     return parts
 
 
-def _docx_paragraph_text(paragraph: Any) -> str:
+def _docx_notes_text(doc: Any, note_refs: dict[tuple[str, str], None]) -> list[str]:
+    """Resolve referenced notes through package relationships, retaining their body markers."""
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import qn
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    if not note_refs:
+        return []
+    notes: dict[tuple[str, str], str] = {}
+    for kind, relationship in (("footnote", RT.FOOTNOTES), ("endnote", RT.ENDNOTES)):
+        for rel in doc.part.rels.values():
+            if rel.reltype != relationship or rel.is_external:
+                continue
+            root = parse_xml(rel.target_part.blob)
+            for note in root.findall(qn(f"w:{kind}")):
+                note_id = note.get(qn("w:id"))
+                key = (kind, note_id)
+                if key not in note_refs or note.get(qn("w:type"), "normal") != "normal":
+                    continue
+                # Use the document's styles for note paragraphs and table cells.
+                text = _docx_blocks_text(
+                    [Paragraph(p, doc) for p in note.findall(qn("w:p"))],
+                    [Table(table, doc) for table in note.findall(qn("w:tbl"))],
+                )
+                notes[key] = "\n".join(text)
+    return [
+        f"[{kind}:{note_id}]\n{notes.get((kind, note_id), 'Note text unavailable.')}" for kind, note_id in note_refs
+    ]
+
+
+def _docx_paragraph_text(paragraph: Any, note_refs: dict[tuple[str, str], None] | None = None) -> str:
     """Keep rubric-visible formatting and revisions in the judge's text input.
 
     Paragraph.text drops run styling and text inside tracked insertions/deletions.
@@ -234,6 +274,13 @@ def _docx_paragraph_text(paragraph: Any) -> str:
                     parts.append("\t")
                 elif child.tag in {qn("w:br"), qn("w:cr")}:
                     parts.append("\n")
+                elif child.tag in {qn("w:footnoteReference"), qn("w:endnoteReference")}:
+                    kind = "footnote" if child.tag == qn("w:footnoteReference") else "endnote"
+                    note_id = child.get(qn("w:id"))
+                    if note_id is not None:
+                        parts.append(f"[{kind}:{note_id}]")
+                        if note_refs is not None:
+                            note_refs.setdefault((kind, note_id), None)
             text = "".join(parts)
             if text and font_flag(run, "bold"):
                 text = f"[bold]{text}[/bold]"
