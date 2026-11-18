@@ -24,6 +24,7 @@ text fixtures and never touch the heavy parsers.
 from __future__ import annotations
 
 import email
+import json
 import logging
 import shutil
 from collections.abc import Callable, Sequence
@@ -323,10 +324,14 @@ def _docx_paragraph_text(paragraph: Any, note_refs: dict[tuple[str, str], None] 
                 text = f"[color {color}]{text}[/color]"
             return text
         text = "".join(inline(child) for child in element)
-        if text and element.tag in {qn("w:ins"), qn("w:moveTo")}:
-            return f"[inserted]{text}[/inserted]"
-        if text and element.tag in {qn("w:del"), qn("w:moveFrom")}:
-            return f"[deleted]{text}[/deleted]"
+        if text and element.tag in {qn("w:ins"), qn("w:moveTo"), qn("w:del"), qn("w:moveFrom")}:
+            kind = "inserted" if element.tag in {qn("w:ins"), qn("w:moveTo")} else "deleted"
+            metadata = "".join(
+                f" {key}={json.dumps(value, ensure_ascii=False)}"
+                for key in ("author", "date", "id")
+                if (value := element.get(qn("w:" + key))) is not None
+            )
+            return f"[{kind}{metadata}]{text}[/{kind}]"
         return text
 
     return inline(paragraph._p)

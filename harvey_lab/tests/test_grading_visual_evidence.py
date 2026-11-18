@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
 from docx.shared import RGBColor
@@ -142,3 +143,39 @@ def test_missing_word_comment_is_explicit_without_dropping_document(tmp_path: Pa
     doc.save(path)
     text = extract_text(path)
     assert text == "Keep the document body.[comment:7]\n[comment:7]\nComment text unavailable."
+
+
+@pytest.mark.parametrize(
+    ("revision", "marker", "text_tag"),
+    [
+        ("ins", "inserted", "t"),
+        ("del", "deleted", "delText"),
+        ("moveTo", "inserted", "t"),
+        ("moveFrom", "deleted", "delText"),
+    ],
+)
+def test_tracked_revision_authors_and_rounds_reach_the_judge(tmp_path: Path, revision, marker, text_tag):
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    workspace = TaskWorkspace(tmp_path)
+    doc = Document()
+    paragraphs = [doc.add_paragraph(), doc.add_table(rows=1, cols=1).cell(0, 0).paragraphs[0]]
+    fragments = []
+    for index, (paragraph, author) in enumerate(zip(paragraphs, ["Calyx", "Nisha Subramanian"], strict=True)):
+        element = OxmlElement("w:" + revision)
+        element.set(qn("w:author"), author)
+        element.set(qn("w:date"), f"2025-06-{22 + index}T12:00:00Z")
+        element.set(qn("w:id"), str(index))
+        run = OxmlElement("w:r")
+        text = OxmlElement("w:" + text_tag)
+        text.text = f"Round {index + 1} covenant"
+        run.append(text)
+        element.append(run)
+        paragraph._p.append(element)
+        fragments.append(
+            f'[{marker} author="{author}" date="2025-06-{22 + index}T12:00:00Z" id="{index}"]'
+            f"Round {index + 1} covenant[/{marker}]"
+        )
+    doc.save(workspace.deliverable_path("rounds.docx"))
+    assert_judge_receives(workspace, "rounds.docx", fragments)
