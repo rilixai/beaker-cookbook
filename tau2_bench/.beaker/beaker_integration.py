@@ -26,6 +26,7 @@ from beaker import (
     inference_target,
     repository,
 )
+from typesafe_sdk import TypeSafeAPIConnectionError, TypeSafeInternalServerError, TypeSafeRateLimitError
 
 from tau2_bench import benchmark, scoring
 from tau2_bench.agent import Agent, load_instructions
@@ -75,13 +76,19 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
             message = f"{type(exc).__name__}: {exc}"
             stage.output({"error": message})
             # LiteLLM's simulator errors share the SDK base classes, but use different subclasses for 5xx.
-            if isinstance(exc, openai.APIConnectionError) or (
-                isinstance(exc, openai.APIStatusError) and (exc.status_code == 429 or 500 <= exc.status_code < 600)
-            ):
+            if isinstance(
+                exc,
+                (
+                    openai.APIConnectionError,
+                    TypeSafeAPIConnectionError,
+                    TypeSafeRateLimitError,
+                    TypeSafeInternalServerError,
+                ),
+            ) or (isinstance(exc, openai.APIStatusError) and (exc.status_code == 429 or 500 <= exc.status_code < 600)):
                 raise RetryableCaseError(message) from exc
             return CaseResult(output={"error": message}, output_kind="record", context={**context, "error": message})
         finally:
-            chat.client.close()
+            chat.close()
         output = scoring.summary(simulation)
         stage.output(output)
     return CaseResult(

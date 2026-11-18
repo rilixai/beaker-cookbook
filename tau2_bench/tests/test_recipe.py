@@ -10,6 +10,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import httpx
+import httpx2
 import openai
 import pytest
 import tau2.evaluator.evaluator_nl_assertions as upstream_judge
@@ -29,7 +30,7 @@ from tau2.data_model.simulation import (
 )
 from tau2.data_model.tasks import RewardType
 
-from tau2_bench import benchmark, data, scoring
+from tau2_bench import benchmark, data, llm, scoring
 from tau2_bench.user_sim import USER_LLM
 
 
@@ -141,14 +142,43 @@ def completion(model: str, content: str) -> dict[str, Any]:
 def stubbed(
     integration: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[dict[str, list[Any]]]:
-    """Stub both model clients and run inside a candidate directory with its own prompt."""
-    seen: dict[str, list[Any]] = {"agent": [], "user": [], "status": [200]}
+    """Stub model requests and run inside a candidate directory with its own prompt."""
+    seen: dict[str, list[Any]] = {"agent": [], "user": [], "decision": [], "actions": [], "status": [200]}
     (tmp_path / "prompts").mkdir()
     (tmp_path / "prompts/system.md").write_text("Candidate instructions: refuse politely.")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "offline-test-key")
     monkeypatch.setenv("BEAKER_INFERENCE_BASE_URL", GATEWAY)
     monkeypatch.setenv("BEAKER_INFERENCE_API_KEY", "run-token")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "offline-test-key")
+
+    def decide(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        seen["decision"].append({"url": str(request.url), **body})
+        options = body["questions"]["next_action"]["criteria"]
+        action = seen["actions"].pop(0) if seen["actions"] else "reply_to_customer"
+        return httpx2.Response(
+            200,
+            json={
+                "model": body["model"],
+                "usage": {"input_tokens": 10, "output_tokens": 1},
+                "answers": {
+                    "next_action": {
+                        "type": "choice",
+                        "choice": action,
+                        "confidence": 1,
+                        "probabilities": {name: float(name == action) for name in options},
+                    }
+                },
+            },
+        )
+
+    real_typesafe = llm.TypeSafeClient
+    monkeypatch.setattr(
+        llm,
+        "TypeSafeClient",
+        lambda **kwargs: real_typesafe(transport=httpx2.MockTransport(decide), compression=False, **kwargs),
+    )
 
     def respond(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
@@ -156,7 +186,24 @@ def stubbed(
         status = seen["status"][0]
         if status != 200:
             return httpx.Response(status, json={"error": {"message": "stub", "type": "stub"}})
-        return httpx.Response(200, json=completion(body["model"], "Sorry, I cannot help with that."))
+        response = completion(body["model"], "Sorry, I cannot help with that.")
+        if body.get("tools"):
+            name = body["tools"][0]["function"]["name"]
+            response["choices"][0].update(
+                finish_reason="tool_calls",
+                message={
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "lookup",
+                            "type": "function",
+                            "function": {"name": name, "arguments": json.dumps({"reservation_id": "fixture"})},
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(200, json=response)
 
     real_openai = openai.OpenAI
 
@@ -203,8 +250,24 @@ async def test_agent_follows_runtime_model_and_simulator_stays_pinned(
     await run(integration, None)
     assert {call["model"] for call in stubbed["agent"]} == {"gpt-6-luna"}
     assert stubbed["agent"][0]["reasoning_effort"] == "none"
-    assert stubbed["agent"][0]["tools"]
+    assert "tools" not in stubbed["agent"][0]
     assert {call["model"] for call in stubbed["user"]} == {USER_LLM}
+
+
+async def test_native_decision_controls_the_agent_turn(integration: ModuleType, stubbed: dict[str, list[Any]]) -> None:
+    stubbed["actions"].append("get_reservation_details")
+    result = await run(integration, None)
+    decisions, agent = stubbed["decision"], stubbed["agent"]
+    assert len(decisions) == len(agent) == 2
+    assert {d["url"] for d in decisions} == {"https://api.typesafe.ai/v1/systemone"}
+    assert {d["model"] for d in decisions} == {"jev-1.14.0"}
+    assert all(d["questions"]["next_action"]["type"] == "choice" for d in decisions)
+    assert decisions[0]["state"] == agent[0]["messages"]
+    assert [tool["function"]["name"] for tool in agent[0]["tools"]] == ["get_reservation_details"]
+    assert agent[0]["tool_choice"] == "required"
+    assert agent[1]["messages"][-1]["role"] == "tool"
+    assert "tools" not in agent[1]
+    assert result.output["termination_reason"] == "user_stop"  # type: ignore[index, call-overload]
 
 
 async def test_trajectory_is_scored_by_upstream_evaluator(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
+from contextlib import closing
 from pathlib import Path
 
 from tau2_bench import benchmark, scoring
@@ -24,7 +25,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, object]:
     turns: list[int] = []
     errors = 0
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w") as output:
+    with closing(chat), args.output.open("w") as output:
         for row in rows:
             domain, task_id = row.input.domain, row.input.task_id
             outcome: dict[str, object] = {"id": row.id}

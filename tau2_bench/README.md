@@ -48,6 +48,8 @@ this directory with `python -m pip install . ./vendor/tau2`.
 
 ## Models
 
+- **Turn routing:** native TypeSafe System One (`jev-1.14.0`) chooses a reply or one
+  of the available tools from the policy and conversation so far.
 - **Agent:** without a model choice, `gpt-6-luna` at reasoning `none`, which
   GPT-6 Luna requires for tool calling through Chat Completions. It uses
   `OPENAI_API_KEY` (Beaker's provider proxy in hosted rollouts). A model-comparison run
@@ -55,8 +57,8 @@ this directory with `python -m pip install . ./vendor/tau2`.
   Completions directly with the OpenAI SDK, not LiteLLM. tau2's LiteLLM path sends every
   `gpt-5*` model through the Responses API, and the gateway is OpenAI-compatible Chat
   Completions.
-- **User simulator (fixed):** `openai/gpt-5.5` at reasoning `low`, upstream's 2.0
-  benchmark default. It never follows the run's model choice, so a comparison changes
+- **User simulator (fixed):** `anthropic/claude-haiku-5-5` at reasoning `low`, chosen
+  to reduce simulator cost. It never follows the run's model choice, so a comparison changes
   the agent, not the test. Its calls are traced in `tau2.user_sim` stages.
 - **Retail NL-assertion judge (fixed across candidates):** GPT-6 Luna
   (`gpt-6-luna`) at reasoning `low`. It runs in `score_case` through the
@@ -91,17 +93,22 @@ These cases score 0:
 
 Provider outages (connection errors, rate limits, 5xx responses) are retried, not scored.
 
-## Adding decision calls
+## Optimizing the decision model
 
-The seed agent makes no decision-API calls. If you add one, for example a closed-set
-policy judgment beside the chat call in `llm.py` or `agent.py`, trace it as a model call.
-Use provider `typesafe` with operation `systemone`, or provider `openai` with the
-decisions operation, as in [`jev_banking77/.beaker/beaker_integration.py`](../jev_banking77/.beaker/beaker_integration.py).
-Untraced decision calls cannot be found in baseline traces.
+The seed uses the decision on every turn with tools available. When Jev selects
+a tool, the chat model receives only that tool and must generate its arguments.
+When Jev selects a reply, the chat model receives no tools. The chat model still
+handles wording and argument generation. `llm.py` contains the editable decision
+instructions and choices. The baseline records these calls as provider
+`typesafe`, operation `systemone`, with token usage.
+
+Run the normal Beaker optimization on this branch with TypeSafe provider routing.
+A Beaker chat model override changes the chat model only. Use the existing
+dataset and score to compare changes to the decision instructions or routing.
 
 ## Evaluate locally
 
-Set `OPENAI_API_KEY`. This command makes paid calls for the agent, the simulator and
+Set `OPENAI_API_KEY` and `TYPESAFE_API_KEY`. This command makes paid calls for the agent, the simulator and
 (retail) the judge:
 
 ```bash
