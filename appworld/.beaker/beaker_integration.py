@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from appworld_setup import prepare_appworld
+from appworld_setup import check_model_setting, prepare_appworld
 from beaker import (
     Case,
     CaseResult,
@@ -47,6 +47,7 @@ class Setup(RunSetup[Row]):
 
     @asynccontextmanager
     async def prepare_run(self, *, runtime):
+        check_model_setting(runtime)
         self.root = prepare_appworld()
         yield {"repository": RepositoryRunSetupResult()}
 

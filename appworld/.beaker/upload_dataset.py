@@ -25,6 +25,11 @@ def main() -> None:
         action="store_true",
         help="Upload a small set instead: the first 4 train scenarios (3 train, 1 held out).",
     )
+    parser.add_argument(
+        "--agent",
+        default=None,
+        help="Agent key to upload to. Default: appworld-fresh, or appworld-task-goal-completion with --tgc.",
+    )
     args = parser.parse_args()
     if args.quickstart and args.tgc:
         parser.error("--quickstart is not supported with --tgc")
@@ -80,7 +85,7 @@ def main() -> None:
                 "upload",
                 temporary,
                 "--agent",
-                "appworld-task-goal-completion" if args.tgc else "appworld-fresh",
+                args.agent or ("appworld-task-goal-completion" if args.tgc else "appworld-fresh"),
                 "--name",
                 "appworld-tgc-full" if args.tgc else "appworld-sgc-quickstart" if quick else "appworld-sgc-full",
                 "--total-count",

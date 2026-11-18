@@ -64,8 +64,19 @@ class ModelProfile:
     temperature: float = 0.0  # standard family only
     top_p: float | None = None  # standard family only
     max_output_tokens: int | None = None  # per model request; family default if None
+    # Another OpenAI-compatible Chat Completions endpoint, such as the You.com
+    # Inference Router or OpenRouter. The provider then picks sampling defaults,
+    # as Beaker's gateway does; reasoning goes in `extra_body` in the provider's shape.
+    base_url: str | None = None
+    api_key_env: str | None = None  # environment variable holding the endpoint's key
+    model: str | None = None  # model ID sent to the endpoint; the table name if unset
+    extra_body: dict[str, Any] | None = None  # provider-specific request fields
 
     def __post_init__(self) -> None:
+        if self.base_url is not None:
+            if not self.api_key_env:
+                raise ValueError(f"{self.name}: a base_url endpoint needs api_key_env.")
+            self.api_type = "chat_completions"
         if self.family is None:
             self.family = infer_family(self.name)
         if self.family not in ("reasoning", "standard"):
@@ -75,8 +86,20 @@ class ModelProfile:
                 f"Invalid reasoning effort {self.reasoning_effort!r}; expected one of {REASONING_EFFORTS}."
             )
 
+    @property
+    def api_model(self) -> str:
+        """The model ID sent to the API."""
+        return self.model or self.name
+
     def settings(self) -> dict[str, Any]:
         """Kwargs for the Agents SDK's ``ModelSettings``."""
+        if self.base_url is not None:
+            endpoint: dict[str, Any] = {"tool_choice": "auto"}
+            if self.max_output_tokens is not None:
+                endpoint["max_tokens"] = self.max_output_tokens
+            if self.extra_body:
+                endpoint["extra_body"] = dict(self.extra_body)
+            return endpoint
         family: ModelFamily = self.family or infer_family(self.name)
         max_output_tokens = self.max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS[family]
         settings: dict[str, Any] = {"store": False, "max_tokens": max_output_tokens}

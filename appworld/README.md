@@ -69,6 +69,16 @@ Each evaluator requirement becomes a pass/fail check grouped by task ID, so the 
 
 **Editable scope:** `code_agent.py` and `prompts/`. Scoring, bootstrap code, model config, and vendored code are fixed. Integration internals are in [`.beaker/README.md`](.beaker/README.md).
 
+**Models.** With `--optimization-model`, hosted runs call the model through Beaker's inference gateway. Without one, they use a block from `configs/model.toml`: `gpt-6-luna` by default, or the block named by `APPWORLD_MODEL` on the agent. A block with a `base_url`, such as the You.com Inference Router blocks, sends the agent's calls straight to that endpoint. Beaker then records their tokens but not their cost. To run GLM 5.3 Flash on the router:
+
+```bash
+uv run beaker agent env set YDC_API_KEY --value-stdin   # paste a You.com API key
+uv run beaker agent env set APPWORLD_MODEL --value youcom-glm-5.3-flash
+uv run beaker run trigger --dataset 'appworld-sgc-full@<revision>'
+```
+
+Setup stops the run if `APPWORLD_MODEL` names no block or its key is unset. An `--optimization-model` given at launch takes precedence.
+
 
 ## Beaker optimization results
 
@@ -130,6 +140,12 @@ uv run appworld-openai-agents-sdk run --model gpt-4.1 --temperature 0 --split de
 Reasoning models (GPT-5/6, o-series) take `--reasoning-effort` and never receive `temperature`/`top_p`/`seed`. Standard models (GPT-4.1, GPT-4o) take `--temperature`/`--top-p` and never receive `reasoning`. Passing the wrong flag for a model is an error. `--max-output-tokens` defaults to 65,536 for reasoning models (reasoning tokens count toward it) and 16,384 otherwise.
 
 In hosted Beaker runs, models route through Beaker's inference gateway, which controls reasoning and sampling settings.
+
+To run locally on another OpenAI-compatible endpoint, give a model block `base_url`, `api_key_env` and, if its name differs, `model`. The agent then uses Chat Completions on that endpoint and leaves sampling to the provider, like the gateway. Reasoning effort goes in `extra_body`, in the provider's own shape. `configs/model.toml` has blocks for DeepSeek V4.1 Flash and GLM 5.3 Flash on the You.com Inference Router (`YDC_API_KEY`, `reasoning_effort`) and on OpenRouter (`OPENROUTER_API_KEY`, `reasoning.effort`):
+
+```bash
+uv run appworld-openai-agents-sdk run --config configs/model.toml --model youcom-glm-5.3-flash --split dev --max-tasks 3
+```
 
 Reasoning models are non-deterministic, so for a citable number run the evaluation several times and report mean ± variance.
 
