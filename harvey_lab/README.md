@@ -274,19 +274,26 @@ and a fixture task tree: no network, no spend.
 
 ### Dataset review evidence
 
-`uv run python .beaker/upload_splits.py --full --name harvey-lab-full-1760` retains the frozen 1660/100 split
-and includes source documents for each task. The upload contains an original ZIP
-and a compressed text index per task, with file checksums and the upstream commit.
-The platform downloads text only for the cases in the current review batch.
-Existing uploads must be uploaded as a new revision to include this evidence.
+`uv run python .beaker/upload_splits.py --full --name harvey-lab-full-1760` retains
+the frozen 1660/100 split. It uploads the task rows and a manifest identifying
+`harveyai/harvey-labs` and the pinned upstream commit. Source documents are not
+included in the upload. Existing datasets with that source and commit can be
+reviewed without uploading a new document bundle.
 
-Text comes from this recipe's document reader. This is evidence for reviewing the
-task and rubric; it is not an independent validation of that reader. PDF text is
-limited to 50 pages, and spreadsheets to 200 rows and 40 columns per sheet.
-Images, rendered layout, evaluated formulas, and email attachments are not assessed.
-The index records unreadable, unsupported, and truncated content. Originals remain
-available for further inspection. A task's text is capped at 32 MiB.
+The platform reviewer lists the pinned task's files and downloads individual
+files as needed. It searches and reads bounded text pages, with a disk cache and
+separate memory/time limits for document extraction. Cases can contain several
+GB of source files; they are not expanded into one in-memory evidence index.
+Citations retain the commit, path, file checksums, and text-page location. Read
+pages and coverage records are saved with the review, rather than uploading all
+original files as dataset artifacts. Unsupported formats, extraction limits,
+and unread pages remain explicit evidence gaps.
+
+The current text readers preserve the integration's formatting markers. PDF text
+is limited to 50 pages, and spreadsheets to 200 rows and 40 columns per sheet.
+Images, rendered layout, evaluated formulas, and email attachments are not
+assessed. These limits apply to individual file extraction, not total case size.
 
 A supplied `--tasks-root` must be a clean checkout at the pinned upstream commit.
-The default downloads the selected task folders from that commit. `--dry-run`
+The default downloads the selected task folders for local validation. `--dry-run`
 still performs no downloads, uploads, or model calls.
