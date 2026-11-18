@@ -29,7 +29,7 @@ from beaker import (
     repository,
 )
 from pydantic import BaseModel, Field
-from toolathlon_diagnostics import DIRECTORY_ENV, TASK_ENV, capture, tail
+from toolathlon_diagnostics import DIRECTORY_ENV, TASK_ENV, capture, preprocess_error, tail
 from toolathlon_harness import patch_paths
 from toolathlon_native_trace import NativeTrace
 from toolathlon_setup import (
@@ -258,7 +258,8 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
                     finally:
                         telemetry.read_status()
                 if process.returncode != 0 or not response_path.is_file():
-                    detail = tail(stderr_path, env) or tail(stdout_path, env)
+                    detail = preprocess_error(output_dir / "run.log", env) or tail(stderr_path, env)
+                    detail = detail or tail(stdout_path, env)
                     raise RetryableCaseError(
                         f"Toolathlon runner subprocess failed (exit {process.returncode}): {detail}"
                     )

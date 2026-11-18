@@ -83,3 +83,48 @@
      if [ "$AGENT_EXIT_CODE" -eq 0 ]; then
          echo "✓ Agent completed successfully"
      else
+--- a/tasks/finalpool/k8s-mysql/scripts/k8s_mysql.sh
++++ b/tasks/finalpool/k8s-mysql/scripts/k8s_mysql.sh
+@@ -432,9 +432,17 @@
+   # registry pull is healthy; anything beyond that is a real failure.
+   if ! kubectl --kubeconfig="$configpath" -n data rollout status statefulset/mysql-f1 --timeout=300s; then
+     log_error "mysql-f1 rollout did not become ready within 5min — preprocess aborting"
+-    log_info "Pod state for diagnostics:"
+-    kubectl --kubeconfig="$configpath" -n data get pods -o wide --no-headers 2>/dev/null || true
+-    kubectl --kubeconfig="$configpath" -n data describe pod mysql-f1-0 2>/dev/null | grep -E "Image|Pulling|Failed|Reason" | head -10 || true
++    local -a data_kubectl=(kubectl --kubeconfig="$configpath" --request-timeout=5s -n data)
++    local scheduling_message
++    scheduling_message=$("${data_kubectl[@]}" get pod mysql-f1-0 \
++      -o 'jsonpath={.status.conditions[?(@.type=="PodScheduled")].message}') || true
++    printf 'TOOLATHLON_PREPROCESS_ERROR: MySQL pod mysql-f1-0 was not ready after 5 minutes%s\n' \
++      "${scheduling_message:+: $scheduling_message}"
++    log_info "MySQL pod, storage and events:"
++    "${data_kubectl[@]}" get pods -o wide || true
++    "${data_kubectl[@]}" describe pod mysql-f1-0 || true
++    "${data_kubectl[@]}" describe pvc || true
++    "${data_kubectl[@]}" get events --sort-by=.lastTimestamp || true
+     return 1
+   fi
+
+--- a/tasks/finalpool/k8s-pr-preview-testing/preprocess/main.py
++++ b/tasks/finalpool/k8s-pr-preview-testing/preprocess/main.py
+@@ -29,13 +29,16 @@
+     # cluster bring-up (port-already-bound, kind create error, orphan-
+     # forwarder cleanup miss, etc.) surfaces as preprocess failure
+     # instead of a silent "ready".
+-    _, _, rc = await run_command(
++    _, stderr, rc = await run_command(
+         f"bash {script_path} {args.port} start {args.agent_workspace}",
+         debug=True, show_output=True,
+     )
+     if rc != 0:
+-        print(f"k8s_pr_preview_testing.sh failed with returncode={rc}; aborting preprocess",
+-              file=sys.stderr)
++        detail = " ".join(stderr.split())[-800:]
++        print(f"TOOLATHLON_PREPROCESS_ERROR: PR Preview setup failed (exit {rc})"
++              f"{': ' + detail if detail else ''}", file=sys.stderr)
++        if stderr:
++            print(stderr, file=sys.stderr)
+         sys.exit(rc)
+
+     print_color("Setting up Kubernetes cluster successfully!","green")

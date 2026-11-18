@@ -149,6 +149,13 @@ def tail(path: Path, environment: Mapping[str, str], limit: int = 4000) -> str:
         return redact(stream.read().decode("utf-8", errors="replace"), environment)[-limit:]
 
 
+def preprocess_error(path: Path, environment: Mapping[str, str]) -> str:
+    for line in reversed(tail(path, environment, limit=65536).splitlines()):
+        if line.startswith("TOOLATHLON_PREPROCESS_ERROR: "):
+            return line.removeprefix("TOOLATHLON_PREPROCESS_ERROR: ")[:1000]
+    return ""
+
+
 def publish(trace: Any, root: Path, cache: Path, environment: Mapping[str, str]) -> None:
     # Beaker shortens TMPDIR through a symlink. Resolve these trusted roots
     # before rejecting links inside a case's diagnostic/output directories.
