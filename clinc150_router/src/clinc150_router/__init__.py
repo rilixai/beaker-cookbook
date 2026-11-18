@@ -1,1 +1,1 @@
-"""CLINC150 intent routing with a chat model."""
+"""CLINC150 intent routing with a native decision model."""

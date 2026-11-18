@@ -16,16 +16,13 @@ from beaker import (
     RolloutRuntime,
     RunSetup,
     SetupRuntime,
-    inference_target,
     repository,
 )
-from openai import AsyncOpenAI
 from pydantic import ValidationError
+from typesafe_sdk import AsyncTypeSafeClient
 
-from clinc150_router.agent import ChatModel, route, system_prompt
+from clinc150_router.agent import question, route
 from clinc150_router.contracts import (
-    DEFAULT_MODEL,
-    DEFAULT_REASONING_EFFORT,
     LABELS,
     OUT_OF_SCOPE,
     REQUEST_TIMEOUT_SECONDS,
@@ -48,37 +45,13 @@ class Setup(RunSetup[Row]):
         yield Case(id=row.id, input=row.input.model_dump(), expected=row.expected.model_dump())
 
 
-def _client_for(runtime: RolloutRuntime[Any]) -> ChatModel:
-    """The model the run selected, through Beaker's inference gateway; else the pinned default.
-
-    A run started with a model choice (model-swap runs) resolves to a gateway
-    endpoint, a run-scoped token and a canonical ``<provider>:<model>`` name;
-    the gateway applies the run's reasoning effort, so none is sent. With no
-    selection the pinned model and ``OPENAI_API_KEY`` are used as-is, which
-    inside a hosted rollout is Beaker's provider proxy.
-    """
-    if runtime.model:
-        target = inference_target(runtime)
-        client = AsyncOpenAI(api_key=target.api_key, base_url=target.base_url, timeout=REQUEST_TIMEOUT_SECONDS)
-        return ChatModel(client=client, provider=target.model.partition(":")[0], model=target.model)
-    return ChatModel(
-        client=AsyncOpenAI(timeout=REQUEST_TIMEOUT_SECONDS),
-        provider="openai",
-        model=DEFAULT_MODEL,
-        reasoning_effort=DEFAULT_REASONING_EFFORT,
-    )
-
-
 async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> CaseResult:
+    if runtime.model:
+        raise ValueError("This recipe uses TypeSafe decisions. Select decision models for comparison.")
     message = Message.model_validate(case_input)
-    chat = _client_for(runtime)
-    try:
-        # Repository candidates execute with source_dir as their working directory.
-        # There is deliberately no fallback to seed prompts outside that candidate.
-        prompt = system_prompt(Path.cwd() / "prompts")
-        prediction = await route(message.text, chat=chat, prompt=prompt, trace=runtime.trace)
-    finally:
-        await chat.client.close()
+    routing_question = question(Path.cwd() / "prompts")
+    async with AsyncTypeSafeClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+        prediction = await route(message.text, client=client, routing_question=routing_question, trace=runtime.trace)
     return CaseResult(output=prediction.model_dump(mode="json"), output_kind="record")
 
 

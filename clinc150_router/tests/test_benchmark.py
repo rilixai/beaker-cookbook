@@ -8,15 +8,15 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
+from backports import zstd
 from beaker import Case, CaseResult
-from beaker.tracing import current_trace
-from openai import AsyncOpenAI
+from typesafe_sdk import AsyncTypeSafeClient
 
 from clinc150_router import cli
-from clinc150_router.agent import ChatModel, InvalidAnswer, parse_intent, route, system_prompt
-from clinc150_router.contracts import LABELS, OUT_OF_SCOPE, Prediction
+from clinc150_router.agent import question
+from clinc150_router.contracts import DEFAULT_MODEL, LABELS, OUT_OF_SCOPE, Prediction
 from clinc150_router.data import SPLIT_FILES, UPSTREAM, Expected, Message, Row, make_splits, source_file
 
 
@@ -34,40 +34,31 @@ def integration_module() -> ModuleType:
     return module
 
 
-def chat_client(
-    received: list[dict[str, Any]],
-    *,
-    content: str = json.dumps({"intent": INTENT}),
-    finish_reason: str = "stop",
-    refusal: str | None = None,
-) -> AsyncOpenAI:
-    def respond(request: httpx.Request) -> httpx.Response:
-        received.append(
-            {"url": str(request.url), "auth": request.headers["authorization"], **json.loads(request.content)}
-        )
-        return httpx.Response(
+def decision_client(received: list[dict[str, Any]], *, intent: str = INTENT) -> AsyncTypeSafeClient:
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        assert request.method == "POST"
+        assert str(request.url) == "https://api.typesafe.ai/v1/systemone"
+        body = request.content
+        if request.headers.get("content-encoding") == "zstd":
+            body = zstd.decompress(body)
+        received.append(json.loads(body))
+        return httpx2.Response(
             200,
             json={
-                "id": "chatcmpl-offline",
-                "object": "chat.completion",
-                "created": 0,
-                "model": json.loads(request.content)["model"],
-                "choices": [
-                    {
-                        "index": 0,
-                        "finish_reason": finish_reason,
-                        "message": {"role": "assistant", "content": content, "refusal": refusal},
+                "model": "resolved-decision-model",
+                "answers": {
+                    "intent": {
+                        "type": "choice",
+                        "choice": intent,
+                        "confidence": 1.0,
+                        "probabilities": {intent: 1.0},
                     }
-                ],
-                "usage": {"prompt_tokens": 900, "completion_tokens": 7, "total_tokens": 907},
+                },
+                "usage": {"input_tokens": 900, "output_tokens": 7},
             },
         )
 
-    return AsyncOpenAI(
-        api_key="offline-test-key",
-        base_url="https://offline.test/v1",
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
-    )
+    return AsyncTypeSafeClient(api_key="offline-test-key", transport=httpx2.MockTransport(respond))
 
 
 def fake_source() -> bytes:
@@ -132,10 +123,10 @@ def seed_intents() -> dict[str, str]:
     return intents
 
 
-def test_seed_prompt_lists_all_151_intents() -> None:
-    prompt = system_prompt(ROOT / "prompts")
+def test_seed_question_lists_all_151_intents() -> None:
+    routing_question = question(ROOT / "prompts")
     assert len(LABELS) == len(set(LABELS)) == 151 and LABELS[-1] == OUT_OF_SCOPE
-    assert all(f"\n- {label}: " in prompt for label in LABELS)
+    assert routing_question.criteria == seed_intents()
 
 
 @pytest.mark.parametrize(
@@ -150,80 +141,25 @@ def test_candidate_cannot_change_intent_ids(tmp_path: Path, change: Any) -> None
     intents = seed_intents()
     change(intents)
     with pytest.raises(ValueError, match="151 intent IDs"):
-        system_prompt(write_prompts(tmp_path, intents))
+        question(write_prompts(tmp_path, intents))
 
 
 def test_empty_descriptions_and_instructions_fail(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="non-empty"):
-        system_prompt(write_prompts(tmp_path / "a", seed_intents() | {INTENT: "  "}))
+        question(write_prompts(tmp_path / "a", seed_intents() | {INTENT: "  "}))
     with pytest.raises(ValueError, match="instructions"):
-        system_prompt(write_prompts(tmp_path / "b", seed_intents(), instructions=" "))
-
-
-@pytest.mark.parametrize(
-    "content",
-    [
-        '{"intent": "none_of_these"}',
-        '{"intent": null}',
-        '{"intent": "translate", "extra": 1}',
-        '{"intent": "oos", "intent": "translate"}',
-        "translate",
-        "",
-        None,
-        "[]",
-    ],
-)
-def test_unknown_answer_is_an_error_not_oos(content: str | None) -> None:
-    with pytest.raises(InvalidAnswer):
-        parse_intent(content)
-
-
-@pytest.mark.parametrize(("finish_reason", "refusal"), [("length", None), ("stop", "Refused")])
-async def test_incomplete_or_refused_answer_is_invalid(finish_reason: str, refusal: str | None) -> None:
-    async with chat_client([], finish_reason=finish_reason, refusal=refusal) as client:
-        prediction = await route(
-            TEXT, chat=ChatModel(client, "openai", "m"), prompt="Classify the message.", trace=cli.NoTrace()
-        )
-    assert prediction.intent is None and prediction.error
+        question(write_prompts(tmp_path / "b", seed_intents(), instructions=" "))
 
 
 # Integration
 
 
-async def test_run_case_uses_pinned_default_without_a_model_choice(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_run_case_sends_and_traces_native_choice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     integration = integration_module()
     write_prompts(tmp_path / "prompts", seed_intents(), instructions="Candidate-specific routing instructions.")
     monkeypatch.chdir(tmp_path)
     received: list[dict[str, Any]] = []
-    monkeypatch.setattr(integration, "AsyncOpenAI", lambda **kwargs: chat_client(received))
-    result = await integration.run_case(
-        case_input={"text": TEXT}, runtime=SimpleNamespace(model=None, trace=current_trace())
-    )
-    request = received[0]
-    assert request["model"] == "gpt-6-luna" and request["reasoning_effort"] == "low"
-    assert request["messages"][0]["content"].startswith("Candidate-specific routing instructions.")
-    assert request["messages"][1] == {"role": "user", "content": TEXT}
-    schema = request["response_format"]["json_schema"]["schema"]
-    assert schema["properties"]["intent"]["enum"] == list(LABELS)
-    assert result.output["intent"] == INTENT and result.output["input_tokens"] == 900
-
-
-async def test_run_case_uses_gateway_model_when_selected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    integration = integration_module()
-    write_prompts(tmp_path / "prompts", seed_intents())
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("BEAKER_INFERENCE_BASE_URL", "https://gateway.test/v1")
-    monkeypatch.setenv("BEAKER_INFERENCE_API_KEY", "run-scoped-token")
-    received: list[dict[str, Any]] = []
-    created: list[dict[str, Any]] = []
-
-    def client(**kwargs: Any) -> AsyncOpenAI:
-        created.append(kwargs)
-        return chat_client(received)
-
-    monkeypatch.setattr(integration, "AsyncOpenAI", client)
+    monkeypatch.setattr(integration, "AsyncTypeSafeClient", lambda **kwargs: decision_client(received))
     spans: list[dict[str, Any]] = []
 
     class RecordingTrace(cli.NoTrace):
@@ -231,27 +167,40 @@ async def test_run_case_uses_gateway_model_when_selected(tmp_path: Path, monkeyp
             spans.append(kwargs)
             return super().model_call(**kwargs)
 
-    runtime = SimpleNamespace(model="anthropic:claude-sonnet-5-5", trace=RecordingTrace())
-    await integration.run_case(case_input={"text": TEXT}, runtime=runtime)
-    assert (spans[0]["operation"], spans[0]["provider"], spans[0]["model"]) == (
-        "chat",
-        "anthropic",
-        "claude-sonnet-5-5",
+    result = await integration.run_case(
+        case_input={"text": TEXT}, runtime=SimpleNamespace(model=None, trace=RecordingTrace())
     )
-    assert created[0]["base_url"] == "https://gateway.test/v1" and created[0]["api_key"] == "run-scoped-token"
-    assert received[0]["model"] == "anthropic:claude-sonnet-5-5"
-    assert "reasoning_effort" not in received[0]
+    assert len(received) == 1
+    request = received[0]
+    assert request["model"] == DEFAULT_MODEL == "jev-1.14.0"
+    assert request["state"] == TEXT
+    assert request["questions"]["intent"] == {
+        "type": "choice",
+        "instructions": "Candidate-specific routing instructions.",
+        "criteria": seed_intents(),
+    }
+    assert (spans[0]["operation"], spans[0]["provider"], spans[0]["model"]) == ("systemone", "typesafe", DEFAULT_MODEL)
+    assert result.output["intent"] == INTENT and result.output["input_tokens"] == 900
+    assert result.output["model"] == "resolved-decision-model"
+
+
+async def test_run_case_rejects_chat_model_override() -> None:
+    integration = integration_module()
+    with pytest.raises(ValueError, match="Select decision models"):
+        await integration.run_case(
+            case_input={"text": TEXT}, runtime=SimpleNamespace(model="openai:gpt-6-luna", trace=cli.NoTrace())
+        )
 
 
 async def test_invalid_answer_is_observable_and_scores_wrong(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     integration = integration_module()
     write_prompts(tmp_path / "prompts", seed_intents())
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(integration, "AsyncOpenAI", lambda **kwargs: chat_client([], content='{"intent": "other"}'))
+    monkeypatch.setattr(integration, "AsyncTypeSafeClient", lambda **kwargs: decision_client([], intent="other"))
     result = await integration.run_case(
-        case_input={"text": TEXT}, runtime=SimpleNamespace(model=None, trace=current_trace())
+        case_input={"text": TEXT}, runtime=SimpleNamespace(model=None, trace=cli.NoTrace())
     )
-    assert result.output["intent"] is None and "unknown intent" in result.output["error"]
+    assert result.output["intent"] is None and "known intent" in result.output["error"]
     case = Case(id="1", input={"text": TEXT}, expected={"intent": OUT_OF_SCOPE})
     scored = await integration.score_case(case=case, result=result, case_files_dir=tmp_path)
     assert scored.objective == 0 and scored.checks[0].message == result.output["error"]
@@ -314,9 +263,9 @@ async def test_cli_keeps_errors_in_denominator_and_reports_oos_metrics(
     prompts = []
     timestamps = iter([0.0, 0.01, 1.0, 1.02, 2.0, 2.03, 3.0, 3.8])
 
-    def read_prompt(path: Path) -> str:
+    def read_question(path: Path) -> Any:
         prompts.append(path)
-        return system_prompt(path)
+        return question(path)
 
     async def fake_route(text: str, **kwargs: Any) -> Any:
         answer = next(answers)
@@ -325,15 +274,14 @@ async def test_cli_keeps_errors_in_denominator_and_reports_oos_metrics(
         return Prediction(intent=answer, model="m", input_tokens=10, output_tokens=1, cost_usd=0.001)
 
     monkeypatch.setattr(cli, "route", fake_route)
-    monkeypatch.setattr(cli, "system_prompt", read_prompt)
+    monkeypatch.setattr(cli, "question", read_question)
     monkeypatch.setattr(cli, "time", SimpleNamespace(perf_counter=lambda: next(timestamps)))
     output = tmp_path / "result.jsonl"
     args = argparse.Namespace(
         data=tmp_path, split="validation", limit=None, prompts=ROOT / "prompts", output=output, concurrency=1
     )
-    async with chat_client([]) as client:
-        metrics = await cli.evaluate(args, ChatModel(client, "openai", "m"))
-        assert not client.is_closed()
+    async with decision_client([]) as client:
+        metrics = await cli.evaluate(args, client)
     assert prompts == [ROOT / "prompts"]
     assert metrics["cases"] == 4 and metrics["errors"] == 1
     assert metrics["accuracy"] == pytest.approx(2 / 4)

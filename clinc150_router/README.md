@@ -1,20 +1,20 @@
-# CLINC150 chat router
+# CLINC150 decision router
 
 Route virtual-assistant requests to one of 150 intents, or to `oos` when no
-intent fits, with one structured chat-model call per message. Beaker optimizes
+intent fits, with one native TypeSafe decision call per message. Beaker optimizes
 `prompts/instructions.md`, `prompts/intents.json` and
 `src/clinc150_router/agent.py`; intent IDs, data and exact-label scoring stay fixed.
 
 ## How it works
 
-`agent.py` builds a system prompt from the instructions and the 151 intent
-descriptions, sends the user's message, and asks for JSON whose `intent` is an
-enum of the 151 IDs. An answer outside that set is recorded as an error and
-scored as wrong; it is never mapped to `oos`.
+`agent.py` sends the user message as state and asks a single TypeSafe System
+One `Choice` question. Its 151 options come from `prompts/intents.json`. The
+routing instructions come from `prompts/instructions.md`. The router records an
+unknown choice as an error and scores it as incorrect.
 
-Runs started with a model choice call that model through Beaker's inference
-gateway. Otherwise Beaker and the local CLI use `gpt-6-luna` with `low`
-reasoning effort, pinned in `src/clinc150_router/contracts.py`.
+The default decision model is `jev-1.14.0`. In Beaker's Decision models comparison,
+the gateway swaps the native decision call for the selected target. An ordinary
+optimization run uses native Jev and can optimize the routing prompts and code.
 
 Beaker gives each correct `oos` prediction 30 times the weight of a correct
 in-scope prediction. On the official validation split, the two groups
@@ -22,11 +22,8 @@ contribute equally to the objective. With Beaker's 0–1 per-case scores,
 perfect validation predictions yield a mean objective of about 0.0645.
 Raw accuracy, in-scope accuracy, and `oos` recall are reported separately.
 
-Every model or decision call must be traced with `trace.model_call`. The chat
-call uses operation `chat` with the resolved provider and model. Beaker traces
-include the benchmark messages and model replies. A decision
-call must use provider `typesafe` with operation `systemone`, or provider
-`openai` for the Decisions endpoint, so Beaker can find and compare it.
+The call is traced with provider `typesafe` and operation `systemone`. Traces
+include the benchmark messages and decision replies.
 
 ## Run with Beaker
 
@@ -61,9 +58,14 @@ Upload only `optimization/`: its `test.jsonl` is validation data. Keep
 repeats 3 utterances between train and val and 2 between train and test; they
 are kept as published.
 
+To verify decision-model swapping, select the decision-router branch, a small
+dataset revision, and **Decision models** in Beaker. Check that the selected
+target made a successful decision call on the validation split before scaling
+up the comparison.
+
 ## Evaluate locally
 
-Set `OPENAI_API_KEY` in your shell; this command makes paid API calls:
+Set `TYPESAFE_API_KEY` in your shell; this command makes paid API calls:
 
 ```bash
 uv run clinc150-router evaluate --data /tmp/clinc150-router-data \
@@ -80,7 +82,7 @@ Run offline tests with `BEAKER_AGENT_KEY= uv run python -m pytest -q`.
 
 ## Seed baseline
 
-Validation split (3,100 messages), `gpt-6-luna`, `low` effort:
+Validation split (3,100 messages), `jev-1.14.0`:
 
 | Metric | Value |
 |---|---|
