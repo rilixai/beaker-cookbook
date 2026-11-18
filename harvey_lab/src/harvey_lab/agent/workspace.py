@@ -200,12 +200,17 @@ def _docx_container_text(container: Any, note_refs: dict[tuple[str, str], None])
 def _docx_blocks_text(
     paragraphs: Sequence[Any], tables: Sequence[Any], note_refs: dict[tuple[str, str], None] | None = None
 ) -> list[str]:
-    parts = [text for p in paragraphs if (text := _docx_paragraph_text(p, note_refs)).strip()]
-    for table in tables:
-        for row in table.rows:
-            cells = ["\n".join(_docx_paragraph_text(p, note_refs) for p in c.paragraphs).strip() for c in row.cells]
-            if any(cells):
-                parts.append("\t".join(cells))
+    parts = []
+    # Keep comment ranges in document order, including ranges crossing a table.
+    blocks = sorted([*paragraphs, *tables], key=lambda block: block._element.getparent().index(block._element))
+    for block in blocks:
+        if hasattr(block, "rows"):
+            for row in block.rows:
+                cells = ["\n".join(_docx_blocks_text(c.paragraphs, c.tables, note_refs)).strip() for c in row.cells]
+                if any(cells):
+                    parts.append("\t".join(cells))
+        elif (text := _docx_paragraph_text(block, note_refs)).strip():
+            parts.append(text)
     return parts
 
 
@@ -220,7 +225,7 @@ def _docx_notes_text(doc: Any, note_refs: dict[tuple[str, str], None]) -> list[s
     if not note_refs:
         return []
     notes: dict[tuple[str, str], str] = {}
-    for kind, relationship in (("footnote", RT.FOOTNOTES), ("endnote", RT.ENDNOTES)):
+    for kind, relationship in (("footnote", RT.FOOTNOTES), ("endnote", RT.ENDNOTES), ("comment", RT.COMMENTS)):
         for rel in doc.part.rels.values():
             if rel.reltype != relationship or rel.is_external:
                 continue
@@ -237,7 +242,8 @@ def _docx_notes_text(doc: Any, note_refs: dict[tuple[str, str], None]) -> list[s
                 )
                 notes[key] = "\n".join(text)
     return [
-        f"[{kind}:{note_id}]\n{notes.get((kind, note_id), 'Note text unavailable.')}" for kind, note_id in note_refs
+        f"[{kind}:{note_id}]\n{notes.get((kind, note_id), 'Comment text unavailable.' if kind == 'comment' else 'Note text unavailable.')}"
+        for kind, note_id in note_refs
     ]
 
 
@@ -251,19 +257,41 @@ def _docx_paragraph_text(paragraph: Any, note_refs: dict[tuple[str, str], None] 
     from docx.oxml.ns import qn
     from docx.text.run import Run
 
-    def font_flag(run: Any, name: str) -> bool:
-        value = getattr(run.font, name)
-        if value is not None:
-            return bool(value)
+    def fonts(run: Any) -> list[Any]:
+        result = [run.font]
         for style in (run.style, paragraph.style):
             while style is not None:
-                value = getattr(style.font, name)
-                if value is not None:
-                    return bool(value)
+                result.append(style.font)
                 style = style.base_style
+        return result
+
+    def font_flag(run: Any, name: str) -> bool:
+        for font in fonts(run):
+            value = getattr(font, name)
+            if value is not None:
+                return bool(value)
         return False
 
+    def font_color(run: Any) -> str | None:
+        for font in fonts(run):
+            properties = font._element.rPr
+            color = properties.find(qn("w:color")) if properties is not None else None
+            if color is not None:
+                return " ".join(
+                    f"{key}={color.get(qn('w:' + key))}"
+                    for key in ("val", "themeColor", "themeTint", "themeShade")
+                    if color.get(qn("w:" + key)) is not None
+                )
+        return None
+
     def inline(element: Any) -> str:
+        if element.tag in {qn("w:commentRangeStart"), qn("w:commentRangeEnd")}:
+            comment_id = element.get(qn("w:id"))
+            if comment_id is not None:
+                if note_refs is not None:
+                    note_refs.setdefault(("comment", comment_id), None)
+                boundary = "start" if element.tag == qn("w:commentRangeStart") else "end"
+                return f"[comment:{comment_id}:{boundary}]"
         if element.tag == qn("w:r"):
             run = Run(element, paragraph)
             parts = []
@@ -274,8 +302,8 @@ def _docx_paragraph_text(paragraph: Any, note_refs: dict[tuple[str, str], None] 
                     parts.append("\t")
                 elif child.tag in {qn("w:br"), qn("w:cr")}:
                     parts.append("\n")
-                elif child.tag in {qn("w:footnoteReference"), qn("w:endnoteReference")}:
-                    kind = "footnote" if child.tag == qn("w:footnoteReference") else "endnote"
+                elif child.tag in {qn("w:footnoteReference"), qn("w:endnoteReference"), qn("w:commentReference")}:
+                    kind = child.tag.rsplit("}", 1)[-1].removesuffix("Reference")
                     note_id = child.get(qn("w:id"))
                     if note_id is not None:
                         parts.append(f"[{kind}:{note_id}]")
@@ -288,6 +316,11 @@ def _docx_paragraph_text(paragraph: Any, note_refs: dict[tuple[str, str], None] 
                 text = f"[italic]{text}[/italic]"
             if text and (font_flag(run, "strike") or font_flag(run, "double_strike")):
                 text = f"[strikethrough]{text}[/strikethrough]"
+            if text and font_flag(run, "underline"):
+                text = f"[underline]{text}[/underline]"
+            color = font_color(run)
+            if text and color:
+                text = f"[color {color}]{text}[/color]"
             return text
         text = "".join(inline(child) for child in element)
         if text and element.tag in {qn("w:ins"), qn("w:moveTo")}:
@@ -299,12 +332,46 @@ def _docx_paragraph_text(paragraph: Any, note_refs: dict[tuple[str, str], None] 
     return inline(paragraph._p)
 
 
+def _xlsx_visual_style(value: Any) -> str:
+    """Keep colors and font indicators, including on otherwise empty cells."""
+
+    def color_text(color: Any) -> str:
+        if color is None:
+            return ""
+        return f"{color.type}:{color.value}" + (f" tint:{color.tint}" if color.tint else "")
+
+    if hasattr(value, "has_style") and not value.has_style:
+        return ""
+    result = []
+    fill = value.fill
+    if fill is not None:
+        if getattr(fill, "patternType", None):
+            result.append(
+                f"fill:{fill.patternType} foreground:{color_text(fill.fgColor)} background:{color_text(fill.bgColor)}"
+            )
+        elif getattr(fill, "stop", None):
+            result.append("gradient:" + ",".join(f"{stop.position}={color_text(stop.color)}" for stop in fill.stop))
+    font = value.font
+    if getattr(value, "_style", None) is not None and value._style.fontId == 0:
+        font = None
+    if font is not None:
+        if font.color is not None:
+            result.append(f"font-color:{color_text(font.color)}")
+        for name in ("bold", "italic", "strike", "underline"):
+            flag = getattr(font, name)
+            if flag:
+                result.append(f"{name}:{flag}")
+    return "; ".join(result)
+
+
 def _read_xlsx(path: Path) -> str:
+    from xml.etree.ElementTree import tostring
+
     try:
         from openpyxl import load_workbook
     except ImportError as exc:  # pragma: no cover - import guard
         raise ImportError("Text extraction requires the optional `openpyxl` dependency for .xlsx.") from exc
-    workbook = load_workbook(filename=str(path), read_only=True, data_only=False)
+    workbook = load_workbook(filename=str(path), read_only=False, data_only=False)
     try:
         cached = load_workbook(filename=str(path), read_only=True, data_only=True)
         try:
@@ -332,7 +399,19 @@ def _read_xlsx(path: Path) -> str:
                             cells.append(f"{cell.coordinate}: {formula} [{result}]")
                         else:
                             cells.append("" if value is None else str(value))
+                        style = _xlsx_visual_style(cell)
+                        if style:
+                            prefix = "" if cell.data_type == "f" else f"{cell.coordinate}: "
+                            cells[-1] = f"{prefix}{cells[-1]} [{style}]"
                     chunks.append("\t".join(cells).rstrip("\t"))
+                for condition in sheet.conditional_formatting:
+                    for rule in sheet.conditional_formatting[condition]:
+                        # Preserve the rule, not a claim about its rendered result. Excel is not run here.
+                        styles = _xlsx_visual_style(rule.dxf) if rule.dxf is not None else ""
+                        chunks.append(
+                            f"Conditional formatting {condition.sqref} (not evaluated): "
+                            f"{tostring(rule.to_tree(), encoding='unicode')} [{styles}]"
+                        )
                 if sheet.max_row and sheet.max_row > 200:
                     chunks.append("... (truncated rows)")
             return "\n".join(chunks).rstrip("\n")

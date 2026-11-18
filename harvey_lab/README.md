@@ -55,10 +55,12 @@ Each task ships a rubric of ~60 atomic PASS/FAIL criteria, each with a written
 acts as a **judge** (`evaluation/scoring.py`, default
 `openrouter/z-ai/glm-5.3-flash` at `--judge-reasoning-effort high`): it reads only the deliverable(s) a
 criterion names — the extracted text, including Word headers and footers,
-with bold, italics, strikethrough, and tracked insertions/deletions retained
+with bold, italics, underline, color, strikethrough, and tracked insertions/deletions retained
 as explicit text markers — and returns PASS/FAIL. Referenced Word footnotes
 and endnotes include matching markers in the body and note text. Missing
-note text is labeled; separator and unreferenced notes are excluded. Excel formulas retain
+note text is labeled; separator and unreferenced notes are excluded. Word comments
+retain their text and range markers. Excel cell fills and font colors are included,
+even for blank cells. Conditional formatting rules are included but not evaluated. Excel formulas retain
 their cell addresses and any cached results. Missing cached results are
 labeled; the extractor does not calculate formulas. Criteria sharing a deliverable scope are graded in
 **batches** of `--judge-batch-size` (default 8) rather than one call per
