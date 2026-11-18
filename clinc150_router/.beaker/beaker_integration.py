@@ -23,18 +23,11 @@ from typesafe_sdk import AsyncTypeSafeClient
 
 from clinc150_router.agent import question, route
 from clinc150_router.contracts import (
-    LABELS,
     OUT_OF_SCOPE,
     REQUEST_TIMEOUT_SECONDS,
     Prediction,
 )
-from clinc150_router.data import UPSTREAM, Expected, Message, Row
-
-
-# Weight by inverse frequency on the official optimization validation split.
-# CaseScore caps each case at 1, so normalize to the rarer class's weight.
-_, _, VALIDATION_ROWS_PER_INTENT, VALIDATION_OOS_ROWS = UPSTREAM["validation"]
-IN_SCOPE_WEIGHT = VALIDATION_OOS_ROWS / ((len(LABELS) - 1) * VALIDATION_ROWS_PER_INTENT)
+from clinc150_router.data import Expected, Message, Row
 
 
 class Setup(RunSetup[Row]):
@@ -66,7 +59,7 @@ async def score_case(*, case: Case, result: CaseResult, case_files_dir: Path) ->
     correct = float(error is None and intent == expected.intent)
     is_oos = expected.intent == OUT_OF_SCOPE
     return CaseScore(
-        objective=correct * (1.0 if is_oos else IN_SCOPE_WEIGHT),
+        objective=correct,
         field_scores={"accuracy": correct, "oos_recall" if is_oos else "in_scope_accuracy": correct},
         checks=(
             Check(

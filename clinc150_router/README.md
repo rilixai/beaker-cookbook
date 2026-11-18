@@ -16,11 +16,9 @@ The default decision model is `jev-1.14.0`. In Beaker's Decision models comparis
 the gateway swaps the native decision call for the selected target. An ordinary
 optimization run uses native Jev and can optimize the routing prompts and code.
 
-Beaker gives each correct `oos` prediction 30 times the weight of a correct
-in-scope prediction. On the official validation split, the two groups
-contribute equally to the objective. With Beaker's 0–1 per-case scores,
-perfect validation predictions yield a mean objective of about 0.0645.
-Raw accuracy, in-scope accuracy, and `oos` recall are reported separately.
+Beaker optimizes accuracy. Every correct prediction earns one point, so the
+objective is the fraction of cases answered correctly. Beaker also reports
+in-scope accuracy and `oos` recall.
 
 The call is traced with provider `typesafe` and operation `systemone`. Traces
 include the benchmark messages and decision replies.

@@ -215,15 +215,14 @@ async def test_invalid_answer_is_observable_and_scores_wrong(tmp_path: Path, mon
         (OUT_OF_SCOPE, INTENT, {"accuracy": 0.0, "oos_recall": 0.0}),
     ],
 )
-async def test_scoring_fills_scope_specific_field_scores(
+async def test_scoring_uses_accuracy_as_objective_and_reports_scope_metrics(
     tmp_path: Path, expected: str, predicted: str, scores: dict[str, float]
 ) -> None:
     integration = integration_module()
     result = CaseResult(output={"intent": predicted, "model": "m"}, output_kind="record")
     case = Case(id="1", input={"text": TEXT}, expected={"intent": expected})
     scored = await integration.score_case(case=case, result=result, case_files_dir=tmp_path)
-    weight = 1 if expected == OUT_OF_SCOPE else 1 / 30
-    assert scored.objective == pytest.approx(scores["accuracy"] * weight)
+    assert scored.objective == scores["accuracy"]
     assert dict(scored.field_scores) == scores
     check = scored.checks[0]
     assert (check.name, check.expected, check.predicted) == ("intent", expected, predicted)
