@@ -30,7 +30,6 @@ EXTERNAL_ACCOUNT_SERVERS = frozenset(
         "notion",
         "snowflake",
         "wandb",
-        "yahoo-finance",
         "youtube",
         "youtube-transcript",
     }
