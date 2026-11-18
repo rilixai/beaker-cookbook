@@ -271,3 +271,22 @@ and a fixture task tree: no network, no spend.
   [Applied Compute on batched Harvey verification](https://www.appliedcompute.com/case-studies/harvey).
 - TODO(owner): expected `criterion_pass_rate`, wall-clock, and $ cost for the
   canonical `evaluate --split test --limit 10` run at the default models.
+
+### Dataset review evidence
+
+`uv run python .beaker/upload_splits.py --full --name harvey-lab-full-1760` retains the frozen 1660/100 split
+and includes source documents for each task. The upload contains an original ZIP
+and a compressed text index per task, with file checksums and the upstream commit.
+The platform downloads text only for the cases in the current review batch.
+Existing uploads must be uploaded as a new revision to include this evidence.
+
+Text comes from this recipe's document reader. This is evidence for reviewing the
+task and rubric; it is not an independent validation of that reader. PDF text is
+limited to 50 pages, and spreadsheets to 200 rows and 40 columns per sheet.
+Images, rendered layout, evaluated formulas, and email attachments are not assessed.
+The index records unreadable, unsupported, and truncated content. Originals remain
+available for further inspection. A task's text is capped at 32 MiB.
+
+A supplied `--tasks-root` must be a clean checkout at the pinned upstream commit.
+The default downloads the selected task folders from that commit. `--dry-run`
+still performs no downloads, uploads, or model calls.

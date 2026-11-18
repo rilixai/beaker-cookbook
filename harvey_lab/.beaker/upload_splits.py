@@ -20,6 +20,7 @@ from sample_splits import distribution_report, sample_train, validate_splits
 from harvey_lab.config import HARVEY_LABS_COMMIT
 from harvey_lab.data.dataset import load_records, read_split
 from harvey_lab.data.fetch import ensure_task_dirs
+from harvey_lab.data.review_evidence import package_documents
 
 
 BEAKER_YAML = Path(__file__).with_name("beaker.yaml")
@@ -85,12 +86,27 @@ def main() -> None:
     if beaker is None:
         raise RuntimeError("beaker CLI is not on PATH; run with `uv run python .beaker/upload_splits.py`")
     ids = [task_id for task_ids in splits.values() for task_id in task_ids]
+    if args.tasks_root is not None:
+        # A partial task.json-only export cannot supply the source evidence.
+        commit = subprocess.check_output(["git", "-C", str(args.tasks_root), "rev-parse", "HEAD"], text=True).strip()
+        if commit != HARVEY_LABS_COMMIT:
+            raise ValueError("--tasks-root must be a checkout at HARVEY_LABS_COMMIT")
+        subprocess.run(["git", "-C", str(args.tasks_root), "diff", "--quiet", "HEAD", "--", "."], check=True)
+        untracked = subprocess.check_output(
+            ["git", "-C", str(args.tasks_root), "ls-files", "--others", "--", "."], text=True
+        )
+        if untracked.strip():
+            raise ValueError("--tasks-root contains untracked files; use a clean pinned checkout")
     tasks_root = args.tasks_root or ensure_task_dirs(ids)
     with tempfile.TemporaryDirectory(prefix="harvey-beaker-dataset-") as directory:
         dataset_dir = Path(directory)
+        documents = {}
         for split, task_ids in splits.items():
             with (dataset_dir / f"{split}.jsonl").open("w", encoding="utf-8") as stream:
                 for record in load_records(tasks_root, task_ids=task_ids):
+                    documents[record.task_id] = package_documents(
+                        tasks_root / record.task_id, record.task_id, dataset_dir
+                    )
                     task_input, expected = row_payload(record)
                     row = TaskRow(
                         id=record.task_id,
@@ -99,6 +115,7 @@ def main() -> None:
                         metadata={"practice_area": record.practice_area, "source_split": split},
                     )
                     stream.write(row.model_dump_json() + "\n")
+        manifest["metadata"] = {"review_documents": documents}
         (dataset_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         subprocess.run(
             [
