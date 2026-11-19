@@ -1,0 +1,105 @@
+"""Export pinned public tasks without inventing a training split."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import subprocess
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+from benchmark_data import COMMIT, REPOSITORY, Row
+
+
+def export(source: Path, destination: Path) -> dict[str, int]:
+    actual = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+    if actual != COMMIT:
+        raise ValueError("Source checkout must match the pinned commit")
+    subprocess.run(["git", "-C", str(source), "diff", "--exit-code", "HEAD"], check=True)
+    tracked = set(subprocess.check_output(["git", "-C", str(source), "ls-files"], text=True).splitlines())
+    destination.mkdir(parents=True, exist_ok=True)
+    rows = []
+    resources = {}
+    for task_id, directory, instruction, expected, metadata, extra_input in task_records(source):
+        verifier_files = {}
+        for path in sorted(directory.rglob("*")):
+            relative = path.relative_to(source).as_posix()
+            if relative not in tracked or not path.is_file() or path.is_symlink():
+                continue
+            if path.suffix in {".py", ".sh", ".toml", ".yaml", ".json"} and "solution" not in path.parts:
+                verifier_files[path.relative_to(directory).as_posix()] = {
+                    "bytes": path.stat().st_size,
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+        if not verifier_files:
+            raise ValueError(f"No public verifier files: {task_id}")
+        expected["verifier_files"] = verifier_files
+        row = Row.model_validate(
+            {
+                "id": task_id,
+                "input": {"task_id": task_id, "instruction": instruction, "source_commit": COMMIT, **extra_input},
+                "expected": expected,
+                "metadata": metadata,
+            }
+        )
+        rows.append(row.model_dump())
+        resources[task_id] = {
+            "repository": REPOSITORY,
+            "commit": COMMIT,
+            "directory": directory.relative_to(source).as_posix(),
+        }
+    if len(rows) != EXPECTED_COUNT or len({row["id"] for row in rows}) != EXPECTED_COUNT:
+        raise ValueError(f"Expected {EXPECTED_COUNT} unique tasks, got {len(rows)}")
+    (destination / "train.jsonl").write_text("")
+    (destination / "test.jsonl").write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows))
+    manifest = {
+        "source": REPOSITORY,
+        "commit": COMMIT,
+        "split_policy": "Full public evaluation set; no invented training split",
+        "task_ids": {"train": [], "test": [row["id"] for row in rows]},
+        "metadata": {"review_resources": resources},
+    }
+    (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    return {"train": 0, "test": len(rows)}
+
+
+EXPECTED_COUNT = 122
+
+
+def task_records(source: Path) -> Iterator[tuple[str, Path, str, dict[str, Any], dict[str, Any], dict[str, Any]]]:
+    assets = json.loads((source / "releases/v1.1/assets.json").read_text())
+    names = [
+        line.strip()
+        for line in (source / "selected_tasks/full.txt").read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    for name in names:
+        directory = source / "tasks" / name
+        card = json.loads((directory / "task_card.json").read_text())
+        expected = {
+            "evaluation": card.get("evaluation"),
+            "requirements": card.get("agentMustDo", []),
+            "reference_files": card.get("referenceFiles", []),
+        }
+        metadata = {
+            "domain": name.split("/")[0],
+            "title": card.get("title"),
+            "release": "v1.1",
+            "taxonomy": card.get("taxonomy", {}),
+            "upstream_data": assets["huggingface"],
+            "evidence_availability": (
+                "Public task code included. Input archives are on Hugging Face; "
+                "reference data requires upstream access approval. Neither archive is included in this upload."
+            ),
+        }
+        yield name, directory, card["taskPrompt"], expected, metadata, {"input_files": card.get("inputFiles", [])}
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--destination", type=Path, required=True, help="Use an OS temporary directory")
+    args = parser.parse_args()
+    print(json.dumps(export(args.source.resolve(), args.destination.resolve())))
