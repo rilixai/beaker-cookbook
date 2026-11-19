@@ -47,6 +47,11 @@ def test_upload_keeps_pinned_manifest_without_document_bundles(tmp_path, monkeyp
         for split in ("train", "test"):
             row = json.loads((dataset / f"{split}.jsonl").read_text())
             assert row["id"] == f"contracts/{split}"
+            assert manifest["metadata"]["review_resources"][row["id"]] == {
+                "repository": "harveyai/harvey-labs",
+                "commit": module.HARVEY_LABS_COMMIT,
+                "directory": f"tasks/contracts/{split}/documents",
+            }
             assert row["input"]["commit"] == manifest["commit"]
 
     monkeypatch.setattr(module.subprocess, "run", run)

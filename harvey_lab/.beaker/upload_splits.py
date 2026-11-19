@@ -77,6 +77,17 @@ def main() -> None:
         },
         "distribution": distribution_report(splits["train"], splits["test"]),
         "task_ids": splits,
+        "metadata": {
+            "review_resources": {
+                task_id: {
+                    "repository": "harveyai/harvey-labs",
+                    "commit": HARVEY_LABS_COMMIT,
+                    "directory": f"tasks/{task_id}/documents",
+                }
+                for task_ids in splits.values()
+                for task_id in task_ids
+            }
+        },
     }
     print(json.dumps(manifest, indent=2))
     if args.dry_run:
