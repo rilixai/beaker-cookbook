@@ -7,9 +7,9 @@ collection, not the older 70-task v0.1 release.
 ## Dataset review
 
 Rows preserve task instructions, task configuration, full-credit reward, and a
-public verifier file inventory. The dataset manifest declares each pinned task
-directory. The reviewer can read tests, environment files, and other public
-evidence on demand. Large scientific assets are not copied into the upload.
+public verifier source with file hashes. The dataset manifest declares each pinned task
+directory. The reviewer can read supported public evidence on demand. Python, shell, TOML, and YAML
+source is included in the rows because the lazy reader does not support those extensions. Large scientific assets are not copied into the upload.
 External downloads and unsupported binary formats can still leave evidence gaps.
 
 All 96 tasks are in `test`; `train` is empty. No optimization training split is

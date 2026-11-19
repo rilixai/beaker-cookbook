@@ -29,10 +29,15 @@ def export(source: Path, destination: Path) -> dict[str, int]:
             relative = path.relative_to(source).as_posix()
             if relative not in tracked or not path.is_file() or path.is_symlink():
                 continue
-            if path.suffix in {".py", ".sh", ".toml", ".yaml", ".json"} and "solution" not in path.parts:
+            if (
+                path.suffix in {".py", ".sh", ".toml", ".yaml", ".json"}
+                and "solution" not in path.parts
+                and "authoring" not in path.parts
+            ):
                 verifier_files[path.relative_to(directory).as_posix()] = {
                     "bytes": path.stat().st_size,
                     "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    **({"text": path.read_text()} if path.suffix in {".py", ".sh", ".toml", ".yaml"} else {}),
                 }
         if not verifier_files:
             raise ValueError(f"No public verifier files: {task_id}")
