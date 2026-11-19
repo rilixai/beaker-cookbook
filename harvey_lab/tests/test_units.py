@@ -629,6 +629,210 @@ def test_extract_text_falls_back_and_survives_bad_binaries(tmp_path: Path) -> No
 # ─── batched verdict parsing + scoring ────────────────────────────────
 
 
+def test_docx_redline_formatting_reaches_the_judge(tmp_path: Path) -> None:
+    from docx import Document
+
+    styled = tmp_path / "styled.docx"
+    plain = tmp_path / "plain.docx"
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run("old term").font.strike = True
+    paragraph.add_run("new term").bold = True
+    document.save(styled)
+    document = Document()
+    document.add_paragraph("old termnew term")
+    document.save(plain)
+
+    seen: list[str] = []
+
+    def judge(_task: str, criteria: list[dict], output: str) -> dict[str, bool]:
+        seen.append(output)
+        return {c["id"]: "[strikethrough]old term[/strikethrough][bold]new term[/bold]" in output for c in criteria}
+
+    for path, passed in [(styled, 1), (plain, 0)]:
+        result = score_rubric(
+            criteria=[
+                {"id": "C-058", "match_criteria": "Mark additions and deletions.", "deliverables": ["memo.docx"]}
+            ],
+            deliverables={"memo.docx": extract_text(path)},
+            task_description="Redline the agreement.",
+            judge=judge,
+        )
+        assert result["passed"] == passed
+    assert seen[0] != seen[1]
+
+
+def test_docx_preserves_table_styles_and_inline_revisions(tmp_path: Path) -> None:
+    from docx import Document
+    from docx.enum.style import WD_STYLE_TYPE
+    from docx.oxml import OxmlElement
+
+    document = Document()
+    style = document.styles.add_style("Redline additions", WD_STYLE_TYPE.CHARACTER)
+    style.font.bold = True
+    cell = document.add_table(rows=1, cols=1).cell(0, 0)
+    cell.paragraphs[0].add_run("addition", style=style)
+    # Explicit run formatting overrides the inherited bold style.
+    run = cell.paragraphs[0].add_run(" plain", style=style)
+    run.bold = False
+    run = cell.paragraphs[0].add_run(" deletion")
+    run.font.double_strike = True
+    paragraph = document.add_paragraph("Changes: ")
+    for revision, text_tag, value in [("ins", "t", "inserted"), ("del", "delText", "removed")]:
+        element = OxmlElement(f"w:{revision}")
+        run_element = OxmlElement("w:r")
+        text = OxmlElement(f"w:{text_tag}")
+        text.text = value
+        run_element.append(text)
+        element.append(run_element)
+        paragraph._p.append(element)
+    hyperlink = OxmlElement("w:hyperlink")
+    run_element = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = " link"
+    run_element.append(text)
+    hyperlink.append(run_element)
+    paragraph._p.append(hyperlink)
+    path = tmp_path / "redline.docx"
+    document.save(path)
+
+    result = extract_text(path)
+    assert "Changes: [inserted]inserted[/inserted][deleted]removed[/deleted] link" in result
+    assert "[bold]addition[/bold] plain[strikethrough] deletion[/strikethrough]" in result
+
+
+def test_docx_headers_and_footers_reach_the_judge(tmp_path: Path) -> None:
+    from docx import Document
+    from docx.enum.section import WD_SECTION_START
+    from docx.shared import Inches
+
+    document = Document()
+    document.add_paragraph("Memo body")
+    section = document.sections[0]
+    section.header.paragraphs[0].text = "Case 24-123, Example Court"
+    section.header.add_table(rows=1, cols=1, width=Inches(4)).cell(0, 0).text = "Matter ABC"
+    section.footer.paragraphs[0].text = "Confidential"
+    section.different_first_page_header_footer = True
+    section.first_page_header.paragraphs[0].text = "First page caption"
+    section.first_page_footer.paragraphs[0].text = "First page footer"
+    document.settings.odd_and_even_pages_header_footer = True
+    section.even_page_header.paragraphs[0].text = "Even page caption"
+    section.even_page_footer.paragraphs[0].text = "Even page footer"
+    document.add_section(WD_SECTION_START.NEW_PAGE)
+    workspace = TaskWorkspace(tmp_path)
+    path = workspace.deliverable_path("memo.docx")
+    document.save(path)
+
+    deliverables = workspace.collect_deliverables(["memo.docx"])
+    expected = (
+        "Memo body",
+        "Case 24-123, Example Court",
+        "Matter ABC",
+        "Confidential",
+        "First page caption",
+        "First page footer",
+        "Even page caption",
+        "Even page footer",
+    )
+
+    def judge(_task: str, criteria: list[dict], output: str) -> dict[str, bool]:
+        assert all(value in output for value in expected)
+        return {c["id"]: True for c in criteria}
+
+    result = score_rubric(
+        criteria=[{"id": "caption", "match_criteria": "Include case details.", "deliverables": ["memo.docx"]}],
+        deliverables=deliverables,
+        task_description="Write the memo.",
+        judge=judge,
+    )
+    assert result["passed"] == 1
+    assert deliverables["memo.docx"].count("Matter ABC") == 1
+
+
+def test_docx_ignores_disabled_header_variants(tmp_path: Path) -> None:
+    from docx import Document
+
+    document = Document()
+    document.add_paragraph("Body")
+    document.sections[0].first_page_header.paragraphs[0].text = "Hidden first page"
+    document.sections[0].even_page_footer.paragraphs[0].text = "Hidden even footer"
+    path = tmp_path / "memo.docx"
+    document.save(path)
+    assert extract_text(path) == "Body"
+
+
+def test_docx_preserves_italics_and_explicit_style_overrides(tmp_path: Path) -> None:
+    from docx import Document
+    from docx.enum.style import WD_STYLE_TYPE
+
+    document = Document()
+    style = document.styles.add_style("Buyer comment", WD_STYLE_TYPE.CHARACTER)
+    style.font.bold = True
+    style.font.italic = True
+    paragraph = document.add_paragraph()
+    paragraph.add_run("Comment", style=style)
+    paragraph.add_run("Bold only", style=style).italic = False
+    document.add_table(rows=1, cols=1).cell(0, 0).paragraphs[0].add_run("Table comment").italic = True
+    document.sections[0].header.paragraphs[0].add_run("Header comment").italic = True
+    path = tmp_path / "comments.docx"
+    document.save(path)
+
+    text = extract_text(path)
+    assert "[italic][bold]Comment[/bold][/italic][bold]Bold only[/bold]" in text
+    assert "[italic]Table comment[/italic]" in text
+    assert "[italic]Header comment[/italic]" in text
+
+
+def test_docx_reads_linked_first_page_header_when_later_section_enables_it(tmp_path: Path) -> None:
+    from docx import Document
+    from docx.enum.section import WD_SECTION_START
+
+    document = Document()
+    document.sections[0].first_page_header.paragraphs[0].text = "Inherited case caption"
+    section = document.add_section(WD_SECTION_START.NEW_PAGE)
+    section.different_first_page_header_footer = True
+    path = tmp_path / "memo.docx"
+    document.save(path)
+
+    assert "# Section 2 first page header\nInherited case caption" in extract_text(path)
+
+
+@pytest.mark.parametrize("cached_value", [None, "30000", "0"])
+def test_xlsx_preserves_formulas_and_cached_values(tmp_path: Path, cached_value: str | None) -> None:
+    from zipfile import ZipFile
+
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Fees"
+    sheet.append(["Principal", "Rate", "Fee", "Literal result"])
+    sheet.append([1000000, 0.03, "=A2*B2", 30000])
+    workbook.create_sheet("Notes").append(["Supporting sheet"])
+    path = tmp_path / "fees.xlsx"
+    workbook.save(path)
+    workbook.close()
+    if cached_value is not None:
+        # openpyxl does not calculate formulas. Simulate an Excel-saved cache.
+        with ZipFile(path) as archive:
+            entries = {name: archive.read(name) for name in archive.namelist()}
+        entries["xl/worksheets/sheet1.xml"] = entries["xl/worksheets/sheet1.xml"].replace(
+            b"<f>A2*B2</f><v></v>", f"<f>A2*B2</f><v>{cached_value}</v>".encode()
+        )
+        with ZipFile(path, "w") as archive:
+            for name, content in entries.items():
+                archive.writestr(name, content)
+    original = path.read_bytes()
+
+    text = extract_text(path)
+    result = (
+        "cached value unavailable; formula not evaluated" if cached_value is None else f"cached value: {cached_value}"
+    )
+    assert f"1000000\t0.03\tC2: =A2*B2 [{result}]\t30000" in text
+    assert "# Sheet: Notes\nSupporting sheet" in text
+    assert path.read_bytes() == original
+
+
 def test_parse_batch_verdicts_maps_ids() -> None:
     reply = '{"verdicts": [{"id": "C1", "verdict": "pass"}, {"id": "C2", "verdict": "fail"}]}'
     assert _parse_batch_verdicts(reply, ["C1", "C2"]) == {"C1": True, "C2": False}
@@ -996,6 +1200,58 @@ def test_forward_collects_response_md_when_task_names_no_deliverable(tmp_path: P
     assert output.deliverables == {"response.md": "the answer"}
     assert output.raw_deliverables == {"response.md": b"the answer"}
     assert output.missing_deliverables == []
+
+
+def test_forward_collects_submitted_documents_without_deliverable_metadata(tmp_path: Path) -> None:
+    root = tmp_path / "tasks"
+    _write_task(
+        root,
+        "contracts/freeform",
+        criteria=[{"id": "C1", "title": "t", "match_criteria": "Contains the answer.", "deliverables": []}],
+        deliverables={},
+    )
+    task_path = root / "contracts/freeform/task.json"
+    task = json.loads(task_path.read_text())
+    task["instructions"] = "Submit redline.docx and risk-memo.docx."
+    task_path.write_text(json.dumps(task))
+    client = _CapturingClient(
+        [
+            (
+                "code_exec",
+                {
+                    "cmd": "python - <<'PY'\nfrom docx import Document\nfrom pathlib import Path\nfor name in ['redline.docx', 'risk-memo.docx']:\n d=Document(); d.add_paragraph('the answer'); d.save(name)\nPath('scratch.md').write_text('unsubmitted')\nPY"
+                },
+            ),
+            ("finish", {"summary": "done", "paths": ["redline.docx", "risk-memo.docx"]}),
+        ]
+    )
+    output = _run_with_client(root, client, task_id="contracts/freeform")
+    assert output.finished
+    assert output.deliverables == {"redline.docx": "the answer", "risk-memo.docx": "the answer"}
+    assert set(output.raw_deliverables) == {"redline.docx", "risk-memo.docx"}
+    assert output.missing_deliverables == []
+    prompt = str(client.messages[-1].content)
+    assert "Submit redline.docx and risk-memo.docx." in prompt
+    assert "If the instructions request no files" in prompt
+    assert "- `response.md`" not in prompt
+    assert "risk-memo.docx" in _scope_deliverables([], output.deliverables)
+
+
+@pytest.mark.parametrize(
+    "finish", [("finish", {"summary": "done", "paths": []}), ("abandon_task_finish", {"reason": "missing inputs"})]
+)
+def test_empty_deliverable_metadata_does_not_grade_unsubmitted_work(tmp_path: Path, finish: tuple[str, dict]) -> None:
+    root = tmp_path / "tasks"
+    _write_task(root, "contracts/freeform", criteria=[], deliverables={})
+    client = _CapturingClient(
+        [
+            ("code_exec", {"cmd": "printf 'unsubmitted' > response.md"}),
+            finish,
+        ]
+    )
+    output = _run_with_client(root, client, task_id="contracts/freeform")
+    assert output.deliverables == {}
+    assert output.raw_deliverables == {}
 
 
 def test_finish_rejects_relative_paths_and_stat_errors() -> None:

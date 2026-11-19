@@ -77,6 +77,17 @@ def main() -> None:
         },
         "distribution": distribution_report(splits["train"], splits["test"]),
         "task_ids": splits,
+        "metadata": {
+            "review_resources": {
+                task_id: {
+                    "repository": "harveyai/harvey-labs",
+                    "commit": HARVEY_LABS_COMMIT,
+                    "directory": f"tasks/{task_id}/documents",
+                }
+                for task_ids in splits.values()
+                for task_id in task_ids
+            }
+        },
     }
     print(json.dumps(manifest, indent=2))
     if args.dry_run:
@@ -85,6 +96,17 @@ def main() -> None:
     if beaker is None:
         raise RuntimeError("beaker CLI is not on PATH; run with `uv run python .beaker/upload_splits.py`")
     ids = [task_id for task_ids in splits.values() for task_id in task_ids]
+    if args.tasks_root is not None:
+        # Preserve the pinned task instructions and grading criteria.
+        commit = subprocess.check_output(["git", "-C", str(args.tasks_root), "rev-parse", "HEAD"], text=True).strip()
+        if commit != HARVEY_LABS_COMMIT:
+            raise ValueError("--tasks-root must be a checkout at HARVEY_LABS_COMMIT")
+        subprocess.run(["git", "-C", str(args.tasks_root), "diff", "--quiet", "HEAD", "--", "."], check=True)
+        untracked = subprocess.check_output(
+            ["git", "-C", str(args.tasks_root), "ls-files", "--others", "--", "."], text=True
+        )
+        if untracked.strip():
+            raise ValueError("--tasks-root contains untracked files; use a clean pinned checkout")
     tasks_root = args.tasks_root or ensure_task_dirs(ids)
     with tempfile.TemporaryDirectory(prefix="harvey-beaker-dataset-") as directory:
         dataset_dir = Path(directory)

@@ -54,8 +54,16 @@ Each task ships a rubric of ~60 atomic PASS/FAIL criteria, each with a written
 `match_criteria` standard and the deliverable(s) it applies to. A second LLM
 acts as a **judge** (`evaluation/scoring.py`, default
 `openrouter/z-ai/glm-5.3-flash` at `--judge-reasoning-effort high`): it reads only the deliverable(s) a
-criterion names — the text extracted from it, as LAB-AA grades text only — and
-returns PASS/FAIL. Criteria sharing a deliverable scope are graded in
+criterion names — the extracted text, including Word headers and footers,
+with bold, italics, underline, color, strikethrough, and tracked insertions/deletions retained
+as explicit text markers — and returns PASS/FAIL. Tracked changes retain their
+author, date, and revision ID so editing rounds remain distinguishable. Referenced Word footnotes
+and endnotes include matching markers in the body and note text. Missing
+note text is labeled; separator and unreferenced notes are excluded. Word comments
+retain their text and range markers. Excel cell fills and font colors are included,
+even for blank cells. Conditional formatting rules are included but not evaluated. Excel formulas retain
+their cell addresses and any cached results. Missing cached results are
+labeled; the extractor does not calculate formulas. Criteria sharing a deliverable scope are graded in
 **batches** of `--judge-batch-size` (default 8) rather than one call per
 criterion, an order of magnitude cheaper at LAB's scale
 ([why](https://www.langchain.com/blog/designing-efficient-verifiers-for-legal-agents)).
@@ -67,7 +75,11 @@ Two numbers come out per task, and `evaluation/run_eval.py` averages both:
   metric, and a denser view of the same grading since one missed criterion
   zeroes `all_pass`).
 
-Filenames must match **exactly** — a near-miss name counts as not produced. A
+When task metadata declares filenames, they must match **exactly** — a near-miss
+name counts as not produced. Some upstream tasks omit that metadata but request
+files in their instructions. For those tasks, the agent follows the instructions
+and the grader receives only files successfully submitted through `finish`.
+`response.md` is the fallback only when the instructions request no files. A
 criterion skips the judge and fails outright only when *none* of its
 deliverables exist. An errored task counts as `0`; a task with no scoreable
 criteria is *unscoreable* and excluded from the averages.
@@ -259,3 +271,29 @@ and a fixture task tree: no network, no spend.
   [Applied Compute on batched Harvey verification](https://www.appliedcompute.com/case-studies/harvey).
 - TODO(owner): expected `criterion_pass_rate`, wall-clock, and $ cost for the
   canonical `evaluate --split test --limit 10` run at the default models.
+
+### Dataset review evidence
+
+`uv run python .beaker/upload_splits.py --full --name harvey-lab-full-1760` retains
+the frozen 1660/100 split. It uploads the task rows and a manifest identifying
+`harveyai/harvey-labs` and the pinned upstream commit. Source documents are not
+included in the upload. Existing datasets with that source and commit can be
+reviewed without uploading a new document bundle.
+
+The platform reviewer lists the pinned task's files and downloads individual
+files as needed. It searches and reads bounded text pages, with a disk cache and
+separate memory/time limits for document extraction. Cases can contain several
+GB of source files; they are not expanded into one in-memory evidence index.
+Citations retain the commit, path, file checksums, and text-page location. Read
+pages and coverage records are saved with the review, rather than uploading all
+original files as dataset artifacts. Unsupported formats, extraction limits,
+and unread pages remain explicit evidence gaps.
+
+The current text readers preserve the integration's formatting markers. PDF text
+is limited to 50 pages, and spreadsheets to 200 rows and 40 columns per sheet.
+Images, rendered layout, evaluated formulas, and email attachments are not
+assessed. These limits apply to individual file extraction, not total case size.
+
+A supplied `--tasks-root` must be a clean checkout at the pinned upstream commit.
+The default downloads the selected task folders for local validation. `--dry-run`
+still performs no downloads, uploads, or model calls.
