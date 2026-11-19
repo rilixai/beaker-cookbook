@@ -6,9 +6,10 @@ Beaker integration for all **122 public ALE v1.1 tasks** selected by upstream
 ## Dataset review
 
 Rows retain the public task prompt, grading description, required outputs,
-reference-file descriptions, and an inventory of public evaluator source.
+reference-file descriptions, and public evaluator source and its file hashes.
 `manifest.json` declares each task's pinned Git directory so the reviewer can
-read its task card, setup, and graders on demand. No benchmark source is vendored.
+read supported documents on demand. Python, shell, TOML, and YAML source is
+included in the rows because the current lazy reader does not support those extensions. No benchmark source is vendored.
 
 All tasks remain in `test`; `train` is empty. ALE does not provide a canonical
 optimization training split. This upload does not create one.
