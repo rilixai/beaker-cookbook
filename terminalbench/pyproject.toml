@@ -1,0 +1,42 @@
+[project]
+name = "terminalbench-recipe"
+version = "0.1.0"
+description = "Terminus 2 on a small TerminalBench 2.0 train/test dataset."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = ["harbor==0.26.0", "litellm==1.104.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/terminalbench_agent"]
+
+[dependency-groups]
+dev = ["beaker-sdk[litellm]==0.6.8", "ruff", "mypy", "pytest", "pytest-asyncio", "types-requests"]
+
+[tool.ruff]
+line-length = 119
+extend-include = [".beaker/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["terminalbench_agent"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/terminalbench_agent", ".beaker"]
+
+[[tool.mypy.overrides]]
+module = ["harbor", "harbor.*", "litellm", "litellm.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["terminalbench_agent.agent"]
+disallow_subclassing_any = false
