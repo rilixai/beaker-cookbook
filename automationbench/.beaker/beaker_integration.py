@@ -15,6 +15,7 @@ observations. The app diff is displayed once per case.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import AsyncIterator, Mapping
 from functools import cache
 from pathlib import Path
@@ -112,6 +113,7 @@ class TaskSetup(RunSetup[TaskRow]):
 
     async def load_cases(self, row: TaskRow, *, runtime: SetupRuntime) -> AsyncIterator[Case]:
         del runtime
+        endpoint_model_spec()  # Fail at setup, not in every rollout, on incomplete endpoint settings.
         assert row.runtime_fixture is not None  # Validated or resolved by TaskRow.
         yield Case(
             id=row.id,
@@ -157,10 +159,59 @@ def default_model_spec() -> ModelSpec:
     return ModelSpec(name="gpt-5.6-luna", api="chat_completions", reasoning_effort="medium")
 
 
+# A run without a model choice can evaluate a model on another Chat
+# Completions-compatible endpoint, such as a self-hosted vLLM server. Set these
+# on the agent: AUTOMATIONBENCH_MODEL, AUTOMATIONBENCH_BASE_URL,
+# AUTOMATIONBENCH_API_KEY_VAR (the name of the variable that holds the key)
+# and, optionally, AUTOMATIONBENCH_EXTRA_BODY: a JSON object of extra request
+# fields, such as sampling settings or chat_template_kwargs.
+MODEL_ENV = "AUTOMATIONBENCH_MODEL"
+BASE_URL_ENV = "AUTOMATIONBENCH_BASE_URL"
+API_KEY_VAR_ENV = "AUTOMATIONBENCH_API_KEY_VAR"
+EXTRA_BODY_ENV = "AUTOMATIONBENCH_EXTRA_BODY"
+
+
+def endpoint_model_spec() -> ModelSpec | None:
+    """The agent's endpoint model, or None when ``AUTOMATIONBENCH_MODEL`` is unset."""
+    name = os.environ.get(MODEL_ENV)
+    if not name:
+        return None
+    base_url = os.environ.get(BASE_URL_ENV)
+    key_var = os.environ.get(API_KEY_VAR_ENV)
+    if not base_url or not key_var:
+        raise ValueError(f"{MODEL_ENV} needs {BASE_URL_ENV} and {API_KEY_VAR_ENV} on the agent.")
+    if not os.environ.get(key_var):
+        raise ValueError(f"Set {key_var} on the agent to run {name}.")
+    extra_body = os.environ.get(EXTRA_BODY_ENV) or None
+    if extra_body is not None:
+        try:
+            parsed = json.loads(extra_body)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{EXTRA_BODY_ENV} must be a JSON object: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{EXTRA_BODY_ENV} must be a JSON object.")
+    return ModelSpec(
+        name=name,
+        base_url=base_url,
+        api_key_var=key_var,
+        api="chat_completions",
+        reasoning_effort="default",
+        extra_body=extra_body,
+    )
+
+
 def _model_for(runtime: RolloutRuntime[Any]) -> tuple[ModelSpec, str | None]:
+    """The run's model choice through Beaker's gateway; else the agent's endpoint; else the default.
+
+    Endpoint calls go straight to the endpoint with the agent's own key, so Beaker
+    traces their tokens but not their cost.
+    """
     if runtime.model:
         target = inference_target(runtime)
         return ModelSpec(name=target.model, base_url=target.base_url, reasoning_effort=None), target.api_key
+    endpoint = endpoint_model_spec()
+    if endpoint is not None:
+        return endpoint, os.environ[endpoint.api_key_var]
     return default_model_spec(), None
 
 

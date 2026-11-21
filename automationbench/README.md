@@ -118,6 +118,19 @@ A `vendor/model` name routes to OpenRouter using `OPENROUTER_API_KEY` unless an
 explicit base URL is supplied. `--reasoning-enabled` supports gateway models with
 an on/off reasoning switch.
 
+Hosted runs without a model choice can evaluate a model on another Chat
+Completions-compatible endpoint, such as a self-hosted vLLM server. Set these on
+the agent:
+
+- `AUTOMATIONBENCH_MODEL`: the model name the endpoint serves.
+- `AUTOMATIONBENCH_BASE_URL`: the endpoint's base URL, ending in `/v1`.
+- `AUTOMATIONBENCH_API_KEY_VAR`: the name of the agent variable holding its key.
+- `AUTOMATIONBENCH_EXTRA_BODY` (optional): a JSON object of extra request fields,
+  for example `{"temperature": 0.8, "chat_template_kwargs": {"enable_thinking": false}}`.
+
+A run's own model choice still wins. Endpoint calls are traced, but Beaker does
+not price them.
+
 ## Execution limits
 
 Each run allows 50 model turns by default (`--max-steps`). The default output cap
