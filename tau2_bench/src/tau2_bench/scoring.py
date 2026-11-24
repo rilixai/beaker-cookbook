@@ -1,4 +1,4 @@
-"""Map tau2's reward to a Beaker score, and keep run evidence small. Fixed code."""
+"""Combine partial and total correctness; retain tau2 reward for comparison. Fixed code."""
 
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ FIELD_NAMES = {
 }
 _COMPLETED = {TerminationReason.AGENT_STOP, TerminationReason.USER_STOP}
 _TEXT_LIMIT = 500
+PARTIAL_WEIGHT = 0.7
+TOTAL_WEIGHT = 0.3
 
 
 def to_context(simulation: SimulationRun) -> dict[str, JsonValue]:
@@ -65,7 +67,14 @@ def error_score(error: str, basis: list[RewardType]) -> CaseScore:
     """An agent or simulator failure: a failed case with the error shown, never a pass."""
     return CaseScore(
         objective=0.0,
-        field_scores={"reward": 0.0, **{FIELD_NAMES[b]: 0.0 for b in basis}},
+        field_scores={
+            "reward": 0.0,
+            "benchmark_reward": 0.0,
+            "partial_correctness": 0.0,
+            "total_correctness": 0.0,
+            "combined_correctness": 0.0,
+            **{FIELD_NAMES[b]: 0.0 for b in basis},
+        },
         checks=(Check(name="conversation ran", verdict="fail", message=error),),
     )
 
@@ -84,12 +93,36 @@ def score(reward: RewardInfo, simulation: SimulationRun, basis: list[RewardType]
             message=None if completed else str((reward.info or {}).get("note") or ""),
         )
     ]
+    database_outcomes = (reward.info or {}).get("database_outcomes")
     if reward.db_check is not None:
         checks.append(
             Check(
                 name="database matches the expected end state",
                 verdict=_verdict(reward.db_check.db_match),
                 group="DB",
+                informational=RewardType.DB not in basis or database_outcomes is not None,
+            )
+        )
+    for outcome in database_outcomes or []:
+        checks.append(
+            Check(
+                name=outcome["name"],
+                verdict=_verdict(outcome["passed"]),
+                expected=outcome["expected"],
+                predicted=outcome["predicted"],
+                message=outcome["message"],
+                group="DB_OUTCOME",
+                informational=RewardType.DB not in basis,
+            )
+        )
+    if reference_error := (reward.info or {}).get("database_outcome_error"):
+        checks.append(
+            Check(
+                name="database partial-credit reference replay",
+                verdict="fail",
+                group="REFERENCE",
+                message=f"{reference_error}. Using the original database check for partial credit.",
+                informational=True,
             )
         )
     for comm in reward.communicate_checks or []:
@@ -100,6 +133,7 @@ def score(reward: RewardInfo, simulation: SimulationRun, basis: list[RewardType]
                 expected=comm.info,
                 message=comm.justification or None,
                 group="COMMUNICATE",
+                informational=RewardType.COMMUNICATE not in basis,
             )
         )
     for nl in reward.nl_assertions or []:
@@ -109,6 +143,7 @@ def score(reward: RewardInfo, simulation: SimulationRun, basis: list[RewardType]
                 verdict=_verdict(nl.met),
                 message=nl.justification or None,
                 group="NL_ASSERTION",
+                informational=RewardType.NL_ASSERTION not in basis,
             )
         )
     for action in reward.action_checks or []:
@@ -121,5 +156,23 @@ def score(reward: RewardInfo, simulation: SimulationRun, basis: list[RewardType]
                 informational=RewardType.ACTION not in basis,
             )
         )
-    objective = float(reward.reward) if completed else 0.0
-    return CaseScore(objective=objective, field_scores={"reward": objective, **fields}, checks=tuple(checks))
+    benchmark_reward = float(reward.reward) if completed else 0.0
+    # The normal-termination row is diagnostic, not free partial credit.
+    scored_checks = [check for check in checks[1:] if not check.informational]
+    partial = benchmark_reward
+    if completed and scored_checks:
+        partial = sum(check.verdict == "pass" for check in scored_checks) / len(scored_checks)
+    total = float(completed and benchmark_reward == 1.0)
+    objective = PARTIAL_WEIGHT * partial + TOTAL_WEIGHT * total
+    return CaseScore(
+        objective=objective,
+        field_scores={
+            "reward": benchmark_reward,
+            "benchmark_reward": benchmark_reward,
+            "partial_correctness": partial,
+            "total_correctness": total,
+            "combined_correctness": objective,
+            **fields,
+        },
+        checks=tuple(checks),
+    )

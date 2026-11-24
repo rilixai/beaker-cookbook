@@ -67,17 +67,60 @@ Traces separate agent cost from simulator cost.
 
 ## Scoring
 
-The objective is τ²-bench's reward, 0 or 1: the product of the task's `reward_basis` components.
+The optimization objective is **`0.7 × partial_correctness + 0.3 × total_correctness`**.
+This uses the cookbook's AutomationBench and AppWorld pattern, with a 70/30
+weighting: partial progress gets credit, with a bonus for completing the whole task correctly.
 
-| Domain | Reward | Deterministic? |
+- **Partial correctness:** the fraction of scored checks that pass. Database checks
+  compare required final state changes, and each required communication fact or
+  natural-language assertion is a separate check. Checks outside the task's
+  `reward_basis`, including diagnostic reference-action matches, do not count.
+- **Total correctness:** 1 only when the conversation ends normally and the original
+  tau2 reward is 1; otherwise 0. Existing policy/confirmation assertions still apply;
+  the new scorer does not add a universal policy judge.
+- **Original benchmark reward:** preserved as both `benchmark_reward` and the existing
+  `reward` field, independently of the combined optimization objective.
+
+For database partial credit, the evaluator constructs the initial world, applies the
+reference actions to get the expected final world, and replays the agent trajectory
+in another world. Each changed record field is a check. Lists of records, such as
+ordered items, are checked by position per entry; other lists and nested fields
+(such as an address) are atomic. New/deleted records are atomic too. These are
+mechanically derived state checks, not a hand-authored semantic task rubric.
+Equivalent tool sequences that reach the same final state receive the same credit.
+Untouched data earns no credit, and unexpected changes add failed checks. Comparison
+units come from the initial/reference states, so truncating a predicted list does
+not remove failed requirements. A task requiring no database changes has no database
+partial-credit checks; its required conversation checks determine partial credit.
+If there are no scored checks at all, partial credit falls back to the original
+reward. Reference reads do not change state and are skipped for partial-credit
+replay. If a reference write fails, the scorer falls back to the original binary
+database check for that task and reports an informational `REFERENCE` failure.
+It does not treat a partially replayed reference as a valid set of outcomes.
+Other replay errors still surface as evaluation errors.
+
+For example, passing 3 of 4 scored requirements with original reward 0 gives
+`partial_correctness=0.75`, `total_correctness=0`, and objective `0.525`.
+Passing everything gives objective `1.0`.
+
+The original tau2 reward remains the product of the task's required components:
+
+| Domain | Original reward | Deterministic? |
 |---|---|---|
-| airline | `DB` × `COMMUNICATE` | Yes. Communicate checks use the **substring** scorer (`--communicate-scorer substring`), not the default LLM judge. |
+| airline | `DB` × `COMMUNICATE` | Yes. Communicate checks use the **substring** scorer (`--communicate-scorer substring`). |
 | retail | `DB` × `NL_ASSERTION` (2 tasks: `DB` only) | No. GPT-6 Luna grades the NL assertions. |
 
-`field_scores` hold `reward`, `db`, plus `communicate` (airline) or `nl_assertion`
-(retail). `checks` show how the conversation ended, the DB match, and one row per
-communicate string or NL assertion. Upstream's gold-action matches also appear, marked
-informational, because they are not part of either domain's reward.
+`field_scores` expose `partial_correctness`, `total_correctness`,
+`combined_correctness`, `benchmark_reward`, the legacy `reward`, and the original
+component scores (`db`, `communicate`, `nl_assertion`). `checks` expose database
+outcomes with expected/actual values and the existing conversation checks. The
+whole-database match remains visible as an informational summary when detailed
+outcomes are available; it does not double-count database correctness.
+
+This is a custom optimization metric, not the published tau2 reward. Compare
+historical runs using `benchmark_reward`, or rescore recorded trajectories with the
+same scorer version. Contradictory customer instructions/reference outcomes still
+need data fixes; partial credit does not repair them.
 
 The evaluator runs in `score_case` on the recorded trajectory. It replays the tool
 calls to rebuild the final database. The database itself is not stored in the result,
