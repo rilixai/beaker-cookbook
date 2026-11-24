@@ -15,9 +15,24 @@ from automationbench.runner import (
     AutomationBenchToolset,
 )
 from beaker.tracing import current_trace
+from mcp.types import CallToolResult
 
+from automationbench_skills.api_tools import (
+    explain_confluence_fields,
+    explain_salesforce_fields,
+    expose_contact_phone_fields,
+    prefer_requested_endpoints,
+)
+from automationbench_skills.gmail_plaintext import (
+    expose_gmail_plaintext,
+    gmail_fetch_schema,
+    plaintext_error,
+    prepare_gmail_body,
+)
 from automationbench_skills.grading_state import capture_grading_state
 from automationbench_skills.scenarios import ScenarioAPIContract
+from automationbench_skills.salesforce_context import SalesforceQueryContext
+from automationbench_skills.sheets_tools import make_sheets_update_rows
 from automationbench_skills.skills_tools import SKILL_TOOLS, set_skills_dir
 
 
@@ -35,13 +50,53 @@ class BeakerToolset(AutomationBenchToolset):
             if self.config.mode != "api":
                 raise ValueError("Pilot fault fixtures require the API toolset")
             self._api = ScenarioAPIContract(self._world, fault)
+        if self.config.mode == "api":
+            expose_contact_phone_fields(self._api)
+            explain_salesforce_fields(self._api)
+            explain_confluence_fields(self._api)
+            self._salesforce_context = SalesforceQueryContext(self._api)
+            expose_gmail_plaintext(self._api)
+            prefer_requested_endpoints(self._api)
 
     def register(self, mcp: Any) -> None:
         super().register(mcp)
+        if self.config.mode == "api":
+            fetch_tool = mcp._tool_manager.get_tool("api_fetch")
+            fetch_tool.parameters = gmail_fetch_schema(self._api.fetch_schema())
+        if self.config.mode == "api" and {
+            "sheets.spreadsheets.get", "sheets.spreadsheets.values.update"
+        }.issubset(self._api.endpoints):
+            mcp.add_tool(
+                self._serialized(self._with_state(make_sheets_update_rows(self._make_api_fetch()))),
+                name="sheets_update_rows",
+                structured_output=False,
+            )
         if self._task.skills_dir:
             set_skills_dir(Path(self._task.skills_dir))
             for tool in SKILL_TOOLS:
                 mcp.add_tool(tool, structured_output=False)
+
+    def _make_api_fetch(self):
+        native = super()._make_api_fetch()
+
+        def call(
+            endpoint: str,
+            path: dict[str, Any] | None = None,
+            params: dict[str, Any] | None = None,
+            body: dict[str, Any] | None = None,
+        ) -> CallToolResult:
+            if endpoint in self._api.endpoints:
+                try:
+                    body = prepare_gmail_body(endpoint, body)
+                except ValueError as error:
+                    self._record_partial_credit()
+                    return plaintext_error(endpoint, error)
+            result = native(endpoint, path, params, body)
+            return self._salesforce_context.enrich(endpoint, params, result)
+
+        call.__name__ = native.__name__
+        call.__doc__ = native.__doc__
+        return call
 
     def _record_partial_credit(self) -> None:
         super()._record_partial_credit()

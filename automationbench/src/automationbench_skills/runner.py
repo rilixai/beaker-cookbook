@@ -27,6 +27,7 @@ from automationbench_skills.data.tasks import Sample
 from automationbench_skills.environment import BeakerData, BeakerTask
 from automationbench_skills.grading_state import assertion_outcomes
 from automationbench_skills.prompts import load_system_prompt, task_clock, with_system_prompt
+from automationbench_skills.reference_context import reference_context
 
 
 DEFAULT_MODEL = "gpt-5.6-luna"
@@ -171,6 +172,13 @@ def _to_result(sample: Sample, output: dict[str, Any], latency_s: float | None =
     )
 
 
+def _subprocess_pythonpath() -> str:
+    """Make tool-server imports resolve to the active source package."""
+    source_dir = str(Path(__file__).resolve().parents[1])
+    import_paths = [source_dir, *os.environ.get("PYTHONPATH", "").split(os.pathsep)]
+    return os.pathsep.join(dict.fromkeys(p for p in import_paths if p))
+
+
 async def run_rollout_raw(
     sample: Sample,
     *,
@@ -183,18 +191,24 @@ async def run_rollout_raw(
     timeout: float | None = None,
 ) -> dict[str, Any]:
     """Run PI's native task/harness, retaining world evidence for trusted scoring."""
+    # Tool servers start with `python -m` from a separate runtime directory.
+    os.environ["PYTHONPATH"] = _subprocess_pythonpath()
     row = _rollout_input(sample, load_system_prompt(prompts_dir, skills=skills_dir is not None))
     info = row["info"]
     messages = row["prompt"]
+    connected_services = compute_connected_services(info["initial_state"], info["assertions"], info["zapier_tools"])
+    task_prompt = "\n\n".join(m["content"] for m in messages if m["role"] != "system")
+    if toolset == "api":
+        task_prompt += reference_context(task_prompt, info["initial_state"], set(connected_services))
     data = BeakerData(
         idx=sample.index,
         name=sample.task_name,
-        prompt="\n\n".join(m["content"] for m in messages if m["role"] != "system"),
+        prompt=task_prompt,
         system_prompt="\n\n".join(m["content"] for m in messages if m["role"] == "system") or None,
         domain=sample.domain,
         assertions=info["assertions"],
         initial_state=info["initial_state"],
-        connected_services=compute_connected_services(info["initial_state"], info["assertions"], info["zapier_tools"]),
+        connected_services=connected_services,
         skills_dir=str(Path(skills_dir).resolve()) if skills_dir is not None else None,
         scenario=info.get("_case_scenario", {}),
     )
