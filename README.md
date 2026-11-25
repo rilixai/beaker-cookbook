@@ -36,6 +36,7 @@ research, knowledge work, app control, and enterprise automation.
 | [`automationbench/`](automationbench/) | AutomationBench-PI: 800 published tasks with 25 exclusions and a tool-calling agent that can read a `skills/` folder — edit the skills, rerun, watch the score move. |
 | [`tau2_bench/`](tau2_bench/) | τ²-bench airline and retail: a customer-service agent in full conversations with a fixed LLM user simulator. Optimize the agent's instructions and loop; scored by τ²-bench's own evaluator. |
 | [`jev_banking77/`](jev_banking77/) | BANKING77: native Jev decisions route banking support messages to 77 intents. Optimize instructions and intent descriptions against fixed labels and exact-match scoring. |
+| [`alfworld/`](alfworld/) | ALFWorld: a household agent in text games that picks every action with native Jev decisions, one Choice question per step over the admissible commands. Optimize the instructions and agent loop; scored by task success within 50 steps. |
 | [`clinc150_router/`](clinc150_router/) | CLINC150: a chat-model router sends virtual-assistant requests to 150 intents or out-of-scope. Optimize the prompts and router code for accuracy and track in-scope accuracy and out-of-scope recall separately. |
 
 Each recipe is a standalone uv project with its own README covering setup, commands, and expected scores.
