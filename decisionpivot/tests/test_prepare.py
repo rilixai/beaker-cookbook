@@ -11,6 +11,7 @@ from decisionpivot.data import (
     SEEDED,
     SPLIT_FILES,
     UNSEEDED,
+    first_per_family,
     load_all,
     load_rows,
     make_splits,
@@ -115,3 +116,12 @@ def test_labels_never_in_input(prepared: Path) -> None:
             outside_state = [{k: v for k, v in i.items() if k != "state"} for i in row["input"]["items"]]
             assert not _keys(outside_state) & {"gold", "level", "deviation", "spec", "meta", "group"}
             assert set(row["expected"]) == {"gold", "level", "layer"}
+
+
+def test_small_dataset_keeps_the_first_groups_of_every_family(prepared: Path) -> None:
+    for path in SPLIT_FILES.values():
+        rows = load_rows(prepared / path)
+        small = first_per_family(rows, 2)
+        assert len(small) == 2 * len(FAMILIES)
+        assert {r.input.family for r in small} == set(FAMILIES)
+        assert [r.id for r in small] == [r.id for r in rows if r in small]  # file order kept

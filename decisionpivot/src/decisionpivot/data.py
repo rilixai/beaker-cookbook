@@ -331,11 +331,30 @@ def load_all(upstream: Path) -> tuple[dict[str, list[Row]], dict[int, dict[str, 
     return published, fresh, hashes
 
 
-def prepare(output_dir: Path, cache_dir: Path = DEFAULT_CACHE, *, python: str = sys.executable) -> dict[str, Any]:
+def first_per_family(rows: Sequence[Row], n: int) -> list[Row]:
+    """The first ``n`` groups of each family, in file order (a seeded hash, so a fair sample)."""
+    taken: Counter[str] = Counter()
+    kept = []
+    for row in rows:
+        if taken[row.input.family] < n:
+            taken[row.input.family] += 1
+            kept.append(row)
+    return kept
+
+
+def prepare(
+    output_dir: Path,
+    cache_dir: Path = DEFAULT_CACHE,
+    *,
+    python: str = sys.executable,
+    groups_per_family: int | None = None,
+) -> dict[str, Any]:
     upstream = fetch_upstream(cache_dir)
     regenerate(upstream, python=python)
     published, fresh, hashes = load_all(upstream)
     splits = make_splits(published, fresh)
+    if groups_per_family is not None:  # a small dataset for cheap trial runs
+        splits = {name: first_per_family(rows, groups_per_family) for name, rows in splits.items()}
     seen: set[str] = set()
     for rows in splits.values():
         ids = {item.id for r in rows for item in r.input.items}
@@ -355,6 +374,7 @@ def prepare(output_dir: Path, cache_dir: Path = DEFAULT_CACHE, *, python: str = 
         "python": platform.python_version(),
         "seeds": {"published": PUBLISHED_SEED, "train": TRAIN_SEED, "validation": VALIDATION_SEED},
         "split_seed": SPLIT_SEED,
+        "groups_per_family": groups_per_family,
         "seeded_families": list(SEEDED),
         "unseeded_families": list(UNSEEDED),
         "split_rule": {

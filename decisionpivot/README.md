@@ -33,6 +33,15 @@ uv run beaker run smoke --strict --integration-id decisionpivot --dataset 'decis
 uv run beaker run trigger --integration-id decisionpivot --dataset 'decisionpivot@<revision>'
 ```
 
+For a cheap trial run first, build a small dataset with the first groups of
+each family (4 per family: 52 groups and about 128 items per split):
+
+```bash
+uv run decisionpivot prepare --output /tmp/decisionpivot-small --groups-per-family 4
+uv run beaker dataset upload /tmp/decisionpivot-small/optimization --name decisionpivot-small \
+  --split train=52 --split test=52
+```
+
 Upload only `optimization/`: its `test.jsonl` is validation data. Keep
 `heldout/test.jsonl` for final evaluation of a frozen candidate.
 

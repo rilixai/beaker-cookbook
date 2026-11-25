@@ -150,6 +150,9 @@ def main() -> None:
     prep = commands.add_parser("prepare", help="Regenerate the core track from the pinned generators and split it")
     prep.add_argument("--output", type=Path, required=True)
     prep.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+    prep.add_argument(
+        "--groups-per-family", type=positive_int, help="keep the first N groups of each family per split (small runs)"
+    )
     run = commands.add_parser("evaluate", help="Run the agent; uses TYPESAFE_API_KEY and incurs API charges")
     run.add_argument("--data", type=Path, required=True)
     run.add_argument("--split", choices=tuple(SPLIT_FILES), default="validation")
@@ -168,7 +171,7 @@ def main() -> None:
     leak.add_argument("--path", type=Path, action="append", help="file or directory (repeatable)")
     args = parser.parse_args()
     if args.command == "prepare":
-        print(json.dumps(prepare(args.output, args.cache), indent=2))
+        print(json.dumps(prepare(args.output, args.cache, groups_per_family=args.groups_per_family), indent=2))
         return
     if args.command == "leak-check":
         paths = args.path or [Path("prompts"), Path("src/decisionpivot/agent.py")]
