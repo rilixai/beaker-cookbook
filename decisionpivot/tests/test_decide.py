@@ -111,4 +111,24 @@ async def test_answer_must_cover_every_option() -> None:
 
     outcome = await run_item(item(), solver=partial, instructions="")
     assert outcome.error and outcome.error.startswith("missing_option")
+
+
+async def test_answer_must_come_from_a_decision_call() -> None:
+    async def overrides(it: Item, session: Session, instructions: str) -> dict[str, float]:
+        await session.decide(Request.of(it))
+        return {"e3": 0.0, "e1": 1.0, "none": 0.0}  # e.g. a chat model's pick, replacing the decision
+
+    async def no_call(it: Item, session: Session, instructions: str) -> dict[str, float]:
+        return {"e3": 1.0, "e1": 0.0, "none": 0.0}
+
+    async def picks_second(it: Item, session: Session, instructions: str) -> dict[str, float]:
+        await session.decide(Request.of(it))
+        second = await session.decide(Request.of(it))
+        return {k: v * 2 for k, v in second.probabilities.items()}  # unnormalised is fine
+
+    for solver in (overrides, no_call):
+        outcome = await run_item(item(), solver=solver, instructions="", client=fake_api.client())
+        assert outcome.probabilities is None and outcome.error and outcome.error.startswith("answer_not_from_decision")
+    ok = await run_item(item(), solver=picks_second, instructions="", client=fake_api.client())
+    assert ok.error is None and ok.probabilities is not None
     assert isinstance(DecisionError("x", "y"), RuntimeError)

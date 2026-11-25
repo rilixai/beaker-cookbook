@@ -137,7 +137,9 @@ A candidate may add text to the instructions or option texts, pre-process the
 state, make several decision calls, or add chat calls (`session.chat`, traced
 and following the run's model). `decide.py` rejects any request that drops,
 reorders, adds or edits an option, changes the question type, or removes the
-question text.
+question text. The agent's final answer must be the probabilities of one of the
+item's own decision calls: chat calls may shape the requests, but the decision
+model makes the decision.
 
 Every decision call is traced as `model_call(operation="systemone",
 provider="typesafe", model=..., server_address="api.typesafe.ai")` with its

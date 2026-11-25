@@ -185,6 +185,7 @@ class Session:
         self.target = target
         self.trace: Tracer = trace or NullTracer()
         self.calls: list[CallRecord] = []
+        self.decisions: list[dict[str, float]] = []
         self._chat_factory = chat_factory
         self._chat: ChatModel | None = None
         self._client = client
@@ -249,8 +250,9 @@ class Session:
                 raise DecisionError("malformed_answer", str(exc)[:300]) from exc
             call.output(answer)
         self.calls.append(CallRecord("systemone", response.model, latency, usage.input_tokens, usage.output_tokens))
+        self.decisions.append(dict(zip(original.keys, p, strict=True)))
         return Decision(
-            probabilities=dict(zip(original.keys, p, strict=True)),
+            probabilities=self.decisions[-1],
             model=response.model,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
@@ -325,16 +327,26 @@ class Outcome:
         }
 
 
-def validate_answer(item: Item, answer: Mapping[str, float]) -> dict[str, float]:
-    """The agent's final distribution must cover exactly the item's options."""
+def validate_answer(
+    item: Item, answer: Mapping[str, float], decisions: Sequence[Mapping[str, float]]
+) -> dict[str, float]:
+    """The final distribution covers exactly the item's options and is one the decision model returned.
+
+    The agent may make several decision calls and pick among them, and may use chat
+    calls to shape its requests, but the decision itself comes from the decision model.
+    """
     keys = item.question.keys
     if not isinstance(answer, Mapping) or set(answer) != set(keys):
         raise DecisionError("missing_option", "the answer must give a probability for every original option")
     try:
-        p = probabilities_from({"type": "choice", "probabilities": dict(answer)}, keys)
+        p = dict(zip(keys, probabilities_from({"type": "choice", "probabilities": dict(answer)}, keys), strict=True))
     except ValueError as exc:
         raise DecisionError("malformed_answer", str(exc)) from exc
-    return dict(zip(keys, p, strict=True))
+    if not any(all(math.isclose(p[k], d[k], rel_tol=1e-9, abs_tol=1e-12) for k in keys) for d in decisions):
+        raise DecisionError(
+            "answer_not_from_decision", "the answer must be the probabilities of one of this item's decision calls"
+        )
+    return p
 
 
 async def run_item(
@@ -354,7 +366,8 @@ async def run_item(
     retryable = False
     async with Session(item, target=target, trace=trace, chat_factory=chat_factory, client=client) as session:
         try:
-            probabilities = validate_answer(item, await solver(item, session, instructions))
+            answer = await solver(item, session, instructions)
+            probabilities = validate_answer(item, answer, session.decisions)
         except DecisionError as exc:
             error, retryable = str(exc), exc.retryable
         except Exception as exc:  # a candidate bug is a failed item, not a crashed run
