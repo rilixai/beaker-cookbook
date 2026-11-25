@@ -1,0 +1,56 @@
+[project]
+name = "mmdm"
+version = "0.1.0"
+description = "A decision-model agent on MMDM: 16 categories of state + question + options decisions."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  # Upstream request building, state truncation and scoring, unmodified.
+  "mmdm-eval @ git+https://github.com/mmdm-benchmark/mmdm.git@eedc865ef7303740a92e1abe73e13698e9f88091",
+  "typesafe-sdk[zstd]==0.7.5",
+  "openai>=2,<3",
+  "pydantic>=2.11,<3",
+]
+
+[project.scripts]
+mmdm = "mmdm.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mmdm"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[dependency-groups]
+dev = ["beaker-sdk>=0.6.5,<0.7", "ruff", "mypy", "pytest", "pytest-asyncio"]
+
+[tool.ruff]
+line-length = 119
+extend-include = [".beaker/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["mmdm"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/mmdm", ".beaker/beaker_integration.py"]
+
+# The upstream toolkit ships without type information.
+[[tool.mypy.overrides]]
+module = ["mmdm_eval", "mmdm_eval.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
