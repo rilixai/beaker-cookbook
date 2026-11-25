@@ -39,7 +39,9 @@ fetch the same files on first use.
 Upstream's official `test` split is the held-out test. Upstream's `train` split is
 divided 75/25 into train and validation by a hash with seed `tau2-bench-v1`. Upload
 only `optimization/`, and keep `heldout/` for the final evaluation of a frozen candidate.
-Rows hold only `{domain, task_id}`. Expected outcomes stay inside upstream.
+Rows hold only `{domain, task_id}`. Expected outcomes come from the pinned upstream tasks plus the fixed reviewed corrections in `src/tau2_bench/task_corrections.json`.
+
+See [the per-sample correction review](docs/dataset-corrections-15f53dd1.md) for the four supported fixes, the local retail-tool fix, and verification limits. These corrections make this a modified benchmark. A new integration build is required; uploading unchanged task-reference rows alone does not apply them. Generated manifests record the corrections file’s SHA-256.
 
 The recipe includes the τ²-bench v2.0.0 Python package in `vendor/tau2` with a
 LiteLLM pin that matches the Beaker worker. Both `uv sync` and the Beaker image

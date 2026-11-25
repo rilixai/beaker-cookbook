@@ -7,11 +7,13 @@ English language binding (as every upstream 2.0 run does), so retail uses its
 
 from __future__ import annotations
 
+import json
 import sys
 from collections import Counter
 from collections.abc import Callable
 from contextvars import ContextVar
 from functools import cache
+from pathlib import Path
 from threading import Lock
 from typing import Any
 
@@ -87,7 +89,14 @@ def run_config(domain: Domain, agent_model: str = DEFAULT_AGENT_MODEL) -> TextRu
 @cache
 def _tasks(domain: Domain) -> dict[str, Task]:
     loaded = pin_language_artifacts(run_config(domain), update=False)
-    return {task.id: task for task in loaded.tasks}
+    tasks = {task.id: task for task in loaded.tasks}
+    corrections = json.loads(Path(__file__).with_name("task_corrections.json").read_text())
+    for raw in corrections[domain]:
+        corrected = Task.model_validate(raw)
+        if corrected.id not in tasks:
+            raise ValueError(f"Correction references unknown {domain} task {corrected.id!r}")
+        tasks[corrected.id] = corrected
+    return tasks
 
 
 def task_ids(domain: Domain) -> list[str]:
