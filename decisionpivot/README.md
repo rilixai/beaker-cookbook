@@ -45,9 +45,13 @@ uv run beaker dataset upload /tmp/decisionpivot-small/optimization --name decisi
 Upload only `optimization/`: its `test.jsonl` is validation data. Keep
 `heldout/test.jsonl` for final evaluation of a frozen candidate.
 
-A run with a model choice sends the decision calls to that model through
-Beaker's gateway; without one they go to native Jev. Smoke checks structure
-without model calls.
+Decision calls always go out as native TypeSafe System One calls. To compare
+decision models, launch a decision-model run (`--decision-model` in newer CLIs,
+or `optimization_config.target_kind: "decision"`): Beaker's gateway swaps each
+call to the selected model, for example `openai:gpt-6-luna` (OpenAI Decisions)
+or an OpenRouter decision model, and answers in TypeSafe's format. A chat-model
+run (`--optimization-model`) changes only chat calls a candidate adds; decision
+calls stay on Jev. Smoke checks structure without model calls.
 
 ## Data
 

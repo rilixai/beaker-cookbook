@@ -11,7 +11,7 @@ from typing import Any
 
 import fake_api
 import pytest
-from beaker import Case, CaseResult, InferenceTarget, RetryableCaseError
+from beaker import Case, CaseResult, RetryableCaseError
 
 from decisionpivot import agent, decide
 from decisionpivot.data import Item
@@ -130,24 +130,36 @@ async def test_traces_one_decision_call_per_item_and_group_stages(
     assert [(c.expected, c.predicted) for c in scored.checks] == [("yes", "yes"), ("no", "yes"), ("yes", "yes")]
 
 
-async def test_model_choice_follows_the_gateway(integration: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_decision_calls_stay_native_when_a_chat_model_is_selected(
+    integration: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
     case = await load_case(integration)
     clients: list[dict[str, Any]] = []
 
     def make_client(**kwargs: Any) -> Any:
         clients.append(kwargs)
-        return fake_api.client(model="openai:gpt-6-luna")
+        return fake_api.client()
 
     monkeypatch.setattr(decide, "AsyncTypeSafeClient", make_client)
-    target = InferenceTarget(base_url="https://gateway.example/v1", api_key="run-token", model="openai:gpt-6-luna")
-    monkeypatch.setattr(integration, "inference_target", lambda rt: target)
     monkeypatch.chdir(ROOT)
     trace = RecordingTrace()
     result = await integration.run_case(case_input=case.input, runtime=runtime(trace, "openai:gpt-6-luna"))
     assert all(o["error"] is None for o in result.output["items"])
-    assert {c["base_url"] for c in clients} == {"https://gateway.example/v1"}
-    assert {c.attributes["model"] for c in trace.model_calls} == {"openai:gpt-6-luna"}
-    assert {c.attributes["server_address"] for c in trace.model_calls} == {"gateway.example"}
+    assert {c["base_url"] for c in clients} == {None}  # the SDK default: api.typesafe.ai, proxied by Beaker
+    assert {c.attributes["model"] for c in trace.model_calls} == {"jev-1.14.0"}
+    assert {c.attributes["server_address"] for c in trace.model_calls} == {"api.typesafe.ai"}
+
+
+async def test_swapped_replies_naming_another_model_are_accepted(
+    integration: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In a decision-model run the gateway answers the Jev call with the target's reply and model name."""
+    case = await load_case(integration)
+    monkeypatch.setattr(decide, "AsyncTypeSafeClient", lambda **kwargs: fake_api.client(model="gpt-6-luna"))
+    monkeypatch.chdir(ROOT)
+    result = await integration.run_case(case_input=case.input, runtime=runtime(RecordingTrace()))
+    assert all(o["error"] is None for o in result.output["items"])
+    assert {m for o in result.output["items"] for m in o["models"]} == {"gpt-6-luna"}
 
 
 async def test_transient_errors_retry_and_other_failures_score_as_wrong(

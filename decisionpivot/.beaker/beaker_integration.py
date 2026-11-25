@@ -12,9 +12,9 @@ specification.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from beaker import (
     Case,
@@ -39,7 +39,6 @@ from decisionpivot.decide import (
     CHAT_TIMEOUT_SECONDS,
     DEFAULT_TARGET,
     ChatModel,
-    DecisionTarget,
     default_chat_model,
     run_item,
 )
@@ -65,18 +64,11 @@ class Setup(RunSetup[Row]):
         )
 
 
-def _decision_target(runtime: RolloutRuntime[Any]) -> DecisionTarget:
-    """The run's selected decision model through Beaker's gateway; else native Jev."""
-    if runtime.model:
-        target = inference_target(runtime)
-        return DecisionTarget(
-            model=target.model,
-            provider=target.model.partition(":")[0] or DEFAULT_TARGET.provider,
-            server_address=urlparse(target.base_url).hostname or target.base_url,
-            base_url=target.base_url,
-            api_key=target.api_key,
-        )
-    return DEFAULT_TARGET
+# Decision calls always go out as native TypeSafe calls. In a decision-model run
+# Beaker's gateway swaps them to the selected model; in a chat-model run they stay
+# on Jev. A swapped reply names the target model, so the Jev version pin that local
+# runs use is dropped here.
+DECISION_TARGET = replace(DEFAULT_TARGET, expected_model=None)
 
 
 def _client_for(runtime: RolloutRuntime[Any]) -> ChatModel:
@@ -97,7 +89,6 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
     case = GroupInput.model_validate(case_input)
     # Repository candidates execute with source_dir as their working directory.
     instructions = agent.load_instructions(Path.cwd() / "prompts")
-    target = _decision_target(runtime)
     records: list[JsonValue] = []
     with runtime.trace.stage(
         "decisionpivot.group", inputs={"group_id": case.group_id, "family": case.family, "size": len(case.items)}
@@ -108,7 +99,7 @@ async def run_case(*, case_input: JsonValue, runtime: RolloutRuntime[Any]) -> Ca
                     item,
                     solver=agent.answer,
                     instructions=instructions,
-                    target=target,
+                    target=DECISION_TARGET,
                     trace=runtime.trace,
                     chat_factory=lambda: _client_for(runtime),
                 )
