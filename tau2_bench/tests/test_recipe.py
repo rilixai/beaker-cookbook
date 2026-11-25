@@ -30,6 +30,7 @@ from tau2.data_model.simulation import (
 from tau2.data_model.tasks import RewardType
 
 from tau2_bench import benchmark, data, scoring
+from tau2_bench.database_scoring import compare_states
 from tau2_bench.user_sim import USER_LLM
 
 
@@ -215,7 +216,15 @@ async def test_trajectory_is_scored_by_upstream_evaluator(
     case = Case(id="airline-0", input={"domain": "airline", "task_id": "0"}, expected={})
     passed = await integration.score_case(case=case, result=result, case_files_dir=Path())
     assert passed.objective == 1.0
-    assert dict(passed.field_scores) == {"reward": 1.0, "db": 1.0, "communicate": 1.0}
+    assert dict(passed.field_scores) == {
+        "reward": 1.0,
+        "benchmark_reward": 1.0,
+        "partial_correctness": 1.0,
+        "total_correctness": 1.0,
+        "combined_correctness": 1.0,
+        "db": 1.0,
+        "communicate": 1.0,
+    }
     # Airline task 3 requires communicating a value; refusing fails that check.
     result = await run(integration, "openai:gpt-test", "3")
     case = Case(id="airline-3", input={"domain": "airline", "task_id": "3"}, expected={})
@@ -237,7 +246,15 @@ async def test_provider_outage_retries_and_agent_errors_fail_visibly(
     case = Case(id="airline-0", input={"domain": "airline", "task_id": "0"}, expected={})
     scored = await integration.score_case(case=case, result=result, case_files_dir=Path())
     assert scored.objective == 0.0
-    assert dict(scored.field_scores) == {"reward": 0.0, "db": 0.0, "communicate": 0.0}
+    assert dict(scored.field_scores) == {
+        "reward": 0.0,
+        "benchmark_reward": 0.0,
+        "partial_correctness": 0.0,
+        "total_correctness": 0.0,
+        "combined_correctness": 0.0,
+        "db": 0.0,
+        "communicate": 0.0,
+    }
     assert scored.checks[0].verdict == "fail" and "BadRequestError" in str(scored.checks[0].message)
 
 
@@ -311,8 +328,16 @@ def test_retail_reward_maps_db_and_nl_assertions() -> None:
         reward_breakdown={RewardType.DB: 1.0, RewardType.NL_ASSERTION: 0.0},
     )
     scored = scoring.score(reward, simulation(TerminationReason.USER_STOP), basis)
-    assert scored.objective == 0.0
-    assert dict(scored.field_scores) == {"reward": 0.0, "db": 1.0, "nl_assertion": 0.0}
+    assert scored.objective == pytest.approx(0.35)
+    assert dict(scored.field_scores) == {
+        "reward": 0.0,
+        "benchmark_reward": 0.0,
+        "partial_correctness": 0.5,
+        "total_correctness": 0.0,
+        "combined_correctness": 0.35,
+        "db": 1.0,
+        "nl_assertion": 0.0,
+    }
     by_group = {check.group: check for check in scored.checks}
     assert by_group["DB"].verdict == "pass"
     assert by_group["NL_ASSERTION"].verdict == "fail"
@@ -324,7 +349,15 @@ def test_premature_end_is_a_failed_case_with_zeroed_components() -> None:
     reward = RewardInfo(reward=0.0, reward_basis=None, info={"note": "Simulation terminated prematurely."})
     scored = scoring.score(reward, simulation(TerminationReason.MAX_STEPS), basis)
     assert scored.objective == 0.0
-    assert dict(scored.field_scores) == {"reward": 0.0, "db": 0.0, "communicate": 0.0}
+    assert dict(scored.field_scores) == {
+        "reward": 0.0,
+        "benchmark_reward": 0.0,
+        "partial_correctness": 0.0,
+        "total_correctness": 0.0,
+        "combined_correctness": 0.0,
+        "db": 0.0,
+        "communicate": 0.0,
+    }
     assert scored.checks[0].verdict == "fail" and scored.checks[0].predicted == "max_steps"
 
 
@@ -341,3 +374,165 @@ def test_communicate_checks_carry_expected_strings() -> None:
     assert scored.objective == 1.0
     (check,) = [c for c in scored.checks if c.group == "COMMUNICATE"]
     assert check.expected == "327" and check.verdict == "pass"
+
+
+# --- combined correctness ----------------------------------------------------------------------
+
+
+def world(**orders: Any) -> dict[str, Any]:
+    return {"agent": {"orders": orders}, "user": {}}
+
+
+@pytest.mark.parametrize("actual,passed", [(["new", "old"], 1), (["new", "new"], 2), ([], 0)])
+def test_database_credit_splits_items_without_rewarding_untouched_data(actual: list[str], passed: int) -> None:
+    initial = world(order={"items": [{"id": "old"}, {"id": "old"}]}, untouched={"status": "pending"})
+    expected = world(order={"items": [{"id": "new"}, {"id": "new"}]}, untouched={"status": "pending"})
+    predicted = world(order={"items": [{"id": value} for value in actual]}, untouched={"status": "pending"})
+    outcomes = compare_states(initial, expected, predicted)
+    assert len(outcomes) == 2
+    assert sum(row["passed"] for row in outcomes) == passed
+
+
+def test_unexpected_changes_are_failures_and_new_records_are_atomic() -> None:
+    initial = world(old={"status": "pending", "address": {"city": "A", "zip": "1"}})
+    expected = world(old={"status": "pending", "address": {"city": "B", "zip": "2"}}, new={"status": "booked"})
+    predicted = world(old={"status": "cancelled", "address": {"city": "B", "zip": "1"}}, new={"status": "booked"})
+    outcomes = compare_states(initial, expected, predicted)
+    assert len(outcomes) == 3
+    assert sum(row["passed"] for row in outcomes) == 1
+    assert any(row["message"] == "Unexpected database change." for row in outcomes)
+
+
+def test_unchanged_database_has_no_free_outcomes() -> None:
+    assert (
+        compare_states(
+            world(order={"status": "pending"}), world(order={"status": "pending"}), world(order={"status": "pending"})
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize("reason", [TerminationReason.USER_STOP, TerminationReason.MAX_STEPS])
+def test_combined_score_counts_database_outcomes_and_individual_assertions(reason: TerminationReason) -> None:
+    basis = [RewardType.DB, RewardType.NL_ASSERTION]
+    outcomes = compare_states(
+        world(order={"items": [{"id": "old"}, {"id": "old"}]}),
+        world(order={"items": [{"id": "new"}, {"id": "new"}]}),
+        world(order={"items": [{"id": "new"}, {"id": "old"}]}),
+    )
+    reward = RewardInfo(
+        reward=0.0,
+        db_check=DBCheck(db_match=False, db_reward=0.0),
+        reward_basis=basis,
+        reward_breakdown={RewardType.DB: 0.0, RewardType.NL_ASSERTION: 0.0},
+        nl_assertions=[
+            NLAssertionCheck(nl_assertion="Confirmed first", met=True, justification="Confirmed"),
+            NLAssertionCheck(nl_assertion="Explained amount", met=False, justification="Missing"),
+        ],
+        info={"database_outcomes": outcomes},
+    )
+    scored = scoring.score(reward, simulation(reason), basis)
+    expected_partial = 0.5 if reason == TerminationReason.USER_STOP else 0.0
+    assert scored.field_scores["partial_correctness"] == expected_partial
+    assert scored.field_scores["total_correctness"] == 0.0
+    assert scored.field_scores["benchmark_reward"] == 0.0
+    assert scored.objective == pytest.approx(0.7 * expected_partial)
+    assert next(check for check in scored.checks if check.group == "DB").informational
+
+
+def test_diagnostic_action_matches_do_not_inflate_partial_credit() -> None:
+    from tau2.data_model.simulation import ActionCheck
+    from tau2.data_model.tasks import Action
+
+    reward = RewardInfo(
+        reward=0.0,
+        reward_basis=[RewardType.DB],
+        db_check=DBCheck(db_match=False, db_reward=0.0),
+        action_checks=[
+            ActionCheck(
+                action=Action(action_id="1", name="lookup", arguments={}), action_match=True, action_reward=1.0
+            )
+        ],
+    )
+    scored = scoring.score(reward, simulation(TerminationReason.USER_STOP), [RewardType.DB])
+    assert scored.field_scores["partial_correctness"] == 0.0
+    assert scored.objective == 0.0
+
+
+@pytest.mark.parametrize("value", [False, True])
+def test_empty_criteria_preserve_upstream_neutral_reward(value: bool) -> None:
+    reward = RewardInfo(reward=float(value), reward_basis=[])
+    scored = scoring.score(reward, simulation(TerminationReason.USER_STOP), [])
+    assert scored.objective == float(value)
+
+
+@pytest.mark.parametrize("domain", ["airline", "retail"])
+def test_database_reference_replay_gives_credit_for_final_state(domain: str) -> None:
+    from tau2.data_model.message import ToolCall
+    from tau2.registry import registry
+
+    from tau2_bench.database_scoring import database_outcomes
+
+    # Real pinned tasks, environment and replay; no simulator or judge calls.
+    operation = "cancel_reservation" if domain == "airline" else "exchange_delivered_order_items"
+    selected = next(
+        task
+        for task in benchmark._tasks(domain).values()
+        if any(action.name == operation for action in task.evaluation_criteria.actions or [])
+    )
+    constructor = registry.get_env_constructor(domain)
+    environment = constructor()
+    state = selected.initial_state
+    history = list(state.message_history or []) if state else []
+    environment.set_state(
+        initialization_data=state.initialization_data if state else None,
+        initialization_actions=state.initialization_actions if state else None,
+        message_history=history,
+    )
+    recorded = simulation(TerminationReason.USER_STOP, selected.id)
+    recorded.messages = list(history)
+    untouched = database_outcomes(recorded, selected, constructor, {})
+    assert untouched and not any(row["passed"] for row in untouched)
+    for index, action in enumerate(selected.evaluation_criteria.actions):
+        assert action.requestor == "assistant"
+        call = ToolCall(id=f"call-{index}", name=action.name, arguments=action.arguments)
+        recorded.messages.extend(
+            [AssistantMessage(role="assistant", tool_calls=[call]), environment.get_response(call)]
+        )
+    outcomes = database_outcomes(recorded, selected, constructor, {})
+    assert outcomes and all(row["passed"] for row in outcomes)
+
+
+@pytest.mark.parametrize("task_id", ["64", "105"])
+def test_invalid_reference_writes_fall_back_visibly(monkeypatch: pytest.MonkeyPatch, task_id: str) -> None:
+    selected = benchmark.task("retail", task_id)
+    basis = selected.evaluation_criteria.reward_basis
+    reward = RewardInfo(
+        reward=0.0,
+        reward_basis=basis,
+        db_check=DBCheck(db_match=False, db_reward=0.0),
+        nl_assertions=[
+            NLAssertionCheck(nl_assertion=text, met=False, justification="Stub")
+            for text in selected.evaluation_criteria.nl_assertions or []
+        ],
+    )
+    monkeypatch.setattr(benchmark, "evaluate_simulation", lambda **kwargs: reward)
+    recorded = simulation(TerminationReason.USER_STOP, task_id)
+    scored = scoring.score(benchmark.evaluate(recorded, "retail", task_id), recorded, basis)
+    assert scored.objective == 0.0
+    assert any(c.group == "REFERENCE" and c.informational and "Reference" in c.message for c in scored.checks)
+    assert not next(c for c in scored.checks if c.group == "DB").informational
+
+
+def test_failed_read_only_reference_does_not_block_database_outcomes() -> None:
+    from tau2.registry import registry
+
+    from tau2_bench.database_scoring import database_outcomes
+
+    # This task includes a reference lookup of a missing product. Reads cannot
+    # change database correctness and must not prevent scoring the final state.
+    selected = benchmark.task("retail", "2")
+    outcomes = database_outcomes(
+        simulation(TerminationReason.USER_STOP, "2"), selected, registry.get_env_constructor("retail"), {}
+    )
+    assert isinstance(outcomes, list)

@@ -7,11 +7,13 @@ English language binding (as every upstream 2.0 run does), so retail uses its
 
 from __future__ import annotations
 
+import json
 import sys
 from collections import Counter
 from collections.abc import Callable
 from contextvars import ContextVar
 from functools import cache
+from pathlib import Path
 from threading import Lock
 from typing import Any
 
@@ -19,7 +21,7 @@ from loguru import logger
 from openai import OpenAI
 from tau2.agent.base_agent import HalfDuplexAgent
 from tau2.data_model.semantic_communication import CommunicateScorer, CommunicateScoring
-from tau2.data_model.simulation import RewardInfo, SimulationRun, TextRunConfig
+from tau2.data_model.simulation import RewardInfo, SimulationRun, TerminationReason, TextRunConfig
 from tau2.data_model.tasks import RewardType, Task
 from tau2.environment.tool import Tool
 from tau2.evaluator.evaluator import EvaluationType, evaluate_simulation
@@ -34,6 +36,7 @@ from tau2.runner.build import build_text_orchestrator
 from tau2.utils.utils import DATA_DIR as tau2_data_dir
 
 from tau2_bench.data import Domain, data_dir, ensure_data
+from tau2_bench.database_scoring import ReferenceReplayError, database_outcomes
 from tau2_bench.llm import ChatModel
 from tau2_bench.user_sim import USER_LLM, USER_LLM_ARGS, USER_NAME, TracedUserSimulator
 
@@ -86,7 +89,14 @@ def run_config(domain: Domain, agent_model: str = DEFAULT_AGENT_MODEL) -> TextRu
 @cache
 def _tasks(domain: Domain) -> dict[str, Task]:
     loaded = pin_language_artifacts(run_config(domain), update=False)
-    return {task.id: task for task in loaded.tasks}
+    tasks = {task.id: task for task in loaded.tasks}
+    corrections = json.loads(Path(__file__).with_name("task_corrections.json").read_text())
+    for raw in corrections[domain]:
+        corrected = Task.model_validate(raw)
+        if corrected.id not in tasks:
+            raise ValueError(f"Correction references unknown {domain} task {corrected.id!r}")
+        tasks[corrected.id] = corrected
+    return tasks
 
 
 def task_ids(domain: Domain) -> list[str]:
@@ -151,4 +161,17 @@ def evaluate(simulation: SimulationRun, domain: Domain, task_id: str) -> RewardI
         actual = Counter(check.nl_assertion for check in reward.nl_assertions or [])
         if actual != expected:
             raise ValueError(f"tau2 judge must return one verdict per expected assertion for {domain} task {task_id}")
+    if (
+        criteria is not None
+        and RewardType.DB in criteria.reward_basis
+        and simulation.termination_reason in {TerminationReason.AGENT_STOP, TerminationReason.USER_STOP}
+    ):
+        try:
+            outcomes = database_outcomes(simulation, selected, registry.get_env_constructor(domain), env_kwargs or {})
+        except ReferenceReplayError as exc:
+            # Upstream skips failed reference calls. Keep its original DB score
+            # rather than treating a partial reference replay as valid goals.
+            reward.info = {**(reward.info or {}), "database_outcome_error": str(exc)}
+        else:
+            reward.info = {**(reward.info or {}), "database_outcomes": outcomes}
     return reward

@@ -12,9 +12,14 @@ This recipe builds on **τ²-bench** by Sierra Research.
 - The benchmark package source from the pinned commit is copied into
   `vendor/tau2`. Its package metadata pins LiteLLM to `1.104.0` for Beaker's
   runtime, and its retail judge config uses GPT-6 Luna via the Responses API.
+  The retail item-modification mutation loop is also corrected to use each
+  replacement’s own catalog price and options.
 - Upstream data files (airline and retail databases, policies, tasks, splits, and the
   English language pack) are **downloaded at run time** from the same commit and
-  checked against SHA-256 digests. They are not stored in this repository.
+  checked against SHA-256 digests. Those original files are not stored in this repository.
+  The recipe applies three reviewed task replacements from
+  `src/tau2_bench/task_corrections.json` after loading the effective English tasks;
+  see `docs/dataset-corrections-15f53dd1.md` for their provenance and scope.
 - `prompts/system.md` starts from upstream's `AGENT_INSTRUCTION` text in
   `src/tau2/agent/llm_agent.py` (same commit).
 
