@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from appworld_setup import prepare_appworld
+from appworld_setup import check_model_setting, prepare_appworld
 from beaker import Case, CaseScore, Integration, RepositoryRunSetupResult, RunSetup
 from beaker_integration import TaskInput
 from beaker_integration import integration as scenario_integration
@@ -23,6 +23,7 @@ class Setup(RunSetup[Row]):
 
     @asynccontextmanager
     async def prepare_run(self, *, runtime):
+        check_model_setting(runtime)
         self.root = prepare_appworld()
         yield {"repository": RepositoryRunSetupResult()}
 
