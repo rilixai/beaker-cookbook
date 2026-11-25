@@ -1,22 +1,15 @@
 # Attribution
 
-This recipe builds on **AutomationBench** by Zapier, Inc.
+This recipe builds on **AutomationBench** by Zapier, Inc. and the **AutomationBench-PI** fork by xeophon.
 
-- Repository: https://github.com/zapier/AutomationBench
+- Dataset, tools, services and graders: https://github.com/xeophon/AutomationBench-PI
+- Pinned commit: `858718b19e5d66c74451432783d34ee64a550a15` (`automation-bench==1.1.0`)
+- Original repository: https://github.com/zapier/AutomationBench
 - Paper: https://arxiv.org/abs/2604.18934
-- License: MIT (copied verbatim to [LICENSE](LICENSE))
-- Pinned commit: `4a8e1061254004d9dac807054eed33fad7d1ff14` (package version `automation-bench==1.0.6`)
+- License: MIT (copied to [LICENSE](LICENSE))
 
-## What is used vs. copied
+The PI benchmark is an unmodified Git dependency. The recipe drives its MCP toolset and scores with its rubric.
 
-- The benchmark itself (environment, simulated tools, tasks, assertion rubric) is
-  **used as an unmodified dependency**, installed straight from the pinned Git
-  commit — nothing from it is vendored or altered.
-- `src/automationbench_skills/vendored/model_setup.py` **adapts a small portion**
-  of upstream `automationbench/scripts/eval.py` (same commit): the model→API
-  routing, sampling-args construction (reasoning-effort handling), and client
-  construction. The file carries a provenance header; batch-API code paths were
-  dropped because this recipe runs single rollouts.
-
-Everything else in this recipe (runner, skills tools, splits, CLI, tests) is
-original to this repository.
+The recipe uses the native PI task, MCP toolset, and Verifiers V1 `NullHarness`.
+Its local extensions add Beaker tracing, skill tools, frozen inputs, and scoring
+state transport. They do not replace PI's service implementations or grading rules.

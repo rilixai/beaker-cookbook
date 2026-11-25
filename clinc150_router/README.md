@@ -16,11 +16,9 @@ Runs started with a model choice call that model through Beaker's inference
 gateway. Otherwise Beaker and the local CLI use `gpt-6-luna` with `low`
 reasoning effort, pinned in `src/clinc150_router/contracts.py`.
 
-Beaker gives each correct `oos` prediction 30 times the weight of a correct
-in-scope prediction. On the official validation split, the two groups
-contribute equally to the objective. With Beaker's 0–1 per-case scores,
-perfect validation predictions yield a mean objective of about 0.0645.
-Raw accuracy, in-scope accuracy, and `oos` recall are reported separately.
+Beaker optimizes accuracy. Every correct prediction earns one point, so the
+objective is the fraction of cases answered correctly. Beaker also reports
+in-scope accuracy and `oos` recall.
 
 Every model or decision call must be traced with `trace.model_call`. The chat
 call uses operation `chat` with the resolved provider and model. Beaker traces

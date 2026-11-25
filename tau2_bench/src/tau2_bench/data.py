@@ -135,6 +135,9 @@ def prepare(output_dir: Path) -> dict[str, dict[str, int]]:
     manifest = {
         "upstream_commit": UPSTREAM_COMMIT,
         "sha256": SHA256,
+        "task_corrections_sha256": hashlib.sha256(
+            Path(__file__).with_name("task_corrections.json").read_bytes()
+        ).hexdigest(),
         "split_seed": SPLIT_SEED,
         "counts": counts,
         "files": SPLIT_FILES,

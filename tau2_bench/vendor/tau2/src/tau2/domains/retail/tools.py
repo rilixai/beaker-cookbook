@@ -579,9 +579,10 @@ class RetailTools(ToolKitBase):  # Tools
             item = next((item for item in order.items if item.item_id == item_id), None)
             if item is None:
                 raise ValueError(f"Item {item_id} not found")
+            variant = self._get_variant(item.product_id, new_item_id)
             item.item_id = new_item_id
             item.price = variant.price
-            item.options = variant.options
+            item.options = variant.options.copy()
         order.status = "pending (item modified)"
 
         return order

@@ -1,5 +1,5 @@
 from automationbench_skills.data.tasks import (
-    PUBLIC_DOMAINS,
+    BENCHMARK_DOMAINS,
     Sample,
     load_samples,
     load_split,

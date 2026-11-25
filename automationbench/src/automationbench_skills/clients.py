@@ -1,127 +1,111 @@
+"""Beaker tracing around the native Verifiers HTTP client."""
+
 from __future__ import annotations
 
-import asyncio
-import math
-import time
-from typing import Any
+import contextvars
+from collections.abc import AsyncIterator
+from typing import Any, cast
 
-from automationbench.clients import (
-    _NON_RETRYABLE_CHAT,
-    _is_safety_classifier_error,
-    _parse_retry_after,
-    _perf,
-    _record_model_call,
-    _record_safety_classifier_error,
-)
-from verifiers.clients import OpenAIChatCompletionsClient
-from verifiers.clients.openai_chat_completions_client import parse_reasoning_content
-from verifiers.errors import ModelError
+from beaker.tracing import current_trace
+from verifiers.v1.clients.client import RelayReply
+from verifiers.v1.clients.eval import EvalClient
+from verifiers.v1.dialects.base import is_sse_done_event
+from verifiers.v1.errors import ProviderError
+from verifiers.v1.interception.server import InterceptionServer
+from verifiers.v1.types import Usage
 
 
-# Reasoning counts toward the completion cap on most providers, so the cap is a
-# reasoning allowance plus room to answer.
-DEFAULT_MAX_REASONING_TOKENS = 24_576
-DEFAULT_MAX_ANSWER_TOKENS = 8_192
-DEFAULT_MAX_MODEL_ATTEMPTS = 3
-# Each attempt times out on its own, and the whole turn, retries and backoff
-# included, has a longer deadline.
-DEFAULT_MODEL_REQUEST_TIMEOUT = 300.0
-DEFAULT_MODEL_TURN_TIMEOUT = 600.0
+DEFAULT_MAX_ANSWER_TOKENS = 8192
+DEFAULT_MAX_REASONING_TOKENS = 24576
 
 
-class CostTrackingChatCompletionsClient(OpenAIChatCompletionsClient):
-    """Chat requests with one retry layer and a deadline for the whole model turn."""
+class TracedEvalClient(EvalClient):
+    def __init__(self, config: Any) -> None:
+        super().__init__(config)
+        self.rejected_usage: Usage | None = None
 
-    def __init__(
-        self,
-        *args: Any,
-        max_attempts: int = DEFAULT_MAX_MODEL_ATTEMPTS,
-        request_timeout: float = DEFAULT_MODEL_REQUEST_TIMEOUT,
-        turn_timeout: float = DEFAULT_MODEL_TURN_TIMEOUT,
-        **kwargs: Any,
-    ) -> None:
-        if max_attempts <= 0 or any(t <= 0 or not math.isfinite(t) for t in (request_timeout, turn_timeout)):
-            raise ValueError("Model attempts and timeouts must be positive and finite")
-        super().__init__(*args, **kwargs)
-        self.max_attempts = max_attempts
-        self.request_timeout = request_timeout
-        self.turn_timeout = turn_timeout
-        self._client = self.client.with_options(max_retries=0, timeout=request_timeout)
+    async def relay(self, dialect: Any, body: dict, session_id: str | None = None, headers: Any = None) -> RelayReply:
+        # The stream can be consumed/closed in a different asyncio task. Keep
+        # the span's context separate so its context tokens close in their owner.
+        context = contextvars.copy_context()
+        operation = current_trace().model_call(
+            operation="chat.completions", provider="openai", model=body["model"], input_messages=body["messages"]
+        )
+        context.run(operation.__enter__)
+        try:
+            reply = await super().relay(dialect, body, session_id, headers)
+        except BaseException as request_error:
+            context.run(operation.__exit__, type(request_error), request_error, request_error.__traceback__)
+            raise
+        parser = dialect.stream_parser()
+        error: BaseException | None = None
+        complete = False
 
-    async def to_native_prompt(self, messages: Any) -> Any:
-        # Preserve upstream's compatibility fix for strict gateway validators.
-        native, extra = await super().to_native_prompt(messages)
-        for message in native:
-            if message.get("reasoning_content") is None:
-                message.pop("reasoning_content", None)
-        return native, extra
+        async def chunks() -> AsyncIterator[bytes]:
+            nonlocal error, complete
+            try:
+                async for chunk in reply.chunks:
+                    if parser.on_done is not None and is_sse_done_event(chunk):
+                        parser.on_done()
+                    parser.feed(chunk)
+                    yield chunk
+                response = parser.finish()
+                operation.output(response.raw)
+                message = response.message
+                failure = None
+                if response.finish_reason == "length" and not (message.content or message.tool_calls):
+                    # Do not repeat the same request when its output cap leaves
+                    # no room for an answer. Hosted execution can retry the case.
+                    failure = ProviderError(
+                        "Model exhausted the output cap without an answer or tool call", status_code=400
+                    )
+                elif not (
+                    message.content or message.reasoning_content or message.tool_calls or message.provider_state
+                ):
+                    # The interception server buffers this stream before committing
+                    # the turn. A 502 uses the native SDK's bounded retry policy.
+                    failure = ProviderError("Model returned an empty response", status_code=502)
+                if failure is not None:
+                    # Rejected streams never reach the native trace's usage
+                    # records. Keep their usage for the CLI as well as Beaker.
+                    self.rejected_usage = Usage.aggregate(
+                        usage for usage in (self.rejected_usage, response.usage) if usage is not None
+                    )
+                    raise failure
+                complete = True
+            except BaseException as exc:
+                error = exc
+                raise
 
-    async def get_native_response(self, *args: Any, **kwargs: Any) -> Any:
-        state = kwargs.get("state")
-        async with asyncio.timeout(self.turn_timeout):
-            for attempt in range(self.max_attempts):
-                try:
-                    started = time.monotonic()
-                    response = await super().get_native_response(*args, **kwargs)
-                except Exception as exc:
-                    if _is_safety_classifier_error(exc):
-                        _record_safety_classifier_error(state, exc)
-                        raise ModelError("provider safety classifier rejected the request") from exc
-                    if isinstance(exc, _NON_RETRYABLE_CHAT) or attempt == self.max_attempts - 1:
-                        raise
-                    retry_after = _parse_retry_after(exc)
-                    await asyncio.sleep(retry_after if retry_after is not None else 2**attempt)
-                    continue
-                _record_model_call(state, time.monotonic() - started, response)
-                record_cost(state, response)
-                # Keep upstream's empty-response retry. Tool arguments pass through
-                # unchanged to the environment's existing parser and execution loop.
-                choices = getattr(response, "choices", None)
-                if choices:
-                    choice = choices[0]
-                    message = choice.message
-                    if choice.finish_reason == "length" and not (message.content or message.tool_calls):
-                        # Reasoning used the whole cap. Retrying the same request
-                        # would stop in the same place, and returning it would end
-                        # the rollout as if the agent had finished.
-                        _count_discarded_usage(state, response)
-                        raise ModelError("the model's reasoning used the whole output cap without answering")
-                    if not (message.content or message.tool_calls or parse_reasoning_content(message)):
-                        if attempt < self.max_attempts - 1:
-                            _count_discarded_usage(state, response)
-                            await asyncio.sleep(2**attempt)
-                            continue
-                return response
-        raise RuntimeError("Model attempt budget exhausted")
+        async def close() -> None:
+            try:
+                await reply.close()
+            finally:
+                failure = error or (None if complete else RuntimeError("Model stream did not complete"))
+                context.run(operation.__exit__, type(failure) if failure else None, failure, None)
 
-
-def _count_discarded_usage(state: Any, native_response: Any) -> None:
-    """Add the tokens of a reply the rollout never receives to ``state["_usage"]``.
-
-    The environment counts a reply's tokens when the rollout receives it, so a
-    reply this client retries past or rejects is counted here instead.
-    """
-    if state is None:
-        return
-    usage = getattr(native_response, "usage", None)
-    totals = state.setdefault("_usage", {"input_tokens": 0, "output_tokens": 0})
-    totals["input_tokens"] += (getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
-    totals["output_tokens"] += (getattr(usage, "completion_tokens", 0) or 0) if usage else 0
+        return RelayReply(content_type=reply.content_type, chunks=chunks(), close=close)
 
 
-def record_cost(state: Any, native_response: Any) -> None:
-    usage = getattr(native_response, "usage", None)
-    if usage is None:
-        return
-    if isinstance(usage, dict):
-        cost = usage.get("cost")
-    else:
-        cost = getattr(usage, "cost", None)
-        if cost is None:
-            model_extra = getattr(usage, "model_extra", None) or {}
-            cost = model_extra.get("cost")
-    if not isinstance(cost, (int, float)) or isinstance(cost, bool):
-        return
-    perf = _perf(state)
-    if perf is not None:
-        perf["cost_usd"] = perf.get("cost_usd", 0.0) + float(cost)
+class TracedInterception(InterceptionServer):
+    """Use native transport and retries with run-scoped credentials and tracing."""
+
+    def __init__(self, api_key: str | None = None) -> None:
+        super().__init__(requires_tunnel=False)
+        self.api_key = api_key
+
+    @property
+    def rejected_usage(self) -> Usage | None:
+        """Usage absent from the native trace, scoped to this rollout's clients."""
+        usages = (cast(TracedEvalClient, client).rejected_usage for client in self.clients.values())
+        return Usage.aggregate(usage for usage in usages if usage is not None)
+
+    def _client(self, config: Any) -> TracedEvalClient:
+        key = config.model_dump_json()
+        if key not in self.clients:
+            client = TracedEvalClient(config)
+            if self.api_key is not None:
+                client.api_key = self.api_key
+            self.clients[key] = client
+            self.stack.push_async_callback(client.close)
+        return cast(TracedEvalClient, self.clients[key])

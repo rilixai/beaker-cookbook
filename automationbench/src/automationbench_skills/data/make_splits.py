@@ -1,7 +1,7 @@
 """Run-once generator for the frozen splits (the txt files are the source of truth).
 
-75 train / 25 test per public domain (450/150 total). Within each domain the 25
-held-out tasks are stratified across task families (``task_family``: the first
+75 train / 25 test in each original domain, plus 150 / 50 in simple (600/200
+total). Within each domain the held-out tasks are stratified across task families (``task_family``: the first
 underscore token of the task name) by largest-remainder allocation over each
 family's share of the domain, with a fixed-seed shuffle inside each family.
 
@@ -15,7 +15,7 @@ import random
 from collections import defaultdict
 
 from automationbench_skills.data.tasks import (
-    PUBLIC_DOMAINS,
+    BENCHMARK_DOMAINS,
     Sample,
     load_samples,
     split_path,
@@ -56,12 +56,14 @@ def make_splits() -> tuple[list[str], list[str]]:
 
     train: list[str] = []
     test: list[str] = []
-    for domain in PUBLIC_DOMAINS:
+    for domain in BENCHMARK_DOMAINS:
         domain_samples = by_domain[domain]
         families: dict[str, list[str]] = defaultdict(list)
         for s in domain_samples:
             families[task_family(s.task_name)].append(s.task_name)
-        alloc = _allocate_largest_remainder({f: len(v) for f, v in families.items()}, TEST_PER_DOMAIN)
+        alloc = _allocate_largest_remainder(
+            {f: len(v) for f, v in families.items()}, 50 if domain == "simple" else TEST_PER_DOMAIN
+        )
         rng = random.Random(SEED)
         domain_test: set[str] = set()
         for family in sorted(families):
