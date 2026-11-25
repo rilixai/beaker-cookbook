@@ -15,8 +15,8 @@ from tau2.data_model.message import UserMessage
 from tau2.user.user_simulator import UserSimulator, UserState, ValidUserInputMessage
 
 
-# Upstream v2.0.0 benchmark default for the text user simulator.
-USER_LLM = "openai/gpt-5.5"
+# Lower-cost customer simulator, fixed across agent candidates.
+USER_LLM = "anthropic/claude-haiku-5-5"
 USER_LLM_ARGS: dict[str, Any] = {"reasoning_effort": "low"}
 USER_NAME = "beaker_traced_user_simulator"
 
@@ -27,8 +27,8 @@ class TracedUserSimulator(UserSimulator[UserState]):
         with trace.stage("tau2.user_sim"):
             with trace.model_call(
                 operation="chat",
-                provider="openai",
-                model=self.llm.removeprefix("openai/"),
+                provider="anthropic",
+                model=self.llm.removeprefix("anthropic/"),
                 input_messages=to_json_safe(message.model_dump(mode="json", exclude={"raw_data"})),
             ) as call:
                 reply: UserMessage = super()._generate_next_message(message, state)
