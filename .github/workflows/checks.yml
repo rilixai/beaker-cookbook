@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        recipe: [harvey_lab, appworld, automationbench, jev_banking77, clinc150_router, tau2_bench]
+        recipe: [harvey_lab, appworld, automationbench, jev_banking77, clinc150_router, tau2_bench, decisionpivot]
     defaults:
       run:
         working-directory: ${{ matrix.recipe }}
@@ -66,7 +66,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        recipe: [harvey_lab, appworld, automationbench, jev_banking77, clinc150_router, tau2_bench]
+        recipe: [harvey_lab, appworld, automationbench, jev_banking77, clinc150_router, tau2_bench, decisionpivot]
     defaults:
       run:
         working-directory: ${{ matrix.recipe }}
@@ -86,3 +86,11 @@ jobs:
 
       - name: pytest
         run: uv run python -m pytest -q
+
+      # DecisionPivot is evaluation only: committed prompts and agent code must
+      # contain no item text. Regenerates the items from the pinned upstream.
+      - name: leak-check (decisionpivot)
+        if: matrix.recipe == 'decisionpivot'
+        run: |
+          uv run decisionpivot prepare --output "$RUNNER_TEMP/decisionpivot-data"
+          uv run decisionpivot leak-check --data "$RUNNER_TEMP/decisionpivot-data"
