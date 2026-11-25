@@ -50,7 +50,10 @@ def test_hard_single_needs_a_unique_correct_top_option() -> None:
     right = score("mmdm-1", q, e, output(0.5, 0.3, 0.2))
     assert right.objective == 1.0 and right.expected_top == ["Name o0"] and right.predicted_top == ["Name o0"]
     assert right.field_scores["top_probability"] == 0.5
-    assert right.field_scores["brier"] == pytest.approx(0.25 + 0.09 + 0.04)
+    assert right.field_scores["brier"] == pytest.approx((0.25 + 0.09 + 0.04) / 2)
+    worst = score("mmdm-1", q, e, output(0.0, 1.0, 0.0))
+    assert worst.field_scores["brier"] == pytest.approx(1.0)  # upstream 2.0, scaled into [0, 1]
+    assert all(0.0 <= v <= 1.0 for v in worst.field_scores.values())
 
 
 def test_set_match_fails_on_a_tie_at_the_boundary() -> None:
@@ -70,7 +73,7 @@ def test_soft_distribution_scores_one_minus_total_variation() -> None:
     assert scored.kind == "soft"
     assert scored.field_scores["total_variation"] == pytest.approx(0.1)
     assert scored.objective == pytest.approx(0.9)
-    assert scored.field_scores["brier"] == pytest.approx(0.02)
+    assert scored.field_scores["brier"] == pytest.approx(0.01)
     assert "hard_accuracy" not in scored.field_scores and "score_nmae" not in scored.field_scores
 
 

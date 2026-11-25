@@ -91,7 +91,10 @@ Each question is scored with upstream `mmdm_eval.metrics.score`:
 | soft (703) | 1 − total variation distance |
 
 Field scores, where they apply: `hard_accuracy`, `set_match`, `brier`,
-`total_variation`, `score_nmae` (score tasks) and `top_probability`. A request
+`total_variation`, `score_nmae` (score tasks) and `top_probability`. Field
+scores must lie in [0, 1], so `brier` is upstream's sum-of-squares Brier divided
+by its maximum of 2; the `evaluate` summary reports soft Brier on upstream's
+[0, 2] scale. A request
 error, malformed answer or missing option fails the case with its error
 recorded.
 

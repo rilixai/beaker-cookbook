@@ -29,6 +29,7 @@ from mmdm.data import Expected, Question
 
 TIE_TOLERANCE = 1e-12  # upstream's tolerance for a tie at the top
 ECE_BINS = 10
+BRIER_MAX = 2.0  # upstream Brier is a sum of squared errors over options
 
 
 def upstream_row(case_id: str, question: Question, expected: Expected) -> dict[str, Any]:
@@ -101,7 +102,8 @@ def score(case_id: str, question: Question, expected: Expected, output: Any) -> 
     elif kind == "hard_set":
         fields["set_match"] = float(upstream["correct"] or 0.0)
     if p is not None:
-        fields["brier"] = float(upstream["brier"])
+        # Upstream's multi-class Brier is a sum of squared errors in [0, 2]; field scores must be in [0, 1].
+        fields["brier"] = float(upstream["brier"]) / BRIER_MAX
         fields["total_variation"] = float(upstream["tv"])
         fields["top_probability"] = max(p)
         if upstream["score_normalized_mae"] is not None:
@@ -123,6 +125,12 @@ def score(case_id: str, question: Question, expected: Expected, output: Any) -> 
 def _mean(values: Iterable[float]) -> float | None:
     items = list(values)
     return math.fsum(items) / len(items) if items else None
+
+
+def _upstream_brier(cases: Sequence[Mapping[str, Any]]) -> float | None:
+    """Mean Brier on upstream's [0, 2] scale, so it matches ``mmdm-score``."""
+    mean = _mean(c["fields"]["brier"] for c in cases)
+    return None if mean is None else mean * BRIER_MAX
 
 
 def _percentile(values: Sequence[float], q: float) -> float | None:
@@ -169,7 +177,7 @@ def summarize(cases: Sequence[Mapping[str, Any]], *, price_per_million_input_tok
             "hard_set": len(cat_sets),
             "set_match": _mean(c["fields"].get("set_match", 0.0) for c in cat_sets),
             "soft": len(cat_soft),
-            "soft_brier": _mean(c["fields"]["brier"] for c in cat_soft),
+            "soft_brier": _upstream_brier(cat_soft),
             "objective": _mean(c["objective"] for c in members),
         }
     latencies = [c["latency_s"] for c in cases]
@@ -182,7 +190,7 @@ def summarize(cases: Sequence[Mapping[str, Any]], *, price_per_million_input_tok
         "hard_single_cases": len(hard),
         "set_match": _mean(c["fields"].get("set_match", 0.0) for c in sets),
         "hard_set_cases": len(sets),
-        "soft_brier": _mean(c["fields"]["brier"] for c in soft_valid),
+        "soft_brier": _upstream_brier(soft_valid),
         "soft_total_variation": _mean(c["fields"]["total_variation"] for c in soft_valid),
         "soft_cases_scored": len(soft_valid),
         "score_nmae": _mean(c["fields"]["score_nmae"] for c in score_valid),
