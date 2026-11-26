@@ -181,7 +181,10 @@ async def test_request_errors_are_failed_cases_and_transient_errors_retry(
     result = await integration.run_case(
         case_input=case.input, runtime=SimpleNamespace(model=None, trace=RecordingTrace())
     )
-    assert result.output["probabilities"] is None and result.output["error"].startswith("request_error")
+    assert result.output["probabilities"] is None
+    # The server's status and message reach the case record, not just the exception class.
+    assert result.output["error"].startswith("request_error: TypeSafeBadRequestError: ")
+    assert "400" in result.output["error"]
     scored = await integration.score_case(case=case, result=result, case_files_dir=ROOT)
     assert scored.objective == 0.0 and scored.checks[0].verdict == "fail" and scored.checks[0].message
 

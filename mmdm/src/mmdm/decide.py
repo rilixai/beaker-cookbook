@@ -296,10 +296,10 @@ class Session:
                     state=body["state"], questions={"decision": api_question}, model=self.target.model
                 )
             except TypeSafeError as exc:
-                call.output({"error": type(exc).__name__})
-                raise DecisionError(
-                    "request_error", type(exc).__name__, retryable=isinstance(exc, _RETRYABLE)
-                ) from exc
+                # str() of an SDK error carries status, server message and request ID, never credentials.
+                detail = f"{type(exc).__name__}: {exc}"[:500]
+                call.output({"error": detail})
+                raise DecisionError("request_error", detail, retryable=isinstance(exc, _RETRYABLE)) from exc
             finally:
                 latency = time.monotonic() - start
             usage = response.usage
