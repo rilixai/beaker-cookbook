@@ -28,8 +28,11 @@ from alfworld_agent.decide import CallRecord, DecisionError, Session, Tracer
 # The usual episode limit in LLM-agent papers on ALFWorld.
 STEP_LIMIT = 50
 GOAL_MARKER = "Your task is to: "
-# Upstream's PDDL translation keeps module-level state; load one game at a time.
-_LOAD_LOCK = threading.Lock()
+# TextWorld keeps module-level state that is not thread-safe: the PDDL translator
+# (loading) and shared TatSu parsers (``textworld.logic`` and the PDDL text
+# generator, used on every reset and step). Games in one process load and step
+# one at a time; a step takes milliseconds, so this costs little next to model calls.
+_ENGINE_LOCK = threading.Lock()
 
 
 class EnvError(RuntimeError):
@@ -75,7 +78,7 @@ class Game:
             raise EnvError(f"Game file not found: {path.name}")
         infos = textworld.EnvInfos(won=True, admissible_commands=True)
         try:
-            with _LOAD_LOCK:
+            with _ENGINE_LOCK:
                 env_id = textworld.gym.register_game(
                     str(path),
                     infos,
@@ -118,7 +121,8 @@ class Game:
         if not isinstance(command, str) or command not in self._admissible:
             raise InadmissibleCommand(repr(command)[:200])
         try:
-            text, _, _, state = self._env.step(command)
+            with _ENGINE_LOCK:
+                text, _, _, state = self._env.step(command)
         except Exception as exc:
             raise EnvError(f"{type(exc).__name__}: {exc}"[:300]) from exc
         self.observation = text.strip()
@@ -127,7 +131,8 @@ class Game:
         self._won = bool(state["won"])
 
     def close(self) -> None:
-        self._env.close()
+        with _ENGINE_LOCK:
+            self._env.close()
 
 
 Act = Callable[[View, Session], Awaitable[str]]

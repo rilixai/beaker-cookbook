@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import fake_api
 import pytest
@@ -114,3 +115,19 @@ async def test_an_inadmissible_command_fails_the_case_with_an_error() -> None:
     assert episode.error == "inadmissible_command: 'fly to the moon'" and episode.steps == 0
     scored = score(episode.output())
     assert scored.objective == 0.0 and scored.error == episode.error
+
+
+def test_games_load_and_step_concurrently_in_threads() -> None:
+    # TextWorld's parsers are shared module state; Beaker runs cases concurrently in one process.
+    def play() -> bool:
+        game = Game(fake_api.game_path())
+        try:
+            for action in fake_api.walkthrough():
+                game.step(action)
+            return game.won
+        finally:
+            game.close()
+
+    with ThreadPoolExecutor(4) as pool:
+        results = [pool.submit(play) for _ in range(8)]
+        assert [result.result() for result in results] == [True] * 8
